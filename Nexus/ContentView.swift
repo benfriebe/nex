@@ -4,6 +4,7 @@ import SwiftUI
 /// Root view: HStack with workspace sidebar + pane grid detail.
 struct ContentView: View {
     let store: StoreOf<AppReducer>
+    @Environment(\.surfaceManager) private var surfaceManager
     @State private var sidebarWidth: CGFloat = 220
 
     var body: some View {
@@ -73,6 +74,20 @@ struct ContentView: View {
                       workspace.focusedPaneID != paneID,
                       workspace.panes[id: paneID] != nil else { return }
                 store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfaceTitleNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let title = notification.userInfo?["title"] as? String,
+                      let paneID = surfaceManager.paneID(for: surface),
+                      let activeID = store.activeWorkspaceID else { return }
+                store.send(.workspaces(.element(id: activeID, action: .paneTitleChanged(paneID: paneID, title: title))))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfacePwdNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let pwd = notification.userInfo?["pwd"] as? String,
+                      let paneID = surfaceManager.paneID(for: surface),
+                      let activeID = store.activeWorkspaceID else { return }
+                store.send(.workspaces(.element(id: activeID, action: .paneDirectoryChanged(paneID: paneID, directory: pwd))))
             }
         }
     }

@@ -61,6 +61,14 @@ final class SurfaceManager: Sendable {
         }
     }
 
+    func paneID(for rawSurface: ghostty_surface_t) -> UUID? {
+        lock.withLock {
+            surfaces.first { _, view in
+                view.ghosttySurface?.surface == rawSurface
+            }?.key
+        }
+    }
+
     var activeSurfaceCount: Int {
         lock.withLock { surfaces.count }
     }

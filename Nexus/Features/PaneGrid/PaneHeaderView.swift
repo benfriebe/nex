@@ -17,11 +17,11 @@ struct PaneHeaderView: View {
                 .fill(isFocused ? Color.accentColor : Color.secondary.opacity(0.3))
                 .frame(width: 6, height: 6)
 
-            Text(displayPath)
+            Text(displayTitle)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
-                .truncationMode(.head)
+                .truncationMode(.middle)
 
             Spacer()
 
@@ -72,7 +72,10 @@ struct PaneHeaderView: View {
         }
     }
 
-    private var displayPath: String {
+    private var displayTitle: String {
+        if let title = pane.title, !title.isEmpty {
+            return title
+        }
         let path = pane.workingDirectory
         if let home = ProcessInfo.processInfo.environment["HOME"],
            path.hasPrefix(home) {

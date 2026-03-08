@@ -65,6 +65,7 @@ struct WorkspaceFeature {
         case focusNextPane
         case focusPreviousPane
         case updateSplitRatio(firstChildPaneID: UUID, ratio: Double)
+        case paneTitleChanged(paneID: UUID, title: String)
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
     }
@@ -162,6 +163,11 @@ struct WorkspaceFeature {
                     firstChildPaneID: firstChildPaneID,
                     to: ratio
                 )
+                return .none
+
+            case .paneTitleChanged(let paneID, let title):
+                state.panes[id: paneID]?.title = title
+                state.panes[id: paneID]?.lastActivityAt = now
                 return .none
 
             case .paneDirectoryChanged(let paneID, let directory):
