@@ -74,7 +74,8 @@ These signals drive the notification system.
 
 | Layer | Technology | Rationale |
 |---|---|---|
-| App framework | Swift + SwiftUI | App lifecycle, windows, sidebars, menus, settings |
+| App framework | Swift + SwiftUI | App lifecycle, windows, menus, settings |
+| Window layout | HStack (sidebar + pane grid) | Manual layout avoids NavigationSplitView toolbar chrome |
 | Terminal surfaces | AppKit (`NSView`) | Fine-grained control for rendering and keyboard events |
 | Terminal emulation | libghostty (via C-ABI) | GPU-accelerated, VT-compliant|
 | Rendering | Metal | GPU-accelerated text and UI rendering via libghostty |
@@ -128,8 +129,9 @@ struct Pane {
     var id: UUID
     var label: String?
     var type: PaneType              // .shell / .agent(AgentKind) / .server / .log
-    var status: PaneStatus          // .idle / .running / .waitingForInput / .error
-    var workingDirectory: String?
+    var title: String?              // live terminal title from OSC 0/2
+    var status: PaneStatus          // .idle / .running / .waitingForInput / .error (Phase 3)
+    var workingDirectory: String    // live CWD from OSC 7
     var lastActivityAt: Date
 }
 
@@ -385,17 +387,22 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 
 ---
 
-### Phase 1 — Core Terminal + Workspace Switching
+### Phase 1 — Core Terminal + Workspace Switching ✅
 **Goal**: A working terminal multiplexer with named workspaces. Nothing agent-specific yet.
 
-- Mac app skeleton: SwiftUI sidebar + AppKit terminal surface
-- libghostty integration
-- PTY management: `openpty()`, process launching, I/O bridging
-- Free-form pane splits (horizontal + vertical, keyboard-driven)
-- Workspace creation, naming, color labels
-- Workspace switching with full state persistence (layout + PTY sessions survive background)
-- SQLite persistence via GRDB (workspace state, layout tree)
-- Basic keyboard shortcuts
+- [x] Mac app skeleton: SwiftUI sidebar + AppKit terminal surface
+- [x] libghostty integration (went straight to libghostty, skipped SwiftTerm)
+- [x] PTY management via libghostty (openpty + process launching handled internally)
+- [x] Free-form pane splits (horizontal + vertical, keyboard-driven + header buttons)
+- [x] Workspace creation, naming, color labels
+- [x] Workspace switching with full state persistence (layout + PTY sessions survive background)
+- [x] SQLite persistence via GRDB (debounced PersistenceService + DatabaseService with migrations)
+- [x] Basic keyboard shortcuts (⌘D split right, ⌘⇧D split down, ⌘W close, ⌘1-9 workspace switch, ⌘⇧S toggle sidebar)
+- [x] Live pane titles via OSC 0/2 title + OSC 7 CWD tracking from ghostty action callbacks
+- [x] Resizable sidebar with drag handle
+- [x] Click-to-focus pane headers with split/close buttons
+- [x] Settings window
+- [x] Bell suppression + doCommand(by:) fix for NSBeep on action keys
 
 **Deliverable**: Replace your current terminal workflow. Can run shells and normal CLI tools across multiple named workspaces.
 
@@ -464,20 +471,18 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 
 ---
 
-## Open Questions to Resolve Before Phase 1
+## Resolved Questions
 
-These decisions will affect the early architecture and are worth settling before writing code.
+**1. libghostty vs SwiftTerm** — Resolved: went straight to libghostty for Phase 1. Zig toolchain and C interop were manageable. GPU rendering and VT compliance worth the upfront cost.
 
-**1. libghostty vs SwiftTerm for Phase 1**
-libghostty gives GPU rendering and better VT compliance but requires a Zig toolchain and is GPL-licensed. SwiftTerm is MIT, pure Swift, and faster to integrate — you could ship Phase 1 faster and migrate to libghostty in Phase 2. Given solo build, SwiftTerm for Phase 1 is the pragmatic call.
+**2. Session persistence model** — Resolved: restore layout and cwd, launch fresh shells on reopen. True session persistence deferred to Phase 5.
 
-**2. Session persistence model**
-When you quit Nexus and reopen it, should PTY processes be restored (requires a persistent daemon process, like tmux's server model) or should workspaces restore their layout with fresh shells? The daemon model is more complex. Recommended for Phase 1: restore layout and cwd, launch fresh shells. True session persistence is a Phase 5 stretch goal.
+## Open Questions
 
-**3. Notification opt-in per workspace**
+**1. Notification opt-in per workspace**
 Some workspaces (e.g. a quick PR review terminal) don't need agent notifications at all. The workspace should have a notification profile setting: "all", "agents only", or "off". Implement in Phase 3.
 
-**4. Codex CLI signal detection**
+**2. Codex CLI signal detection**
 OpenAI Codex CLI's exact escape sequence and prompt patterns need to be verified against the current CLI version before the Phase 3 watcher is built. This is a small research spike before Phase 3 starts.
 
 ---
@@ -486,7 +491,7 @@ OpenAI Codex CLI's exact escape sequence and prompt patterns need to be verified
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Terminal engine | libghostty (Phase 2+) / SwiftTerm (Phase 1) | libghostty is best-in-class; SwiftTerm unblocks Phase 1 faster |
+| Terminal engine | libghostty | GPU-accelerated, VT-compliant, used from Phase 1 |
 | State management | TCA | testable concurrent state |
 | Persistence | SQLite/GRDB | Better than UserDefaults for workspace state; simpler than CoreData |
 | IPC | Unix domain socket (JSON) | simple, scriptable, no framework dependency |
