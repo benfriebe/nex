@@ -10,6 +10,7 @@ struct PaneGridView: View {
     let panes: IdentifiedArrayOf<Pane>
     let focusedPaneID: UUID?
     let onCreatePane: () -> Void
+    let onSplitPane: (UUID, PaneLayout.SplitDirection) -> Void
     let onClosePane: (UUID) -> Void
     let onFocusPane: (UUID) -> Void
     let onUpdateRatio: (UUID, Double) -> Void
@@ -48,6 +49,8 @@ struct PaneGridView: View {
                 pane: pane,
                 isFocused: pane.id == focusedPaneID,
                 onFocus: { onFocusPane(pane.id) },
+                onSplitHorizontal: { onSplitPane(pane.id, .horizontal) },
+                onSplitVertical: { onSplitPane(pane.id, .vertical) },
                 onClose: { onClosePane(pane.id) }
             )
 

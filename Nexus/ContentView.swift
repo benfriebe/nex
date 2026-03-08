@@ -26,6 +26,12 @@ struct ContentView: View {
                         onCreatePane: {
                             store.send(.workspaces(.element(id: activeID, action: .createPane)))
                         },
+                        onSplitPane: { paneID, direction in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .splitPane(direction: direction, sourcePaneID: paneID)
+                            )))
+                        },
                         onClosePane: { paneID in
                             store.send(.workspaces(.element(id: activeID, action: .closePane(paneID))))
                         },

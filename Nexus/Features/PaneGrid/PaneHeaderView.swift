@@ -7,6 +7,8 @@ struct PaneHeaderView: View {
     let pane: Pane
     let isFocused: Bool
     let onFocus: () -> Void
+    let onSplitHorizontal: () -> Void
+    let onSplitVertical: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -22,6 +24,28 @@ struct PaneHeaderView: View {
                 .truncationMode(.head)
 
             Spacer()
+
+            Button(action: onSplitHorizontal) {
+                Image(systemName: "square.split.2x1")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(0.6)
+            .help("Split right (⌘D)")
+
+            Button(action: onSplitVertical) {
+                Image(systemName: "square.split.1x2")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(0.6)
+            .help("Split down (⌘⇧D)")
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
