@@ -4,15 +4,17 @@ import SwiftUI
 /// Root view: HStack with workspace sidebar + pane grid detail.
 struct ContentView: View {
     let store: StoreOf<AppReducer>
+    @State private var sidebarWidth: CGFloat = 220
 
     var body: some View {
         WithPerceptionTracking {
             HStack(spacing: 0) {
                 if store.isSidebarVisible {
                     WorkspaceListView(store: store)
-                        .frame(minWidth: 180, idealWidth: 220, maxWidth: 300)
+                        .frame(width: sidebarWidth)
+                        .background(Color(nsColor: .controlBackgroundColor))
 
-                    Divider()
+                    sidebarResizeHandle
                 }
 
                 if let activeID = store.activeWorkspaceID,
@@ -67,5 +69,25 @@ struct ContentView: View {
                 store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
             }
         }
+    }
+
+    private var sidebarResizeHandle: some View {
+        Color(nsColor: .controlBackgroundColor)
+            .frame(width: 1)
+            .overlay(Color(nsColor: .separatorColor).opacity(0.5))
+            .contentShape(Rectangle().inset(by: -3))
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        sidebarWidth = min(max(sidebarWidth + value.translation.width, 180), 300)
+                    }
+            )
     }
 }
