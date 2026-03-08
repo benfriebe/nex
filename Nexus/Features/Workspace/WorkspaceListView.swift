@@ -13,35 +13,8 @@ struct WorkspaceListView: View {
                     if let id { store.send(.setActiveWorkspace(id)) }
                 }
             )) {
-                ForEach(store.workspaces) { workspace in
-                    let index = store.workspaces.index(id: workspace.id).map {
-                        store.workspaces.distance(from: store.workspaces.startIndex, to: $0)
-                    } ?? 0
-                    WorkspaceRowView(
-                        name: workspace.name,
-                        color: workspace.color,
-                        paneCount: workspace.panes.count,
-                        isActive: workspace.id == store.activeWorkspaceID,
-                        index: index
-                    )
-                    .tag(workspace.id)
-                    .contextMenu {
-                        Button("Rename...") {
-                            // TODO: inline rename
-                        }
-                        Menu("Color") {
-                            ForEach(WorkspaceColor.allCases) { color in
-                                Button(color.displayName) {
-                                    store.send(.workspaces(.element(id: workspace.id, action: .setColor(color))))
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("Delete", role: .destructive) {
-                            store.send(.deleteWorkspace(workspace.id))
-                        }
-                        .disabled(store.workspaces.count <= 1)
-                    }
+                ForEach(store.scope(state: \.workspaces, action: \.workspaces)) { workspaceStore in
+                    workspaceRow(workspaceStore: workspaceStore)
                 }
             }
             .listStyle(.sidebar)
@@ -52,6 +25,40 @@ struct WorkspaceListView: View {
                 }
                 .buttonStyle(.borderless)
                 .padding(12)
+            }
+        }
+    }
+
+    private func workspaceRow(workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
+        WithPerceptionTracking {
+            let workspaceID = workspaceStore.state.id
+            let index = store.workspaces.index(id: workspaceID).map {
+                store.workspaces.distance(from: store.workspaces.startIndex, to: $0)
+            } ?? 0
+            WorkspaceRowView(
+                name: workspaceStore.name,
+                color: workspaceStore.color,
+                paneCount: workspaceStore.panes.count,
+                isActive: workspaceID == store.activeWorkspaceID,
+                index: index
+            )
+            .tag(workspaceID)
+            .contextMenu {
+                Button("Rename...") {
+                    // TODO: inline rename
+                }
+                Menu("Color") {
+                    ForEach(WorkspaceColor.allCases) { color in
+                        Button(color.displayName) {
+                            workspaceStore.send(.setColor(color))
+                        }
+                    }
+                }
+                Divider()
+                Button("Delete", role: .destructive) {
+                    store.send(.deleteWorkspace(workspaceID))
+                }
+                .disabled(store.workspaces.count <= 1)
             }
         }
     }
