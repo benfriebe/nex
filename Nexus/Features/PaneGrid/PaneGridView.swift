@@ -107,10 +107,12 @@ struct PaneGridView: View {
                 isFocused: pane.id == focusedPaneID
             )
         }
-        .border(
-            pane.id == focusedPaneID ? Color.accentColor.opacity(0.4) : Color.clear,
-            width: 1
-        )
+        .overlay {
+            if pane.id == focusedPaneID {
+                Rectangle()
+                    .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+            }
+        }
         .opacity(dragSourcePaneID == pane.id ? 0.5 : 1.0)
         .frame(width: frame.width, height: frame.height)
         .offset(x: frame.origin.x, y: frame.origin.y)

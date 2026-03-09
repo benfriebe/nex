@@ -67,7 +67,6 @@ struct ContentView: View {
                 }
 
                 if store.isInspectorVisible {
-                    Divider()
                     WorkspaceInspectorView(store: store)
                 }
             }
