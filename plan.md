@@ -408,16 +408,16 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 
 ---
 
-### Phase 2 — Repo Registry + Worktree Association
+### Phase 2 — Repo Registry + Worktree Association ✅
 **Goal**: Workspaces understand your repos.
 
-- Repo registry (scan root dir on setup, manual add/remove)
-- Associate repos to workspaces (with fuzzy search picker)
-- Worktree creation and linking per workspace
-- Multi-repo worktree support per workspace
-- Workspace Inspector panel (repos, panes, git status)
-- Git status summary in sidebar (clean/dirty indicator)
-- Worktree naming convention + configurable base path
+- [x] Repo registry (scan root dir on setup, manual add/remove)
+- [x] Associate repos to workspaces (with fuzzy search picker)
+- [x] Worktree creation and linking per workspace
+- [x] Multi-repo worktree support per workspace
+- [x] Workspace Inspector panel (repos, panes, git status)
+- [x] Git status summary in sidebar (clean/dirty indicator)
+- [x] Worktree naming convention + configurable base path
 
 **Deliverable**: Create a workspace, associate 2–3 repos, create worktrees — all from one place.
 
