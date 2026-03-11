@@ -19,7 +19,7 @@ struct PaneHeaderView: View {
         HStack(spacing: 4) {
             Circle()
                 .fill(statusDotColor)
-                .frame(width: 6, height: 6)
+                .frame(width: 10, height: 10)
                 .animation(.easeInOut(duration: 0.3), value: pane.status)
 
             Text(displayTitle)

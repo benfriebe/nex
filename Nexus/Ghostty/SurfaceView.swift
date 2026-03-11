@@ -108,7 +108,6 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSView overrides
 
     static let paneFocusedNotification = Notification.Name("SurfaceView.paneFocused")
-    static let paneKeystrokeNotification = Notification.Name("SurfaceView.paneKeystroke")
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -198,13 +197,6 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Notify that the user typed in this pane (clears waitingForInput status)
-        NotificationCenter.default.post(
-            name: Self.paneKeystrokeNotification,
-            object: nil,
-            userInfo: ["paneID": paneID]
-        )
-
         // Step 1: Interpret the key event to get the text it produces.
         // This calls our NSTextInputClient methods (insertText/setMarkedText)
         // which store the result in interpretedText/isComposing.

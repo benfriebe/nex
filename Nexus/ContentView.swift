@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.surfaceManager) private var surfaceManager
     @Environment(\.socketServer) private var socketServer
     @State private var sidebarWidth: CGFloat = 220
+    @State private var statusClearTask: Task<Void, Never>?
 
     var body: some View {
         WithPerceptionTracking {
@@ -83,9 +84,17 @@ struct ContentView: View {
                 guard let paneID = notification.userInfo?["paneID"] as? UUID,
                       let activeID = store.activeWorkspaceID,
                       let workspace = store.workspaces[id: activeID],
-                      workspace.focusedPaneID != paneID,
                       workspace.panes[id: paneID] != nil else { return }
-                store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
+                if workspace.focusedPaneID != paneID {
+                    store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
+                }
+                scheduleClearStatus(paneID: paneID, workspaceID: activeID)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                guard let activeID = store.activeWorkspaceID,
+                      let workspace = store.workspaces[id: activeID],
+                      let focusedID = workspace.focusedPaneID else { return }
+                scheduleClearStatus(paneID: focusedID, workspaceID: activeID)
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfaceTitleNotification)) { notification in
                 guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
@@ -101,14 +110,6 @@ struct ContentView: View {
                 // Route through AppReducer for cross-workspace support
                 store.send(.surfaceDirectoryChanged(paneID: paneID, directory: pwd))
             }
-            .onReceive(NotificationCenter.default.publisher(for: SurfaceView.paneKeystrokeNotification)) { notification in
-                guard let paneID = notification.userInfo?["paneID"] as? UUID else { return }
-                // Route through AppReducer to find the correct workspace
-                guard let workspace = store.workspaces.first(where: { ws in
-                    ws.panes[id: paneID]?.status == .waitingForInput
-                }) else { return }
-                store.send(.workspaces(.element(id: workspace.id, action: .clearPaneStatus(paneID))))
-            }
             .onAppear {
                 // Start socket server and wire events to AppReducer
                 socketServer.onEvent = { paneID, event in
@@ -116,6 +117,17 @@ struct ContentView: View {
                 }
                 socketServer.start()
             }
+        }
+    }
+
+    private func scheduleClearStatus(paneID: UUID, workspaceID: UUID) {
+        guard let workspace = store.workspaces[id: workspaceID],
+              workspace.panes[id: paneID]?.status != .idle else { return }
+        statusClearTask?.cancel()
+        statusClearTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            store.send(.workspaces(.element(id: workspaceID, action: .clearPaneStatus(paneID))))
         }
     }
 
