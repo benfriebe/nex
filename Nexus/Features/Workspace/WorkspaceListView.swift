@@ -45,7 +45,9 @@ struct WorkspaceListView: View {
                 repoCount: workspaceStore.repoAssociations.count,
                 gitStatus: aggregateStatus,
                 isActive: workspaceID == store.activeWorkspaceID,
-                index: index
+                index: index,
+                waitingPaneCount: workspaceStore.panes.filter { $0.status == .waitingForInput }.count,
+                hasRunningPanes: workspaceStore.panes.contains { $0.status == .running }
             )
             .tag(workspaceID)
             .contextMenu {

@@ -49,8 +49,8 @@ guard let paneID = ProcessInfo.processInfo.environment["NEXUS_PANE_ID"] else {
     exit(0)
 }
 
-// If title/body not provided via flags, try reading hook JSON from stdin
-if title == nil || body == nil {
+// If title/body not provided via flags, try reading hook JSON from stdin (only for notification events, only when piped)
+if event == "notification" && (title == nil || body == nil) && isatty(STDIN_FILENO) == 0 {
     if let stdinData = try? FileHandle.standardInput.availableData,
        !stdinData.isEmpty,
        let json = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
