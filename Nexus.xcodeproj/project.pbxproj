@@ -16,6 +16,7 @@
 		23B7A4375CFBA2A0AF0BD4B5 /* WorkspaceFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5BE660397D7CA67D909D988 /* WorkspaceFeatureTests.swift */; };
 		2CB3848DCA20C5F575116C33 /* PaneHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F5C2505807A0297370DC70D /* PaneHeaderView.swift */; };
 		2FC734D4C60D40384C0CC762 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CFC6CC21FCE4E91003E7CE82 /* IOKit.framework */; };
+		355088AB8B7FF283D86D06EB /* SocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F0C3330B816C66BB134635 /* SocketServer.swift */; };
 		35CD4C3C9E2AFB3A51F2041D /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66990CB73BAC11D753EA94D /* GhosttyConfigClient.swift */; };
 		375C8BCC9F11700FEBFAC68D /* NewWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319C35E223267880C3247786 /* NewWorkspaceSheet.swift */; };
 		3BC7127EAC19AFD8B4AE3D39 /* RepoRegistryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B6DC97B932A92EFBAAD4DE6 /* RepoRegistryView.swift */; };
@@ -32,6 +33,7 @@
 		665EBD0DA670A820E57863DE /* NexusCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CE0337B159EEA8C987E0998 /* NexusCommands.swift */; };
 		6E3A0DD305DB01F5F0D25EBC /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1B856A0577AA63F438DC24C /* AppKit.framework */; };
 		6FA0DA9D860493F2DB0EA2EA /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D86C730015BEA184D84A2921 /* Carbon.framework */; };
+		7645F3C0EF8DC0B7181786AC /* AgentLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B5AA9EFFCC7C8FBEB44F33 /* AgentLifecycleTests.swift */; };
 		76CB14ECF2247E233B2614BE /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD58D51CC4DC22E568D4B0A3 /* PersistenceTests.swift */; };
 		88AB951C2D8FA04BDBBBF5E7 /* RepoRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE85F7FC60685F87C266F01 /* RepoRegistryTests.swift */; };
 		89537007F8FCAE80F380ACEB /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43F76D69B7E837A41C13448 /* GitService.swift */; };
@@ -80,6 +82,7 @@
 		4ADBDF643D25D92B538C4EA9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4C6359C7E9394EA91ACF09F3 /* DatabaseMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseMigrationTests.swift; sourceTree = "<group>"; };
 		51CA985BADE5CE7057E2E2B4 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		52F0C3330B816C66BB134635 /* SocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketServer.swift; sourceTree = "<group>"; };
 		55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 		5C18E2F1249EAC70CE79F613 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		620FC3BC6EDDA3073A852809 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
@@ -92,6 +95,7 @@
 		7EC807E893030C5E46495AFF /* WorkspaceRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRowView.swift; sourceTree = "<group>"; };
 		7EE85F7FC60685F87C266F01 /* RepoRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryTests.swift; sourceTree = "<group>"; };
 		7F5C2505807A0297370DC70D /* PaneHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHeaderView.swift; sourceTree = "<group>"; };
+		83B5AA9EFFCC7C8FBEB44F33 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		8DF4ADB86C4AE07CB9C53E2A /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		94EB494A4A627FA920CD3C24 /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		973DFAD268E5D80FC7948975 /* RepoAssociation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoAssociation.swift; sourceTree = "<group>"; };
@@ -160,6 +164,7 @@
 				A6C7D51FECC970E31659DFBD /* DatabaseService.swift */,
 				B43F76D69B7E837A41C13448 /* GitService.swift */,
 				55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */,
+				52F0C3330B816C66BB134635 /* SocketServer.swift */,
 				5C18E2F1249EAC70CE79F613 /* SurfaceManager.swift */,
 			);
 			path = Services;
@@ -168,6 +173,7 @@
 		0EBCEF7719D6AE51AC9B466C /* NexusTests */ = {
 			isa = PBXGroup;
 			children = (
+				83B5AA9EFFCC7C8FBEB44F33 /* AgentLifecycleTests.swift */,
 				4C6359C7E9394EA91ACF09F3 /* DatabaseMigrationTests.swift */,
 				6EDF2C4B37E684819F441FA4 /* PaneLayoutTests.swift */,
 				FD58D51CC4DC22E568D4B0A3 /* PersistenceTests.swift */,
@@ -381,6 +387,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7645F3C0EF8DC0B7181786AC /* AgentLifecycleTests.swift in Sources */,
 				E31A11FDFB40CB30A5A10A9C /* DatabaseMigrationTests.swift in Sources */,
 				C6BAFDCD619CAC21E4269342 /* PaneLayoutTests.swift in Sources */,
 				76CB14ECF2247E233B2614BE /* PersistenceTests.swift in Sources */,
@@ -418,6 +425,7 @@
 				3BC7127EAC19AFD8B4AE3D39 /* RepoRegistryView.swift in Sources */,
 				0CFAA877D93376BE849A45BF /* SettingsFeature.swift in Sources */,
 				23626EE07F58122AEE57E28E /* SettingsView.swift in Sources */,
+				355088AB8B7FF283D86D06EB /* SocketServer.swift in Sources */,
 				9752B8F62EC1E917DA3D1D27 /* SplitDividerView.swift in Sources */,
 				57DB32B8D4EC27378781BEF5 /* SurfaceContainerView.swift in Sources */,
 				40AA44A23F333093A2CB0D73 /* SurfaceManager.swift in Sources */,

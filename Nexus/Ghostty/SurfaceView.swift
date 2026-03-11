@@ -37,14 +37,32 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         config.font_size = 0 // 0 = use config default
         config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
 
-        workingDirectory.withCString { cwd in
-            config.working_directory = cwd
-            let rawSurface = ghostty_surface_new(app, &config)
-            if let rawSurface {
-                ghosttySurface = GhosttySurface(surface: rawSurface)
-                // Start unfocused — focus is granted explicitly via makeFirstResponder
-                ghosttySurface?.setFocus(false)
+        // Inject NEXUS_PANE_ID so hook scripts know which pane fired
+        let paneIDString = paneID.uuidString
+        paneIDString.withCString { paneIDCStr in
+            var envVar = ghostty_env_var_s()
+            let keyStr = strdup("NEXUS_PANE_ID")!
+            let valStr = strdup(paneIDCStr)!
+            envVar.key = UnsafePointer(keyStr)
+            envVar.value = UnsafePointer(valStr)
+
+            withUnsafeMutablePointer(to: &envVar) { envPtr in
+                config.env_vars = envPtr
+                config.env_var_count = 1
+
+                workingDirectory.withCString { cwd in
+                    config.working_directory = cwd
+                    let rawSurface = ghostty_surface_new(app, &config)
+                    if let rawSurface {
+                        ghosttySurface = GhosttySurface(surface: rawSurface)
+                        // Start unfocused — focus is granted explicitly via makeFirstResponder
+                        ghosttySurface?.setFocus(false)
+                    }
+                }
             }
+
+            free(keyStr)
+            free(valStr)
         }
     }
 
@@ -90,6 +108,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSView overrides
 
     static let paneFocusedNotification = Notification.Name("SurfaceView.paneFocused")
+    static let paneKeystrokeNotification = Notification.Name("SurfaceView.paneKeystroke")
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -179,6 +198,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Notify that the user typed in this pane (clears waitingForInput status)
+        NotificationCenter.default.post(
+            name: Self.paneKeystrokeNotification,
+            object: nil,
+            userInfo: ["paneID": paneID]
+        )
+
         // Step 1: Interpret the key event to get the text it produces.
         // This calls our NSTextInputClient methods (insertText/setMarkedText)
         // which store the result in interpretedText/isComposing.

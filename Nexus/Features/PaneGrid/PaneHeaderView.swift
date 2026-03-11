@@ -18,8 +18,9 @@ struct PaneHeaderView: View {
     var body: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(isFocused ? Color.accentColor : Color.secondary.opacity(0.3))
+                .fill(statusDotColor)
                 .frame(width: 6, height: 6)
+                .animation(.easeInOut(duration: 0.3), value: pane.status)
 
             Text(displayTitle)
                 .font(.system(size: 11, design: .monospaced))
@@ -86,6 +87,17 @@ struct PaneHeaderView: View {
                     Color.accentColor.opacity(0.08)
                 }
             }
+        }
+    }
+
+    private var statusDotColor: Color {
+        switch pane.status {
+        case .running:
+            return .green
+        case .waitingForInput:
+            return .blue
+        case .idle:
+            return isFocused ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.3)
         }
     }
 

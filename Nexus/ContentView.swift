@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.surfaceManager) private var surfaceManager
+    @Environment(\.socketServer) private var socketServer
     @State private var sidebarWidth: CGFloat = 220
 
     var body: some View {
@@ -89,16 +90,31 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfaceTitleNotification)) { notification in
                 guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
                       let title = notification.userInfo?["title"] as? String,
-                      let paneID = surfaceManager.paneID(for: surface),
-                      let activeID = store.activeWorkspaceID else { return }
-                store.send(.workspaces(.element(id: activeID, action: .paneTitleChanged(paneID: paneID, title: title))))
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                // Route through AppReducer for cross-workspace support
+                store.send(.surfaceTitleChanged(paneID: paneID, title: title))
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfacePwdNotification)) { notification in
                 guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
                       let pwd = notification.userInfo?["pwd"] as? String,
-                      let paneID = surfaceManager.paneID(for: surface),
-                      let activeID = store.activeWorkspaceID else { return }
-                store.send(.workspaces(.element(id: activeID, action: .paneDirectoryChanged(paneID: paneID, directory: pwd))))
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                // Route through AppReducer for cross-workspace support
+                store.send(.surfaceDirectoryChanged(paneID: paneID, directory: pwd))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: SurfaceView.paneKeystrokeNotification)) { notification in
+                guard let paneID = notification.userInfo?["paneID"] as? UUID else { return }
+                // Route through AppReducer to find the correct workspace
+                guard let workspace = store.workspaces.first(where: { ws in
+                    ws.panes[id: paneID]?.status == .waitingForInput
+                }) else { return }
+                store.send(.workspaces(.element(id: workspace.id, action: .clearPaneStatus(paneID))))
+            }
+            .onAppear {
+                // Start socket server and wire events to AppReducer
+                socketServer.onEvent = { paneID, event in
+                    store.send(.socketEvent(paneID: paneID, event: event))
+                }
+                socketServer.start()
             }
         }
     }

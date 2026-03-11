@@ -40,6 +40,13 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
 
+        // Agent Lifecycle (socket events)
+        case socketEvent(paneID: UUID, event: AgentEvent)
+
+        // Cross-workspace surface notifications
+        case surfaceTitleChanged(paneID: UUID, title: String)
+        case surfaceDirectoryChanged(paneID: UUID, directory: String)
+
         // Repo Registry
         case scanForRepos(rootPath: String)
         case scanCompleted([ScannedRepo])
@@ -64,6 +71,7 @@ struct AppReducer {
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.persistenceService) var persistenceService
     @Dependency(\.gitService) var gitService
+    @Dependency(\.socketServer) var socketServer
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
 
@@ -205,6 +213,38 @@ struct AppReducer {
 
             case .settings:
                 return .none
+
+            // MARK: - Agent Lifecycle
+
+            case .socketEvent(let paneID, let event):
+                // Route to the workspace that owns this pane
+                guard let workspace = state.workspaces.first(where: { ws in
+                    ws.panes[id: paneID] != nil
+                }) else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .agentStatusChanged(paneID: paneID, event: event)
+                )))
+
+            // MARK: - Cross-Workspace Surface Notifications
+
+            case .surfaceTitleChanged(let paneID, let title):
+                guard let workspace = state.workspaces.first(where: { ws in
+                    ws.panes[id: paneID] != nil
+                }) else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .paneTitleChanged(paneID: paneID, title: title)
+                )))
+
+            case .surfaceDirectoryChanged(let paneID, let directory):
+                guard let workspace = state.workspaces.first(where: { ws in
+                    ws.panes[id: paneID] != nil
+                }) else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .paneDirectoryChanged(paneID: paneID, directory: directory)
+                )))
 
             // MARK: - Repo Registry
 

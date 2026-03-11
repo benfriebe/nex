@@ -22,6 +22,7 @@ struct NexusApp: App {
         WindowGroup {
             ContentView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
+                .environment(\.socketServer, SocketServer.liveValue)
                 .environment(\.ghosttyConfig, .liveValue)
                 .frame(minWidth: 600, minHeight: 400)
                 .onAppear {

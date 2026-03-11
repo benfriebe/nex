@@ -160,4 +160,66 @@ struct WorkspaceFeatureTests {
             state.repoAssociations = []
         }
     }
+
+    // MARK: - Agent Status
+
+    @Test func agentStoppedSetsPaneToWaiting() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.agentStatusChanged(paneID: paneID, event: .stopped)) { state in
+            state.panes[id: paneID]?.status = .waitingForInput
+        }
+    }
+
+    @Test func agentErrorSetsPaneToWaiting() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.agentStatusChanged(paneID: paneID, event: .error(message: "fail"))) { state in
+            state.panes[id: paneID]?.status = .waitingForInput
+        }
+    }
+
+    @Test func clearPaneStatusResetsToIdle() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .waitingForInput
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.clearPaneStatus(paneID)) { state in
+            state.panes[id: paneID]?.status = .idle
+        }
+    }
+
+    @Test func notificationEventDoesNotChangeStatus() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.agentStatusChanged(paneID: paneID, event: .notification(title: "Done", body: "ok")))
+        // No state change expected — notification doesn't affect pane status
+    }
 }

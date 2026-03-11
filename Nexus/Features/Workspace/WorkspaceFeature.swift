@@ -88,6 +88,8 @@ struct WorkspaceFeature {
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
         case movePane(paneID: UUID, targetPaneID: UUID, zone: PaneLayout.DropZone)
+        case agentStatusChanged(paneID: UUID, event: AgentEvent)
+        case clearPaneStatus(UUID)
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
     }
@@ -232,6 +234,23 @@ struct WorkspaceFeature {
                     paneID, toAdjacentOf: targetPaneID, zone: zone
                 )
                 state.focusedPaneID = paneID
+                return .none
+
+            case .agentStatusChanged(let paneID, let event):
+                switch event {
+                case .started:
+                    state.panes[id: paneID]?.status = .running
+                case .stopped:
+                    state.panes[id: paneID]?.status = .waitingForInput
+                case .error:
+                    state.panes[id: paneID]?.status = .waitingForInput
+                case .notification:
+                    break
+                }
+                return .none
+
+            case .clearPaneStatus(let paneID):
+                state.panes[id: paneID]?.status = .idle
                 return .none
 
             case .addRepoAssociation(let assoc):
