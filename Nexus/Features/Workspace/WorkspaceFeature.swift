@@ -246,12 +246,8 @@ struct WorkspaceFeature {
                 switch event {
                 case .started:
                     state.panes[id: paneID]?.status = .running
-                case .stopped:
+                case .stopped, .error, .notification:
                     state.panes[id: paneID]?.status = .waitingForInput
-                case .error:
-                    state.panes[id: paneID]?.status = .waitingForInput
-                case .notification:
-                    break
                 }
                 return .none
 

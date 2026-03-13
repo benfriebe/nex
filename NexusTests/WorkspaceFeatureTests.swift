@@ -210,7 +210,7 @@ struct WorkspaceFeatureTests {
         }
     }
 
-    @Test func notificationEventDoesNotChangeStatus() async {
+    @Test func notificationEventSetsWaitingForInput() async {
         let workspace = WorkspaceFeature.State(name: "Test")
         let paneID = workspace.panes.first!.id
 
@@ -220,7 +220,8 @@ struct WorkspaceFeatureTests {
             $0.surfaceManager = SurfaceManager()
         }
 
-        await store.send(.agentStatusChanged(paneID: paneID, event: .notification(title: "Done", body: "ok")))
-        // No state change expected — notification doesn't affect pane status
+        await store.send(.agentStatusChanged(paneID: paneID, event: .notification(title: "Done", body: "ok"))) {
+            $0.panes[id: paneID]?.status = .waitingForInput
+        }
     }
 }
