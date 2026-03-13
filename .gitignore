@@ -11,6 +11,9 @@ xcuserdata/
 *.swp
 *~
 
+# libghostty (build from ghostty submodule, too large for git)
+lib/libghostty.a
+
 # Ghostty submodule build artifacts
 ghostty/zig-out/
 ghostty/zig-cache/
