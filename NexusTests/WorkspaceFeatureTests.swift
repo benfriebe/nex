@@ -59,6 +59,13 @@ struct WorkspaceFeatureTests {
         }
 
         await store.send(.closePane(secondPaneID)) { state in
+            state.recentlyClosedPanes = [
+                ClosedPaneSnapshot(
+                    workingDirectory: state.panes[id: secondPaneID]!.workingDirectory,
+                    label: nil,
+                    claudeSessionID: nil
+                )
+            ]
             state.panes.remove(id: secondPaneID)
             state.layout = .leaf(firstPaneID)
             state.focusedPaneID = firstPaneID
@@ -238,5 +245,145 @@ struct WorkspaceFeatureTests {
         await store.send(.agentStatusChanged(paneID: paneID, event: .notification(title: "Done", body: "ok"))) {
             $0.panes[id: paneID]?.status = .waitingForInput
         }
+    }
+
+    // MARK: - Undo Close Pane
+
+    @Test func closeCapturesSnapshot() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstPaneID = workspace.panes.first!.id
+
+        let secondPaneID = UUID()
+        let secondPane = Pane(
+            id: secondPaneID,
+            label: "my-label",
+            workingDirectory: "/tmp/test",
+            claudeSessionID: "session-abc"
+        )
+        workspace.panes.append(secondPane)
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstPaneID),
+            second: .leaf(secondPaneID)
+        )
+        workspace.focusedPaneID = secondPaneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.closePane(secondPaneID)) { state in
+            state.recentlyClosedPanes = [
+                ClosedPaneSnapshot(
+                    workingDirectory: "/tmp/test",
+                    label: "my-label",
+                    claudeSessionID: "session-abc"
+                )
+            ]
+            state.panes.remove(id: secondPaneID)
+            state.layout = .leaf(firstPaneID)
+            state.focusedPaneID = firstPaneID
+        }
+    }
+
+    @Test func reopenRestoresPane() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstPaneID = workspace.panes.first!.id
+        workspace.recentlyClosedPanes = [
+            ClosedPaneSnapshot(
+                workingDirectory: "/tmp/restored",
+                label: "restored-label",
+                claudeSessionID: nil
+            )
+        ]
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .constant(newPaneID)
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.reopenClosedPane) { state in
+            state.recentlyClosedPanes = []
+            state.panes.append(Pane(
+                id: newPaneID,
+                label: "restored-label",
+                workingDirectory: "/tmp/restored"
+            ))
+            state.layout = .split(
+                .horizontal,
+                ratio: 0.5,
+                first: .leaf(firstPaneID),
+                second: .leaf(newPaneID)
+            )
+            state.focusedPaneID = newPaneID
+        }
+    }
+
+    @Test func reopenEmptyStackIsNoop() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.reopenClosedPane)
+        // State unchanged — no assertion closure needed
+    }
+
+    @Test func closedPaneStackCapsAt10() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let basePaneID = workspace.panes.first!.id
+
+        // Create 11 extra panes and close them all
+        var paneIDs: [UUID] = []
+        for i in 0..<11 {
+            let id = UUID()
+            paneIDs.append(id)
+            workspace.panes.append(Pane(
+                id: id,
+                workingDirectory: "/tmp/dir\(i)"
+            ))
+        }
+        // Build a layout with all panes — just a flat chain of splits
+        var layout: PaneLayout = .leaf(basePaneID)
+        for id in paneIDs {
+            let (newLayout, _) = layout.splitting(
+                paneID: basePaneID,
+                direction: .horizontal,
+                newPaneID: id
+            )
+            layout = newLayout
+        }
+        workspace.layout = layout
+        workspace.focusedPaneID = basePaneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        for id in paneIDs {
+            await store.send(.closePane(id))
+        }
+
+        #expect(store.state.recentlyClosedPanes.count == 10)
+        // Oldest entry (dir0) should have been evicted
+        #expect(store.state.recentlyClosedPanes.first?.workingDirectory == "/tmp/dir1")
+        #expect(store.state.recentlyClosedPanes.last?.workingDirectory == "/tmp/dir10")
     }
 }

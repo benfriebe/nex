@@ -139,6 +139,15 @@ final class PaneShortcutMonitor {
             return true
         }
 
+        // ⌘⇧T — reopen closed pane
+        if event.keyCode == 17 /* t */ && flags == [.command, .shift] {
+            store.send(.workspaces(.element(
+                id: activeID,
+                action: .reopenClosedPane
+            )))
+            return true
+        }
+
         return false
     }
 }

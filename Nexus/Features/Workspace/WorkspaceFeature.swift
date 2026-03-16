@@ -1,6 +1,12 @@
 import ComposableArchitecture
 import Foundation
 
+struct ClosedPaneSnapshot: Equatable, Sendable {
+    var workingDirectory: String
+    var label: String?
+    var claudeSessionID: String?
+}
+
 @Reducer
 struct WorkspaceFeature {
     @ObservableState
@@ -13,6 +19,7 @@ struct WorkspaceFeature {
         var layout: PaneLayout
         var focusedPaneID: UUID?
         var repoAssociations: IdentifiedArrayOf<RepoAssociation> = []
+        var recentlyClosedPanes: [ClosedPaneSnapshot] = []
         var createdAt: Date
         var lastAccessedAt: Date
 
@@ -93,6 +100,7 @@ struct WorkspaceFeature {
         case paneBranchChanged(paneID: UUID, branch: String?)
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
+        case reopenClosedPane
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -182,6 +190,18 @@ struct WorkspaceFeature {
                 }
 
             case .closePane(let paneID):
+                if let pane = state.panes[id: paneID] {
+                    state.recentlyClosedPanes.append(
+                        ClosedPaneSnapshot(
+                            workingDirectory: pane.workingDirectory,
+                            label: pane.label,
+                            claudeSessionID: pane.claudeSessionID
+                        )
+                    )
+                    if state.recentlyClosedPanes.count > 10 {
+                        state.recentlyClosedPanes.removeFirst()
+                    }
+                }
                 state.panes.remove(id: paneID)
                 let newLayout = state.layout.removing(paneID: paneID)
                 state.layout = newLayout
@@ -274,6 +294,43 @@ struct WorkspaceFeature {
             case .removeRepoAssociation(let id):
                 state.repoAssociations.remove(id: id)
                 return .none
+
+            case .reopenClosedPane:
+                guard let snapshot = state.recentlyClosedPanes.popLast() else { return .none }
+                guard let focusedID = state.focusedPaneID else { return .none }
+
+                let newPaneID = uuid()
+                let newPane = Pane(
+                    id: newPaneID,
+                    label: snapshot.label,
+                    workingDirectory: snapshot.workingDirectory
+                )
+
+                let (newLayout, _) = state.layout.splitting(
+                    paneID: focusedID,
+                    direction: .horizontal,
+                    newPaneID: newPaneID
+                )
+                state.layout = newLayout
+                state.panes.append(newPane)
+                state.focusedPaneID = newPaneID
+
+                let opacity = ghosttyConfig.backgroundOpacity
+                let sessionID = snapshot.claudeSessionID
+                return .run { _ in
+                    await surfaceManager.createSurface(
+                        paneID: newPaneID,
+                        workingDirectory: newPane.workingDirectory,
+                        backgroundOpacity: opacity
+                    )
+                    if let sessionID {
+                        try? await Task.sleep(for: .seconds(1))
+                        await surfaceManager.sendCommand(
+                            to: newPaneID,
+                            command: "claude --resume \(sessionID)"
+                        )
+                    }
+                }
             }
         }
     }
