@@ -27,6 +27,7 @@
 		4C4F3BAFDC79A047D466A653 /* SocketParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28616052D961C0BEC060DF9 /* SocketParsingTests.swift */; };
 		4EB99A1B277034863DAE58D0 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DF4ADB86C4AE07CB9C53E2A /* QuartzCore.framework */; };
 		4FE40D67FB1FA6F90950FAA1 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */; };
+		53E282953AF9C7E1BCE6D86E /* CheckForUpdatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EABF38D032E30ABBA8D130C /* CheckForUpdatesView.swift */; };
 		556DE281F89A0258C29208A5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ADBDF643D25D92B538C4EA9 /* ContentView.swift */; };
 		56A1FC9C1A5285DA29A904AD /* NexusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC04BDAB61F82D3189AC43C6 /* NexusApp.swift */; };
 		57DB32B8D4EC27378781BEF5 /* SurfaceContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5495E12EC7C814B95EE2732 /* SurfaceContainerView.swift */; };
@@ -51,6 +52,7 @@
 		B92A401BA03B47447E9113F0 /* WorktreeOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBD2F8DC26F08263D4EADB4 /* WorktreeOperationTests.swift */; };
 		B9C2E796D5E09945264F81D2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C82DD33A39D1BC1A1D8CA29 /* Foundation.framework */; };
 		C6BAFDCD619CAC21E4269342 /* PaneLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDF2C4B37E684819F441FA4 /* PaneLayoutTests.swift */; };
+		CA1113B115264247DA5F00D0 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC6DA386CEB2093603BF6036 /* UpdaterService.swift */; };
 		CC29F22AD9D5EA5BEB81A283 /* Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE5A9173C5A36233FBDC6F8 /* Repo.swift */; };
 		CEA2876B7A8C383C24C28BD7 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 705D6277A1B79CE63A2D0AAF /* AppReducer.swift */; };
 		D49DF832989D4C7D953394BA /* SettingsFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7845FB43A113FD179B70B5 /* SettingsFeatureTests.swift */; };
@@ -108,6 +110,7 @@
 		94EB494A4A627FA920CD3C24 /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		973DFAD268E5D80FC7948975 /* RepoAssociation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoAssociation.swift; sourceTree = "<group>"; };
 		9D41B355C6BEEDE8BA3B2061 /* PaneGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneGridView.swift; sourceTree = "<group>"; };
+		9EABF38D032E30ABBA8D130C /* CheckForUpdatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckForUpdatesView.swift; sourceTree = "<group>"; };
 		A28616052D961C0BEC060DF9 /* SocketParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingTests.swift; sourceTree = "<group>"; };
 		A6C7D51FECC970E31659DFBD /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
 		AD73E318BB132E80DF737777 /* WorkspaceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInspectorView.swift; sourceTree = "<group>"; };
@@ -127,6 +130,7 @@
 		CFC6CC21FCE4E91003E7CE82 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		D649B49DF0AA5FFD3746D604 /* Nexus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Nexus.entitlements; sourceTree = "<group>"; };
 		D86C730015BEA184D84A2921 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
+		DC6DA386CEB2093603BF6036 /* UpdaterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterService.swift; sourceTree = "<group>"; };
 		E1CCDF319563AC5D3B26D08C /* SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceView.swift; sourceTree = "<group>"; };
 		E7B99B9BACA8153BE1ABE412 /* WorkspaceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListView.swift; sourceTree = "<group>"; };
 		E883F4B1CB4946F40EB6A43B /* StatusBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPopoverView.swift; sourceTree = "<group>"; };
@@ -181,6 +185,7 @@
 				55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */,
 				52F0C3330B816C66BB134635 /* SocketServer.swift */,
 				5C18E2F1249EAC70CE79F613 /* SurfaceManager.swift */,
+				DC6DA386CEB2093603BF6036 /* UpdaterService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -274,6 +279,7 @@
 		650B49880AEA3A783D9C7836 /* Commands */ = {
 			isa = PBXGroup;
 			children = (
+				9EABF38D032E30ABBA8D130C /* CheckForUpdatesView.swift */,
 				1CE0337B159EEA8C987E0998 /* NexusCommands.swift */,
 			);
 			path = Commands;
@@ -457,6 +463,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CEA2876B7A8C383C24C28BD7 /* AppReducer.swift in Sources */,
+				53E282953AF9C7E1BCE6D86E /* CheckForUpdatesView.swift in Sources */,
 				556DE281F89A0258C29208A5 /* ContentView.swift in Sources */,
 				B060959AEA2A5E363A9A6C72 /* DatabaseService.swift in Sources */,
 				FB580C1521D18D37B4ABDD35 /* GhosttyApp.swift in Sources */,
@@ -488,6 +495,7 @@
 				57DB32B8D4EC27378781BEF5 /* SurfaceContainerView.swift in Sources */,
 				40AA44A23F333093A2CB0D73 /* SurfaceManager.swift in Sources */,
 				E71B6E45BE8F61CE19EDD29A /* SurfaceView.swift in Sources */,
+				CA1113B115264247DA5F00D0 /* UpdaterService.swift in Sources */,
 				60540450EC5091215339A570 /* WorkspaceColor.swift in Sources */,
 				5E20EF3FAFAC6280DE7084C5 /* WorkspaceFeature.swift in Sources */,
 				FE6E0F3A10AD73C5B216F13A /* WorkspaceInspectorView.swift in Sources */,

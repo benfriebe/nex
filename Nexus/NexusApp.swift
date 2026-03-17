@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import Sparkle
 import SwiftUI
 
 @main
@@ -8,6 +9,9 @@ struct NexusApp: App {
     }
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
+    @StateObject private var updaterViewModel = UpdaterViewModel(
+        startUpdater: !NexusApp.isTestMode
+    )
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -70,6 +74,9 @@ struct NexusApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updaterViewModel: updaterViewModel)
+            }
             NexusCommands(store: store)
         }
 
