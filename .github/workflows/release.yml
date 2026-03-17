@@ -35,7 +35,7 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
-          FAT_LIB=$(find .zig-cache -name "libghostty-fat.a" -type f | head -1)
+          FAT_LIB=$(find "$ZIG_LOCAL_CACHE_DIR" -name "libghostty-fat.a" -type f | head -1)
           cp "$FAT_LIB" ../lib/libghostty.a
 
       - name: Generate Xcode project
