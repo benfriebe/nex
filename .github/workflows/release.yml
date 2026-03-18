@@ -82,8 +82,9 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          # Download Sparkle tools
-          curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/2.7.5/Sparkle-2.7.5.tar.xz" -o /tmp/sparkle.tar.xz
+          # Download Sparkle tools (latest release)
+          SPARKLE_TAG=$(curl -sI "https://github.com/sparkle-project/Sparkle/releases/latest" | grep -i location | sed 's/.*tag\///' | tr -d '\r')
+          curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_TAG}/Sparkle-${SPARKLE_TAG}.tar.xz" -o /tmp/sparkle.tar.xz
           mkdir -p /tmp/sparkle
           tar xf /tmp/sparkle.tar.xz -C /tmp/sparkle
 
