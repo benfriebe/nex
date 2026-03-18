@@ -35,9 +35,14 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
-          FAT_LIB=$(find "$ZIG_LOCAL_CACHE_DIR" -name "libghostty-fat.a" -type f | head -1)
+          # The xcframework builds both arm64 and x86_64 fat libs — pick the arm64 one
           mkdir -p ../lib
-          cp "$FAT_LIB" ../lib/libghostty.a
+          for f in $(find "$ZIG_LOCAL_CACHE_DIR" -name "libghostty-fat.a" -type f); do
+            if lipo -info "$f" 2>/dev/null | grep -q arm64; then
+              cp "$f" ../lib/libghostty.a
+              break
+            fi
+          done
 
       - name: Generate Xcode project
         run: |
