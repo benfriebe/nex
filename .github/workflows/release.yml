@@ -35,14 +35,10 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
-          # The xcframework builds both arm64 and x86_64 fat libs — pick the arm64 one
+          # Extract the macOS universal lib from the installed xcframework
           mkdir -p ../lib
-          for f in $(find "$ZIG_LOCAL_CACHE_DIR" -name "libghostty-fat.a" -type f); do
-            if lipo -info "$f" 2>/dev/null | grep -q arm64; then
-              cp "$f" ../lib/libghostty.a
-              break
-            fi
-          done
+          MACOS_LIB=$(find zig-out -path "*/macos-*/libghostty.a" -type f | head -1)
+          cp "$MACOS_LIB" ../lib/libghostty.a
 
       - name: Generate Xcode project
         run: |
