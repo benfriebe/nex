@@ -1,18 +1,18 @@
 import ComposableArchitecture
 import Foundation
 
-struct ScannedRepo: Equatable, Sendable {
+struct ScannedRepo: Equatable {
     let path: String
     let name: String
 }
 
-struct WorktreeInfo: Equatable, Sendable {
+struct WorktreeInfo: Equatable {
     let path: String
     let branch: String?
     let isMain: Bool
 }
 
-struct GitService: Sendable {
+struct GitService {
     var scanForRepos: @Sendable (_ rootPath: String, _ maxDepth: Int) async throws -> [ScannedRepo]
     var getRemoteURL: @Sendable (_ repoPath: String) async throws -> String?
     var getCurrentBranch: @Sendable (_ path: String) async throws -> String?

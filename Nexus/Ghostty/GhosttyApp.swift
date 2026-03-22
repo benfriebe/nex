@@ -8,7 +8,7 @@ final class GhosttyApp {
     static let shared = GhosttyApp()
 
     // nonisolated(unsafe) so deinit and config client can access without actor hop
-    nonisolated(unsafe) private(set) var app: ghostty_app_t?
+    private(set) nonisolated(unsafe) var app: ghostty_app_t?
     nonisolated(unsafe) var config: GhosttyConfig?
 
     /// Notification posted when a surface title changes.
@@ -61,7 +61,7 @@ final class GhosttyApp {
             return app.handleAction(target: target, action: action)
         }
 
-        runtime.read_clipboard_cb = { userdata, clipboard, request in
+        runtime.read_clipboard_cb = { userdata, _, request in
             guard let userdata, let request else { return }
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             guard let surface = surfaceView.ghosttySurface?.surface else { return }
@@ -80,7 +80,7 @@ final class GhosttyApp {
             ghostty_surface_complete_clipboard_request(surface, data, request, true)
         }
 
-        runtime.write_clipboard_cb = { _, clipboard, content, count, _ in
+        runtime.write_clipboard_cb = { _, _, content, count, _ in
             guard let content, count > 0 else { return }
             // content pointer is only valid for this callback's duration — read synchronously
             let pasteboard = NSPasteboard.general
@@ -91,7 +91,7 @@ final class GhosttyApp {
             }
         }
 
-        runtime.close_surface_cb = { userdata, _ in
+        runtime.close_surface_cb = { _, _ in
             // The close_surface callback fires when a surface's process terminates
             // We handle this via the action callback instead
         }
@@ -118,7 +118,7 @@ final class GhosttyApp {
                     object: nil,
                     userInfo: [
                         "surface": surface as Any,
-                        "title": title,
+                        "title": title
                     ]
                 )
             }
@@ -133,7 +133,7 @@ final class GhosttyApp {
                     object: nil,
                     userInfo: [
                         "surface": surface as Any,
-                        "pwd": pwd,
+                        "pwd": pwd
                     ]
                 )
             }
@@ -150,7 +150,7 @@ final class GhosttyApp {
                     userInfo: [
                         "surface": surface as Any,
                         "title": title,
-                        "body": body,
+                        "body": body
                     ]
                 )
             }

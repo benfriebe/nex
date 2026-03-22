@@ -6,7 +6,6 @@ import UserNotifications
 /// Posts macOS desktop notifications via UNUserNotificationCenter.
 /// Handles permission requests and focus-based suppression.
 final class NotificationService: NSObject, Sendable, UNUserNotificationCenterDelegate {
-
     /// Callback when user taps "Open" on a notification. (paneID, workspaceID)
     nonisolated(unsafe) var onOpenPane: ((UUID, UUID) -> Void)?
 
@@ -93,15 +92,15 @@ final class NotificationService: NSObject, Sendable, UNUserNotificationCenterDel
     /// Show notifications even when the app is in the foreground.
     /// Suppression is handled at the call site (AppReducer checks focus state).
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
+        _: UNUserNotificationCenter,
+        willPresent _: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
     }
 
     /// Handle notification action button taps.
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
+        _: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo

@@ -1,13 +1,10 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("Agent Lifecycle — Cross-Workspace Routing")
 @MainActor
 struct AgentLifecycleTests {
-
     private func makeAppStore(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
         activeWorkspaceID: UUID

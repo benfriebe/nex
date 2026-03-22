@@ -9,16 +9,15 @@ struct SplitDividerInfo: Identifiable {
     let firstSize: CGFloat
 }
 
-indirect enum PaneLayout: Equatable, Codable, Sendable {
-
+indirect enum PaneLayout: Equatable, Codable {
     static let dividerThickness: CGFloat = 4
     case leaf(UUID)
     case split(SplitDirection, ratio: Double, first: PaneLayout, second: PaneLayout)
     case empty
 
-    enum SplitDirection: String, Codable, Sendable {
-        case horizontal  // side by side (⌘D)
-        case vertical    // stacked (⌘⇧D)
+    enum SplitDirection: String, Codable {
+        case horizontal // side by side (⌘D)
+        case vertical // stacked (⌘⇧D)
     }
 
     // MARK: - Queries
@@ -26,11 +25,11 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
     var allPaneIDs: [UUID] {
         switch self {
         case .leaf(let id):
-            return [id]
+            [id]
         case .split(_, _, let first, let second):
-            return first.allPaneIDs + second.allPaneIDs
+            first.allPaneIDs + second.allPaneIDs
         case .empty:
-            return []
+            []
         }
     }
 
@@ -48,16 +47,16 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
     func replacing(paneID: UUID, with replacement: PaneLayout) -> PaneLayout {
         switch self {
         case .leaf(let id):
-            return id == paneID ? replacement : self
+            id == paneID ? replacement : self
         case .split(let direction, let ratio, let first, let second):
-            return .split(
+            .split(
                 direction,
                 ratio: ratio,
                 first: first.replacing(paneID: paneID, with: replacement),
                 second: second.replacing(paneID: paneID, with: replacement)
             )
         case .empty:
-            return self
+            self
         }
     }
 
@@ -94,21 +93,21 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
 
     // MARK: - Drop Zone
 
-    enum DropZone: Equatable, Sendable {
+    enum DropZone: Equatable {
         case top, bottom, left, right
 
         var splitDirection: SplitDirection {
             switch self {
-            case .left, .right: return .horizontal
-            case .top, .bottom: return .vertical
+            case .left, .right: .horizontal
+            case .top, .bottom: .vertical
             }
         }
 
         /// Whether the dragged pane goes first in the new split.
         var isFirst: Bool {
             switch self {
-            case .left, .top: return true
-            case .right, .bottom: return false
+            case .left, .top: true
+            case .right, .bottom: false
             }
         }
 
@@ -203,14 +202,13 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
                 direction: direction, ratio: ratio, in: bounds
             )
 
-            let dividerRect: CGRect
-            if direction == .horizontal {
-                dividerRect = CGRect(
+            let dividerRect = if direction == .horizontal {
+                CGRect(
                     x: bounds.minX + firstSize, y: bounds.minY,
                     width: Self.dividerThickness, height: bounds.height
                 )
             } else {
-                dividerRect = CGRect(
+                CGRect(
                     x: bounds.minX, y: bounds.minY + firstSize,
                     width: bounds.width, height: Self.dividerThickness
                 )
@@ -271,7 +269,7 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
         case .leaf, .empty:
             return self
         case .split(let direction, let ratio, let first, let second):
-            if first.contains(paneID: firstChildPaneID) && !second.contains(paneID: firstChildPaneID) {
+            if first.contains(paneID: firstChildPaneID), !second.contains(paneID: firstChildPaneID) {
                 // This split's first child contains the target — update this node's ratio
                 // But only if the pane is a direct leaf or we're at the right level
                 if case .leaf = first {

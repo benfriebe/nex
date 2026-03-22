@@ -59,7 +59,7 @@ private struct AppearanceSettingsView: View {
                     Text("Background Opacity")
                     Slider(
                         value: $store.backgroundOpacity.sending(\.setBackgroundOpacity),
-                        in: 0.1...1.0,
+                        in: 0.1 ... 1.0,
                         step: 0.05
                     )
                     Text("\(Int(store.backgroundOpacity * 100))%")

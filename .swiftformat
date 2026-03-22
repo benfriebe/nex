@@ -1,0 +1,7 @@
+--indent 4
+--trailingCommas never
+--maxwidth 0
+--exclude ghostty,.build
+--disable hoistPatternLet,wrapPropertyBodies,noForceUnwrapInTests,wrapMultilineStatementBraces
+--patternlet inline
+--swiftversion 6.0

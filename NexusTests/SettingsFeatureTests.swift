@@ -1,13 +1,10 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("SettingsFeature")
 @MainActor
 struct SettingsFeatureTests {
-
     private func makeStore(
         state: SettingsFeature.State = SettingsFeature.State()
     ) -> TestStoreOf<SettingsFeature> {
@@ -49,7 +46,7 @@ struct SettingsFeatureTests {
     @Test func resolvedWorktreeBasePathExpandsTilde() {
         var state = SettingsFeature.State()
         state.worktreeBasePath = "~/nexus/workspaces"
-        let expected = (("~/nexus/workspaces") as NSString).expandingTildeInPath
+        let expected = ("~/nexus/workspaces" as NSString).expandingTildeInPath
         #expect(state.resolvedWorktreeBasePath == expected)
     }
 }

@@ -1,10 +1,8 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("Repo Registry")
 @MainActor
 struct RepoRegistryTests {
     @Test func addRepoAppendsToRegistry() async {
@@ -116,7 +114,7 @@ struct RepoRegistryTests {
             $0.gitService.scanForRepos = { _, _ in
                 [
                     ScannedRepo(path: "/code/repo1", name: "repo1"),
-                    ScannedRepo(path: "/code/repo2", name: "repo2"),
+                    ScannedRepo(path: "/code/repo2", name: "repo2")
                 ]
             }
             $0.gitService.getRemoteURL = { _ in nil }
@@ -127,7 +125,7 @@ struct RepoRegistryTests {
         await store.send(.scanForRepos(rootPath: "/code"))
         await store.receive(.scanCompleted([
             ScannedRepo(path: "/code/repo1", name: "repo1"),
-            ScannedRepo(path: "/code/repo2", name: "repo2"),
+            ScannedRepo(path: "/code/repo2", name: "repo2")
         ]))
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-struct RepoAssociation: Identifiable, Equatable, Sendable {
+struct RepoAssociation: Identifiable, Equatable {
     let id: UUID
     var repoID: UUID
     var worktreePath: String

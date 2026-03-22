@@ -20,12 +20,12 @@ struct SettingsFeature {
         }
     }
 
-    enum Action: Equatable, Sendable {
+    enum Action: Equatable {
         case loadSettings
         case setBackgroundOpacity(Double)
         case setBackgroundColor(r: Double, g: Double, b: Double)
         case setWorktreeBasePath(String)
-        case _applyAppearance(opacity: Double, r: Double, g: Double, b: Double)
+        case applyAppearance(opacity: Double, r: Double, g: Double, b: Double)
     }
 
     private enum AppearanceDebounceID: Hashable { case debounce }
@@ -62,7 +62,7 @@ struct SettingsFeature {
                     state.backgroundColorB = Double(color.blueComponent)
                 }
 
-                return .send(._applyAppearance(
+                return .send(.applyAppearance(
                     opacity: state.backgroundOpacity,
                     r: state.backgroundColorR,
                     g: state.backgroundColorG,
@@ -71,7 +71,7 @@ struct SettingsFeature {
 
             case .setBackgroundOpacity(let opacity):
                 state.backgroundOpacity = opacity
-                return .send(._applyAppearance(
+                return .send(.applyAppearance(
                     opacity: opacity,
                     r: state.backgroundColorR,
                     g: state.backgroundColorG,
@@ -83,7 +83,7 @@ struct SettingsFeature {
                 state.backgroundColorR = r
                 state.backgroundColorG = g
                 state.backgroundColorB = b
-                return .send(._applyAppearance(
+                return .send(.applyAppearance(
                     opacity: state.backgroundOpacity,
                     r: r, g: g, b: b
                 ))
@@ -94,7 +94,7 @@ struct SettingsFeature {
                 UserDefaults.standard.set(path, forKey: Self.defaultsKeyWorktreeBasePath)
                 return .none
 
-            case ._applyAppearance(let opacity, let r, let g, let b):
+            case .applyAppearance(let opacity, let r, let g, let b):
                 // Persist to UserDefaults
                 let defaults = UserDefaults.standard
                 defaults.set(opacity, forKey: Self.defaultsKeyOpacity)

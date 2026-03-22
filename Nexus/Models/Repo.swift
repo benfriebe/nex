@@ -1,6 +1,6 @@
 import Foundation
 
-struct Repo: Identifiable, Equatable, Sendable {
+struct Repo: Identifiable, Equatable {
     let id: UUID
     var path: String
     var name: String

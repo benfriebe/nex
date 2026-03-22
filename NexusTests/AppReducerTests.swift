@@ -1,14 +1,11 @@
 import Clocks
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("AppReducer — Workspace & State Management")
 @MainActor
 struct AppReducerTests {
-
     // MARK: - Helpers
 
     private func makeStore(

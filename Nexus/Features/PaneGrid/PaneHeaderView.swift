@@ -113,11 +113,11 @@ struct PaneHeaderView: View {
     private var statusDotColor: Color {
         switch pane.status {
         case .running:
-            return .green
+            .green
         case .waitingForInput:
-            return .blue
+            .blue
         case .idle:
-            return isFocused ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.3)
+            isFocused ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.3)
         }
     }
 

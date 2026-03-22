@@ -1,10 +1,8 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("Persistence")
 struct PersistenceTests {
     @Test func roundTripSaveAndLoad() async throws {
         let db = try DatabaseService(inMemory: true)

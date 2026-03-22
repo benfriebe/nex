@@ -16,13 +16,12 @@ struct NexusCommands: Commands {
             Divider()
 
             // Switch by number: ⌘1–⌘9
-            ForEach(0..<9, id: \.self) { index in
+            ForEach(0 ..< 9, id: \.self) { index in
                 Button("Switch to Workspace \(index + 1)") {
                     store.send(.switchToWorkspaceByIndex(index))
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
             }
-
         }
 
         // View
@@ -55,7 +54,7 @@ final class PaneShortcutMonitor {
     func start() {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            return self.handleKeyEvent(event) ? nil : event
+            return handleKeyEvent(event) ? nil : event
         }
     }
 
@@ -72,7 +71,7 @@ final class PaneShortcutMonitor {
         guard let activeID = store.activeWorkspaceID else { return false }
 
         // ⌘D — split right
-        if event.keyCode == 2 /* d */ && flags == .command {
+        if event.keyCode == 2 /* d */, flags == .command {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .splitPane(direction: .horizontal, sourcePaneID: nil)
@@ -81,7 +80,7 @@ final class PaneShortcutMonitor {
         }
 
         // ⌘⇧D — split down
-        if event.keyCode == 2 /* d */ && flags == [.command, .shift] {
+        if event.keyCode == 2 /* d */, flags == [.command, .shift] {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .splitPane(direction: .vertical, sourcePaneID: nil)
@@ -90,7 +89,7 @@ final class PaneShortcutMonitor {
         }
 
         // ⌘W — close pane
-        if event.keyCode == 13 /* w */ && flags == .command {
+        if event.keyCode == 13 /* w */, flags == .command {
             if let workspace = store.workspaces[id: activeID],
                let focusedID = workspace.focusedPaneID {
                 // Last pane — close the workspace instead
@@ -111,7 +110,7 @@ final class PaneShortcutMonitor {
         let arrowFlags = flags.subtracting([.numericPad, .function])
 
         // ⌘⌥→ — focus next pane
-        if event.keyCode == 124 /* → */ && arrowFlags == [.command, .option] {
+        if event.keyCode == 124 /* → */, arrowFlags == [.command, .option] {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .focusNextPane
@@ -120,7 +119,7 @@ final class PaneShortcutMonitor {
         }
 
         // ⌘⌥← — focus previous pane
-        if event.keyCode == 123 /* ← */ && arrowFlags == [.command, .option] {
+        if event.keyCode == 123 /* ← */, arrowFlags == [.command, .option] {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .focusPreviousPane
@@ -129,19 +128,19 @@ final class PaneShortcutMonitor {
         }
 
         // ⌘⌥↓ — next workspace
-        if event.keyCode == 125 /* ↓ */ && arrowFlags == [.command, .option] {
+        if event.keyCode == 125 /* ↓ */, arrowFlags == [.command, .option] {
             store.send(.switchToNextWorkspace)
             return true
         }
 
         // ⌘⌥↑ — previous workspace
-        if event.keyCode == 126 /* ↑ */ && arrowFlags == [.command, .option] {
+        if event.keyCode == 126 /* ↑ */, arrowFlags == [.command, .option] {
             store.send(.switchToPreviousWorkspace)
             return true
         }
 
         // ⌘⇧T — reopen closed pane
-        if event.keyCode == 17 /* t */ && flags == [.command, .shift] {
+        if event.keyCode == 17 /* t */, flags == [.command, .shift] {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .reopenClosedPane

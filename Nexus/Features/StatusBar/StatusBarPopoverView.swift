@@ -81,7 +81,7 @@ struct StatusBarPopoverView: View {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.primary.opacity(0.0001))
         )
-        .onHover { hovering in
+        .onHover { _ in
             // Handled by SwiftUI button highlight
         }
     }
@@ -135,8 +135,8 @@ private struct PulseModifier: ViewModifier {
     }
 }
 
-extension View {
-    fileprivate func pulse() -> some View {
+private extension View {
+    func pulse() -> some View {
         modifier(PulseModifier())
     }
 }

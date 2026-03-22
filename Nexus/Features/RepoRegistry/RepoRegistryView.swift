@@ -33,8 +33,8 @@ struct RepoRegistryView: View {
                             .font(.system(size: 36))
                             .foregroundStyle(.quaternary)
                         Text(store.repoRegistry.isEmpty
-                             ? "No repositories registered"
-                             : "No matching repositories")
+                            ? "No repositories registered"
+                            : "No matching repositories")
                             .foregroundStyle(.secondary)
                         if store.repoRegistry.isEmpty {
                             Text("Use \"Scan Directory\" to find repos or \"Add Repo\" to add one.")

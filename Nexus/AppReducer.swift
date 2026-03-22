@@ -21,7 +21,7 @@ struct AppReducer {
         }
     }
 
-    enum Action: Equatable, Sendable {
+    enum Action: Equatable {
         case appLaunched
         case createWorkspace(name: String, color: WorkspaceColor, repos: [Repo] = [])
         case deleteWorkspace(UUID)
@@ -41,14 +41,14 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
 
-        // Agent Lifecycle (socket events)
+        /// Agent Lifecycle (socket events)
         case socketEvent(paneID: UUID, event: AgentEvent)
 
         // Cross-workspace surface notifications
         case surfaceTitleChanged(paneID: UUID, title: String)
         case surfaceDirectoryChanged(paneID: UUID, directory: String)
 
-        // Desktop notifications (OSC 9/99/777)
+        /// Desktop notifications (OSC 9/99/777)
         case desktopNotification(paneID: UUID, title: String, body: String)
 
         // Repo Registry
@@ -69,10 +69,10 @@ struct AppReducer {
         case toggleInspector
         case refreshGitStatus
         case gitStatusUpdated(associationID: UUID, status: RepoGitStatus)
-        case _startGitStatusTimer
+        case startGitStatusTimer
 
-        // External indicators (menu bar, dock badge)
-        case _updateExternalIndicators
+        /// External indicators (menu bar, dock badge)
+        case updateExternalIndicators
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -263,21 +263,21 @@ struct AppReducer {
                         }
                     },
                     .send(.refreshGitStatus),
-                    .send(._startGitStatusTimer),
+                    .send(.startGitStatusTimer),
                     .send(.persistState)
                 )
 
             case .workspaces(.element(_, action: .agentStatusChanged)):
                 return .merge(
                     .send(.persistState),
-                    .send(._updateExternalIndicators)
+                    .send(.updateExternalIndicators)
                 )
 
             case .workspaces(.element(_, action: .clearPaneStatus(let paneID))):
                 let notifService = notificationService
                 return .merge(
                     .send(.persistState),
-                    .send(._updateExternalIndicators),
+                    .send(.updateExternalIndicators),
                     .run { _ in notifService.removeNotification(for: paneID) }
                 )
 
@@ -314,7 +314,7 @@ struct AppReducer {
                         id: workspace.id,
                         action: .agentStatusChanged(paneID: paneID, event: event)
                     ))),
-                    .send(._updateExternalIndicators)
+                    .send(.updateExternalIndicators)
                 ]
                 let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
                 switch event {
@@ -523,7 +523,7 @@ struct AppReducer {
 
                 return .run { send in
                     for assoc in associations {
-                        let status = (try? await gitService.getStatus(assoc.worktreePath)) ?? .unknown
+                        let status = await (try? gitService.getStatus(assoc.worktreePath)) ?? .unknown
                         await send(.gitStatusUpdated(associationID: assoc.id, status: status))
                     }
                 }
@@ -532,7 +532,7 @@ struct AppReducer {
                 state.gitStatuses[associationID] = status
                 return .none
 
-            case ._startGitStatusTimer:
+            case .startGitStatusTimer:
                 return .run { send in
                     for await _ in clock.timer(interval: .seconds(30)) {
                         await send(.refreshGitStatus)
@@ -542,7 +542,7 @@ struct AppReducer {
 
             // MARK: - External Indicators
 
-            case ._updateExternalIndicators:
+            case .updateExternalIndicators:
                 var totalWaiting = 0
                 var totalRunning = 0
                 var statusItems: [StatusBarItem] = []

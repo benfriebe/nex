@@ -28,7 +28,7 @@ final class GhosttyConfig {
     // MARK: - Config Getters
 
     var backgroundOpacity: Double {
-        var v: Double = 1.0
+        var v = 1.0
         let key = "background-opacity"
         _ = ghostty_config_get(rawConfig, &v, key, UInt(key.count))
         return v

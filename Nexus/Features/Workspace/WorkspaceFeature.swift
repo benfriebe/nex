@@ -1,7 +1,7 @@
 import ComposableArchitecture
 import Foundation
 
-struct ClosedPaneSnapshot: Equatable, Sendable {
+struct ClosedPaneSnapshot: Equatable {
     var workingDirectory: String
     var label: String?
     var claudeSessionID: String?
@@ -10,7 +10,7 @@ struct ClosedPaneSnapshot: Equatable, Sendable {
 @Reducer
 struct WorkspaceFeature {
     @ObservableState
-    struct State: Equatable, Identifiable, Sendable {
+    struct State: Equatable, Identifiable {
         let id: UUID
         var name: String
         var slug: String
@@ -31,16 +31,16 @@ struct WorkspaceFeature {
         ) {
             self.id = id
             self.name = name
-            self.slug = Self.makeSlug(from: name, id: id)
+            slug = Self.makeSlug(from: name, id: id)
             self.color = color
             self.createdAt = createdAt
-            self.lastAccessedAt = createdAt
+            lastAccessedAt = createdAt
 
             let paneID = UUID()
             let pane = Pane(id: paneID)
-            self.panes = [pane]
-            self.layout = .leaf(paneID)
-            self.focusedPaneID = paneID
+            panes = [pane]
+            layout = .leaf(paneID)
+            focusedPaneID = paneID
         }
 
         /// Restore from persisted state (no default pane creation).
@@ -80,7 +80,7 @@ struct WorkspaceFeature {
         }
     }
 
-    enum Action: Equatable, Sendable {
+    enum Action: Equatable {
         case rename(String)
         case setColor(WorkspaceColor)
         case createPane

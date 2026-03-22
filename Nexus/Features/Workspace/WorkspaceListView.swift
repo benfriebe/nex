@@ -63,7 +63,7 @@ struct WorkspaceListView: View {
                 gitStatus: aggregateStatus,
                 isActive: workspaceID == store.activeWorkspaceID,
                 index: index,
-                waitingPaneCount: workspaceStore.panes.filter { $0.status == .waitingForInput }.count,
+                waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
                 hasRunningPanes: workspaceStore.panes.contains { $0.status == .running }
             )
             .tag(workspaceID)
@@ -94,7 +94,7 @@ struct WorkspaceListView: View {
             store.gitStatuses[assoc.id] ?? .unknown
         }
         if statuses.isEmpty { return .unknown }
-        if statuses.contains(where: { if case .dirty = $0 { return true } else { return false } }) {
+        if statuses.contains(where: { if case .dirty = $0 { true } else { false } }) {
             let totalChanged = statuses.reduce(0) { total, status in
                 if case .dirty(let count) = status { return total + count }
                 return total

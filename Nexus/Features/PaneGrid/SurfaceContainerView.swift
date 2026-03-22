@@ -9,7 +9,7 @@ struct SurfaceContainerView: NSViewRepresentable {
     @Environment(\.surfaceManager) private var surfaceManager
     @Environment(\.ghosttyConfig) private var ghosttyConfig
 
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context _: Context) -> NSView {
         let container = NSView()
         container.wantsLayer = true
 
@@ -34,7 +34,7 @@ struct SurfaceContainerView: NSViewRepresentable {
         return container
     }
 
-    func updateNSView(_ container: NSView, context: Context) {
+    func updateNSView(_ container: NSView, context _: Context) {
         guard let surface = surfaceManager.surface(for: paneID) else { return }
 
         // Remove any stale subviews that aren't our target surface
@@ -67,20 +67,11 @@ struct SurfaceContainerView: NSViewRepresentable {
             surface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             surface.topAnchor.constraint(equalTo: container.topAnchor),
-            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
     }
 }
 
-// MARK: - Environment key for SurfaceManager
-
-private struct SurfaceManagerKey: EnvironmentKey {
-    nonisolated(unsafe) static let defaultValue = SurfaceManager()
-}
-
 extension EnvironmentValues {
-    var surfaceManager: SurfaceManager {
-        get { self[SurfaceManagerKey.self] }
-        set { self[SurfaceManagerKey.self] = newValue }
-    }
+    @Entry var surfaceManager: SurfaceManager = .init()
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum WorkspaceColor: String, Codable, CaseIterable, Sendable, Identifiable {
+enum WorkspaceColor: String, Codable, CaseIterable, Identifiable {
     case red, orange, yellow, green, blue, purple, pink, gray
 
     var id: String { rawValue }

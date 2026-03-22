@@ -1,10 +1,8 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("Worktree Operations")
 @MainActor
 struct WorktreeOperationTests {
     @Test func createWorktreeSuccess() async {

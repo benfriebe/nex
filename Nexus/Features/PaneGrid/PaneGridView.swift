@@ -77,7 +77,7 @@ struct PaneGridView: View {
                     // Hit-test: find which pane contains the cursor
                     var hitTarget: UUID?
                     for (id, rect) in frames {
-                        if id != pane.id && rect.contains(point) {
+                        if id != pane.id, rect.contains(point) {
                             hitTarget = id
                             break
                         }
@@ -129,7 +129,7 @@ struct PaneGridView: View {
     }
 
     private func dropZoneOverlay(frame: CGRect, zone: PaneLayout.DropZone) -> some View {
-        let overlayRect: CGRect = switch zone {
+        let overlayRect = switch zone {
         case .left:
             CGRect(x: frame.minX, y: frame.minY, width: frame.width / 2, height: frame.height)
         case .right:

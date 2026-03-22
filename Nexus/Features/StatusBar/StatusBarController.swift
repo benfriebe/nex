@@ -2,7 +2,7 @@ import AppKit
 import ComposableArchitecture
 import SwiftUI
 
-struct StatusBarItem: Equatable, Identifiable, Sendable {
+struct StatusBarItem: Equatable, Identifiable {
     let workspaceName: String
     let workspaceColor: WorkspaceColor
     let paneTitle: String
@@ -14,13 +14,13 @@ struct StatusBarItem: Equatable, Identifiable, Sendable {
 }
 
 final class StatusBarController: NSObject, @unchecked Sendable {
-    nonisolated(unsafe) private var statusItem: NSStatusItem?
-    nonisolated(unsafe) private var popover: NSPopover?
-    nonisolated(unsafe) private var eventMonitor: Any?
+    private nonisolated(unsafe) var statusItem: NSStatusItem?
+    private nonisolated(unsafe) var popover: NSPopover?
+    private nonisolated(unsafe) var eventMonitor: Any?
 
-    nonisolated(unsafe) private var waitingCount: Int = 0
-    nonisolated(unsafe) private var runningCount: Int = 0
-    nonisolated(unsafe) private var items: [StatusBarItem] = []
+    private nonisolated(unsafe) var waitingCount: Int = 0
+    private nonisolated(unsafe) var runningCount: Int = 0
+    private nonisolated(unsafe) var items: [StatusBarItem] = []
 
     nonisolated(unsafe) var onSelectPane: ((UUID, UUID) -> Void)?
 
@@ -99,7 +99,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
 
     // MARK: - Popover
 
-    @objc private func togglePopover(_ sender: Any?) {
+    @objc private func togglePopover(_: Any?) {
         MainActor.assumeIsolated {
             if let popover, popover.isShown {
                 popover.performClose(nil)

@@ -5,7 +5,6 @@ import QuartzCore
 /// Manages Metal rendering via CALayer, routes keyboard/mouse events
 /// to the ghostty C API.
 final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
-
     nonisolated(unsafe) var ghosttySurface: GhosttySurface?
     private var markedText: NSMutableAttributedString = .init()
     let paneID: UUID
@@ -15,10 +14,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     private var isComposing: Bool = false
     private var isInKeyDown: Bool = false
 
-    // Resize debounce — coalesces rapid setFrameSize calls (from splits, maximize,
-    // drag resize) into a single set_size so the shell only gets one SIGWINCH.
+    /// Resize debounce — coalesces rapid setFrameSize calls (from splits, maximize,
+    /// drag resize) into a single set_size so the shell only gets one SIGWINCH.
     private var resizeWorkItem: DispatchWorkItem?
-
 
     init(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0) {
         self.paneID = paneID
@@ -67,7 +65,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) not supported")
     }
 
@@ -96,7 +94,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         guard let sublayers = layer?.sublayers else { return }
         // Skip when bounds is zero — setting the Metal layer to zero size
         // corrupts ghostty's rendering state (happens during view re-parenting)
-        guard bounds.width > 0 && bounds.height > 0 else { return }
+        guard bounds.width > 0, bounds.height > 0 else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for sublayer in sublayers {
@@ -134,14 +132,14 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             // a split or workspace switch), defer refresh until after layout
             // so the view has its correct bounds.
             DispatchQueue.main.async { [weak self] in
-                guard let self, let window = self.window else { return }
-                self.ghosttySurface?.refresh()
-                self.needsDisplay = true
+                guard let self, let window else { return }
+                ghosttySurface?.refresh()
+                needsDisplay = true
                 let scale = window.backingScaleFactor
-                let w = UInt32(self.bounds.width * scale)
-                let h = UInt32(self.bounds.height * scale)
-                if w > 0 && h > 0 {
-                    self.ghosttySurface?.setSize(width: w, height: h)
+                let w = UInt32(bounds.width * scale)
+                let h = UInt32(bounds.height * scale)
+                if w > 0, h > 0 {
+                    ghosttySurface?.setSize(width: w, height: h)
                 }
             }
         }
@@ -176,12 +174,12 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         // all intermediate sizes and only send the final one.
         resizeWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let window = self.window else { return }
+            guard let self, let window else { return }
             let scale = window.backingScaleFactor
-            let w = UInt32(self.frame.width * scale)
-            let h = UInt32(self.frame.height * scale)
-            if w > 0 && h > 0 {
-                self.ghosttySurface?.setSize(width: w, height: h)
+            let w = UInt32(frame.width * scale)
+            let h = UInt32(frame.height * scale)
+            if w > 0, h > 0 {
+                ghosttySurface?.setSize(width: w, height: h)
             }
         }
         resizeWorkItem = work
@@ -190,7 +188,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Keyboard input
 
-    override func doCommand(by selector: Selector) {
+    override func doCommand(by _: Selector) {
         // Ghostty handles all key bindings internally. Without this override,
         // NSView's default calls NSBeep() for unhandled selectors (Enter,
         // Backspace, arrows, etc.).
@@ -333,7 +331,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - NSTextInputClient
 
-    func insertText(_ string: Any, replacementRange: NSRange) {
+    func insertText(_ string: Any, replacementRange _: NSRange) {
         guard let str = string as? String else { return }
         if isInKeyDown {
             // During keyDown: store text for the key event, don't send separately
@@ -347,7 +345,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         }
     }
 
-    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+    func setMarkedText(_ string: Any, selectedRange _: NSRange, replacementRange _: NSRange) {
         let str: String
         if let attrStr = string as? NSAttributedString {
             markedText = NSMutableAttributedString(attributedString: attrStr)
@@ -387,7 +385,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         markedText.length > 0
     }
 
-    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+    func attributedSubstring(forProposedRange _: NSRange, actualRange _: NSRangePointer?) -> NSAttributedString? {
         nil
     }
 
@@ -395,7 +393,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         []
     }
 
-    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+    func firstRect(forCharacterRange _: NSRange, actualRange _: NSRangePointer?) -> NSRect {
         guard let surface = ghosttySurface else {
             return window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
         }
@@ -405,7 +403,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         return NSRect(x: screenPoint.x, y: screenPoint.y - h, width: w, height: h)
     }
 
-    func characterIndex(for point: NSPoint) -> Int {
+    func characterIndex(for _: NSPoint) -> Int {
         0
     }
 

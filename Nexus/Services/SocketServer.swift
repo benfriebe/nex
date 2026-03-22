@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 
 /// Event received from an agent hook via the Unix socket.
-enum AgentEvent: Equatable, Sendable {
+enum AgentEvent: Equatable {
     case started
     case stopped
     case error(message: String)
@@ -24,10 +24,10 @@ final class SocketServer: Sendable {
     static let socketPath = "/tmp/nexus.sock"
 
     private let lock = NSLock()
-    nonisolated(unsafe) private var socketFD: Int32 = -1
-    nonisolated(unsafe) private var isRunning = false
-    nonisolated(unsafe) private var acceptSource: DispatchSourceRead?
-    nonisolated(unsafe) private var clientSources: [Int32: DispatchSourceRead] = [:]
+    private nonisolated(unsafe) var socketFD: Int32 = -1
+    private nonisolated(unsafe) var isRunning = false
+    private nonisolated(unsafe) var acceptSource: DispatchSourceRead?
+    private nonisolated(unsafe) var clientSources: [Int32: DispatchSourceRead] = [:]
 
     /// Called on the main queue when a valid event arrives.
     nonisolated(unsafe) var onEvent: (@Sendable (UUID, AgentEvent) -> Void)?
@@ -162,18 +162,27 @@ final class SocketServer: Sendable {
 
     struct Message: Decodable {
         let event: String
-        let pane_id: String
+        let paneID: String
         var message: String?
         var title: String?
         var body: String?
-        var session_id: String?
+        var sessionID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case event
+            case paneID = "pane_id"
+            case message
+            case title
+            case body
+            case sessionID = "session_id"
+        }
     }
 
     /// Parse a single JSON message into a (paneID, event, message) tuple.
     /// Returns nil if the data is invalid or the event type is unrecognized.
     static func parseMessage(_ data: Data) -> (UUID, AgentEvent, Message)? {
         guard let msg = try? JSONDecoder().decode(Message.self, from: data),
-              let paneID = UUID(uuidString: msg.pane_id) else { return nil }
+              let paneID = UUID(uuidString: msg.paneID) else { return nil }
 
         let agentEvent: AgentEvent
         switch msg.event {
@@ -189,7 +198,7 @@ final class SocketServer: Sendable {
                 body: msg.body ?? ""
             )
         case "session-start":
-            guard let sessionID = msg.session_id, !sessionID.isEmpty else { return nil }
+            guard let sessionID = msg.sessionID, !sessionID.isEmpty else { return nil }
             agentEvent = .sessionStarted(sessionID: sessionID)
         default:
             return nil
@@ -217,7 +226,7 @@ final class SocketServer: Sendable {
             // Fire .sessionStarted whenever it's present (unless the event
             // itself is already session-start, to avoid a duplicate).
             if msg.event != "session-start",
-               let sessionID = msg.session_id, !sessionID.isEmpty {
+               let sessionID = msg.sessionID, !sessionID.isEmpty {
                 results.append((paneID, .sessionStarted(sessionID: sessionID)))
             }
         }
@@ -247,13 +256,6 @@ extension DependencyValues {
 
 import SwiftUI
 
-private struct SocketServerKey: EnvironmentKey {
-    nonisolated(unsafe) static let defaultValue = SocketServer()
-}
-
 extension EnvironmentValues {
-    var socketServer: SocketServer {
-        get { self[SocketServerKey.self] }
-        set { self[SocketServerKey.self] = newValue }
-    }
+    @Entry var socketServer: SocketServer = .init()
 }

@@ -116,7 +116,7 @@ actor PersistenceService {
 
     // MARK: - Load
 
-    struct LoadResult: Sendable {
+    struct LoadResult {
         var workspaces: IdentifiedArrayOf<WorkspaceFeature.State>
         var activeWorkspaceID: UUID?
         var repoRegistry: IdentifiedArrayOf<Repo>
@@ -188,11 +188,10 @@ actor PersistenceService {
                         repoAssociations.append(assoc)
                     }
 
-                    let layout: PaneLayout
-                    if let data = record.layoutJSON.data(using: .utf8) {
-                        layout = (try? JSONDecoder().decode(PaneLayout.self, from: data)) ?? .empty
+                    let layout: PaneLayout = if let data = record.layoutJSON.data(using: .utf8) {
+                        (try? JSONDecoder().decode(PaneLayout.self, from: data)) ?? .empty
                     } else {
-                        layout = .empty
+                        .empty
                     }
 
                     let color = WorkspaceColor(rawValue: record.color) ?? .blue

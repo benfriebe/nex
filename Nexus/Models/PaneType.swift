@@ -1,3 +1,3 @@
-enum PaneType: String, Codable, Sendable {
+enum PaneType: String, Codable {
     case shell
 }

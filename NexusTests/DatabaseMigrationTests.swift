@@ -1,10 +1,8 @@
 import Foundation
 import GRDB
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("Database Migration")
 struct DatabaseMigrationTests {
     @Test func v2MigrationCreatesRepoTables() throws {
         let db = try DatabaseService(inMemory: true)

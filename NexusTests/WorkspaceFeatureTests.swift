@@ -1,10 +1,8 @@
 import ComposableArchitecture
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("WorkspaceFeature")
 @MainActor
 struct WorkspaceFeatureTests {
     @Test func splitPaneCreatesNewPane() async {
@@ -348,7 +346,7 @@ struct WorkspaceFeatureTests {
 
         // Create 11 extra panes and close them all
         var paneIDs: [UUID] = []
-        for i in 0..<11 {
+        for i in 0 ..< 11 {
             let id = UUID()
             paneIDs.append(id)
             workspace.panes.append(Pane(

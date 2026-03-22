@@ -50,7 +50,7 @@ guard let paneID = ProcessInfo.processInfo.environment["NEXUS_PANE_ID"] else {
     exit(0)
 }
 
-// Read stdin JSON when piped (Claude Code passes JSON with session_id to all hooks)
+/// Read stdin JSON when piped (Claude Code passes JSON with session_id to all hooks)
 var stdinJSON: [String: Any]?
 if isatty(STDIN_FILENO) == 0 {
     if let stdinData = try? FileHandle.standardInput.availableData,
@@ -70,16 +70,16 @@ if event == "notification", let json = stdinJSON {
     }
 }
 
-// Extract session_id from stdin JSON (available in all hook events)
+/// Extract session_id from stdin JSON (available in all hook events)
 var sessionID: String?
 if let json = stdinJSON {
     sessionID = json["session_id"] as? String
 }
 
-// Build JSON payload
+/// Build JSON payload
 var payload: [String: String] = [
     "event": event,
-    "pane_id": paneID,
+    "pane_id": paneID
 ]
 if let message { payload["message"] = message }
 if let title { payload["title"] = title }
@@ -87,12 +87,14 @@ if let body { payload["body"] = body }
 if let sessionID { payload["session_id"] = sessionID }
 
 guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
-      var jsonString = String(data: jsonData, encoding: .utf8) else {
+      var jsonString = String(data: jsonData, encoding: .utf8)
+else {
     exit(1)
 }
+
 jsonString += "\n"
 
-// Connect to Unix socket and send
+/// Connect to Unix socket and send
 let fd = socket(AF_UNIX, SOCK_STREAM, 0)
 guard fd >= 0 else { exit(0) } // Silent fail — Nexus not running
 

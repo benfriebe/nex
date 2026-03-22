@@ -36,15 +36,6 @@ extension DependencyValues {
     }
 }
 
-// MARK: - SwiftUI Environment
-
-private struct GhosttyConfigClientKey: EnvironmentKey {
-    static let defaultValue = GhosttyConfigClient()
-}
-
 extension EnvironmentValues {
-    var ghosttyConfig: GhosttyConfigClient {
-        get { self[GhosttyConfigClientKey.self] }
-        set { self[GhosttyConfigClientKey.self] = newValue }
-    }
+    @Entry var ghosttyConfig: GhosttyConfigClient = .init()
 }

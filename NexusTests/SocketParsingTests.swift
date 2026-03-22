@@ -1,11 +1,8 @@
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("SocketServer — JSON Parsing")
 struct SocketParsingTests {
-
     private static let paneUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private static let paneIDString = "00000000-0000-0000-0000-000000000001"
 

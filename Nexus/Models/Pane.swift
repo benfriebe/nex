@@ -1,12 +1,12 @@
 import Foundation
 
-enum PaneStatus: String, Codable, Sendable, Equatable {
+enum PaneStatus: String, Codable, Equatable {
     case idle
     case running
     case waitingForInput
 }
 
-struct Pane: Identifiable, Equatable, Sendable {
+struct Pane: Identifiable, Equatable {
     let id: UUID
     var label: String?
     var type: PaneType

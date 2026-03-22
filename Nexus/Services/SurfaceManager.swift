@@ -6,8 +6,8 @@ import Foundation
 /// view hierarchy but kept alive so PTY processes continue running.
 final class SurfaceManager: Sendable {
     private let lock = NSLock()
-    // nonisolated(unsafe) because access is protected by lock
-    nonisolated(unsafe) private var surfaces: [UUID: SurfaceView] = [:]
+    /// nonisolated(unsafe) because access is protected by lock
+    private nonisolated(unsafe) var surfaces: [UUID: SurfaceView] = [:]
 
     @MainActor
     func createSurface(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0) {
@@ -36,7 +36,7 @@ final class SurfaceManager: Sendable {
             surfaces.removeValue(forKey: paneID)
         }
         surfaceView?.ghosttySurface?.destroy()
-        surfaceView?.ghosttySurface = nil  // Prevent double-free in SurfaceView.deinit
+        surfaceView?.ghosttySurface = nil // Prevent double-free in SurfaceView.deinit
     }
 
     @MainActor

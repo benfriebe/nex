@@ -1,9 +1,7 @@
 import Foundation
+@testable import Nexus
 import Testing
 
-@testable import Nexus
-
-@Suite("PaneLayout")
 struct PaneLayoutTests {
     // MARK: - allPaneIDs
 

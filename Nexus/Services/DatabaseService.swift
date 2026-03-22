@@ -24,7 +24,7 @@ final class DatabaseService: Sendable {
     }
 
     /// In-memory database for testing.
-    init(inMemory: Bool) throws {
+    init(inMemory _: Bool) throws {
         var config = Configuration()
         config.foreignKeysEnabled = true
         writer = try DatabaseQueue(configuration: config)

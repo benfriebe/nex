@@ -92,7 +92,7 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 NSApp.dockTile.badgeLabel = nil
-                store.send(._updateExternalIndicators)
+                store.send(.updateExternalIndicators)
                 guard let activeID = store.activeWorkspaceID,
                       let workspace = store.workspaces[id: activeID],
                       let focusedID = workspace.focusedPaneID else { return }
