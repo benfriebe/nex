@@ -154,9 +154,8 @@ struct ContentView: View {
     }
 
     private var sidebarResizeHandle: some View {
-        Color(nsColor: .controlBackgroundColor)
-            .frame(width: 1)
-            .overlay(Color(nsColor: .separatorColor).opacity(0.5))
+        Color.clear
+            .frame(width: 0)
             .contentShape(Rectangle().inset(by: -3))
             .onHover { hovering in
                 if hovering {

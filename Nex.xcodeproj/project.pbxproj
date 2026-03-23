@@ -47,6 +47,7 @@
 		A0749EBDDCE764238315879A /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */; };
 		A15BBD1CFDB5E52E44B7ED59 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = A7AC116A099F0911E230E51F /* Markdown */; };
 		AC234A5AAADE90A7EC7BB5F8 /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */; };
+		B167B81282ADF716B21B1679 /* VibrancyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D6AE6635332105A3C18A03 /* VibrancyView.swift */; };
 		B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F173122691292BD9062F356E /* CheckForUpdatesView.swift */; };
 		B3FBC9276113E015DA08D41A /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */; };
 		B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */; };
@@ -110,6 +111,7 @@
 		4F0D3AB3067CDBF5A490F532 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
 		523DE37561222E411737C3F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		57C59BDCBA03302FC7FDE16B /* WorkspaceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInspectorView.swift; sourceTree = "<group>"; };
+		61D6AE6635332105A3C18A03 /* VibrancyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibrancyView.swift; sourceTree = "<group>"; };
 		6B4B95F852C737F18989F8FA /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		75DCD589969583F84BFCE38B /* NexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7DED98594372C8E34542A5C2 /* SplitDividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDividerView.swift; sourceTree = "<group>"; };
@@ -282,6 +284,7 @@
 		5F485357D29F2C092501D735 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				61D6AE6635332105A3C18A03 /* VibrancyView.swift */,
 				B83E9D548B12F0748394A98C /* MarkdownPane */,
 				575CB385F691D30D4A449F9C /* PaneGrid */,
 				09ECBBE13D93F1F5CFC8849D /* RepoRegistry */,
@@ -520,6 +523,7 @@
 				64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */,
 				75BECE7D63EF981C344D4902 /* SurfaceView.swift in Sources */,
 				B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */,
+				B167B81282ADF716B21B1679 /* VibrancyView.swift in Sources */,
 				4AF9CB9A4E7CE871FBE1A6F2 /* WorkspaceColor.swift in Sources */,
 				E62618BAC6927017CC4ECC44 /* WorkspaceFeature.swift in Sources */,
 				E89E89193A52010164900B00 /* WorkspaceInspectorView.swift in Sources */,
