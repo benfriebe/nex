@@ -1,7 +1,7 @@
 excluded:
   - ghostty/
   - .build/
-  - Nexus.xcodeproj/
+  - Nex.xcodeproj/
 
 disabled_rules:
   - line_length

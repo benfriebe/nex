@@ -1,9 +1,9 @@
 <?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
   <channel>
-    <title>Nexus</title>
+    <title>Nex</title>
     <link>https://github.com/benfriebe/nexus</link>
-    <description>Nexus update feed</description>
+    <description>Nex update feed</description>
     <language>en</language>
     <!-- Items will be prepended by the release workflow -->
     <item>

@@ -1,8 +1,8 @@
-# Nexus
+# Nex
 
 A Mac-native terminal workspace multiplexer for polyrepo development with AI agents.
 
-Nexus gives you named, persistent terminal workspaces with free-form split layouts, git worktree management across multiple repos, and first-class monitoring for AI coding agents like Claude Code. Switching workspaces is instant. Agents get noticed when they need you.
+Nex gives you named, persistent terminal workspaces with free-form split layouts, git worktree management across multiple repos, and first-class monitoring for AI coding agents like Claude Code. Switching workspaces is instant. Agents get noticed when they need you.
 
 ## Requirements
 
@@ -15,15 +15,15 @@ Nexus gives you named, persistent terminal workspaces with free-form split layou
 
 ### From a release
 
-1. Download `Nexus.zip` from the latest release
-2. Unzip and move `Nexus.app` to `/Applications`
+1. Download `Nex.zip` from the latest release
+2. Unzip and move `Nex.app` to `/Applications`
 3. Run the hook installer to enable Claude Code integration:
 
 ```bash
-/Applications/Nexus.app/Contents/Resources/scripts/install-hooks.sh
+/Applications/Nex.app/Contents/Resources/scripts/install-hooks.sh
 ```
 
-This installs the `nexus-notify` CLI to `/usr/local/bin` and configures Claude Code hooks in `~/.claude/settings.json`.
+This installs the `nex-notify` CLI to `/usr/local/bin` and configures Claude Code hooks in `~/.claude/settings.json`.
 
 ### Building from source
 
@@ -38,7 +38,7 @@ Generate the Xcode project and build:
 
 ```bash
 xcodegen generate --spec project.yml
-xcodebuild -scheme Nexus -skipMacroValidation build
+xcodebuild -scheme Nex -skipMacroValidation build
 ```
 
 The `-skipMacroValidation` flag is required for TCA's Swift macros.
@@ -62,15 +62,15 @@ cp .zig-cache/o/<hash>/libghostty-fat.a ../lib/libghostty.a
 
 ### Claude Code hooks
 
-Nexus monitors Claude Code sessions through hooks. The install script configures these automatically, but you can set them up manually by adding the following to `~/.claude/settings.json`:
+Nex monitors Claude Code sessions through hooks. The install script configures these automatically, but you can set them up manually by adding the following to `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "nexus-notify --event stop" }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "nexus-notify --event notification" }] }],
-    "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "nexus-notify --event session-start" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nexus-notify --event start" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "nex-notify --event stop" }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "nex-notify --event notification" }] }],
+    "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "nex-notify --event session-start" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex-notify --event start" }] }]
   }
 }
 ```
@@ -79,17 +79,17 @@ Restart any running Claude Code sessions after configuring hooks.
 
 ### Ghostty config
 
-Nexus uses [libghostty](https://github.com/ghostty-org/ghostty) for terminal rendering and inherits your Ghostty configuration from `~/.config/ghostty/config`. Font, colors, scrollback, and other terminal settings are read from there.
+Nex uses [libghostty](https://github.com/ghostty-org/ghostty) for terminal rendering and inherits your Ghostty configuration from `~/.config/ghostty/config`. Font, colors, scrollback, and other terminal settings are read from there.
 
 ### Repo registry
 
-Open **Settings > Repositories** to add repos Nexus should know about. You can scan a directory to discover repos recursively, or add them individually. Registered repos are available when creating workspaces and associating worktrees.
+Open **Settings > Repositories** to add repos Nex should know about. You can scan a directory to discover repos recursively, or add them individually. Registered repos are available when creating workspaces and associating worktrees.
 
 ## Usage
 
 ### Workspaces
 
-Workspaces are the core unit in Nexus. Each workspace is a named context with its own terminal layout, repo associations, and running processes.
+Workspaces are the core unit in Nex. Each workspace is a named context with its own terminal layout, repo associations, and running processes.
 
 | Action | Shortcut |
 |---|---|
@@ -126,7 +126,7 @@ The inspector shows repo associations, worktree info, and git status for the cur
 
 ### Agent monitoring
 
-When Claude Code runs in a Nexus pane, pane headers update to reflect agent status (idle, running, waiting for input, error). Nexus surfaces this information in several ways:
+When Claude Code runs in a Nex pane, pane headers update to reflect agent status (idle, running, waiting for input, error). Nex surfaces this information in several ways:
 
 - **Desktop notifications** when an agent finishes or needs input, with "Open" and "Dismiss" actions
 - **Menu bar icon** showing counts of running and waiting agents
@@ -137,7 +137,7 @@ Notifications clear automatically when you focus the app.
 
 ### Worktrees
 
-Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nexus/workspaces`).
+Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nex/workspaces`).
 
 ### Settings
 
@@ -149,10 +149,10 @@ Open settings with `Cmd+,`. Available options:
 
 ## Data
 
-Nexus stores its database at `~/Library/Application Support/Nexus/nexus.db`. All workspaces, panes, layouts, and repo associations are persisted there and restored on launch.
+Nex stores its database at `~/Library/Application Support/Nex/nex.db`. All workspaces, panes, layouts, and repo associations are persisted there and restored on launch.
 
 ## Running tests
 
 ```bash
-xcodebuild -scheme NexusTests -skipMacroValidation test
+xcodebuild -scheme NexTests -skipMacroValidation test
 ```

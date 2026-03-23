@@ -1,4 +1,4 @@
-# Nexus — Design Plan
+# Nex — Design Plan
 
 **A Mac-native workspace multiplexer for polyrepo development with AI agents**
 
@@ -6,9 +6,9 @@
 
 ## Vision
 
-Nexus is a Mac-native terminal workspace manager built for developers running multiple AI coding agents in parallel across a polyrepo. The core primitive is a **workspace** — a named, persistent context that bundles a free-form terminal layout, one or more git worktrees (across multiple repos), a set of running processes and agents, and a notification routing configuration. Switching workspaces is instant and deterministic. Agents get noticed when they need you.
+Nex is a Mac-native terminal workspace manager built for developers running multiple AI coding agents in parallel across a polyrepo. The core primitive is a **workspace** — a named, persistent context that bundles a free-form terminal layout, one or more git worktrees (across multiple repos), a set of running processes and agents, and a notification routing configuration. Switching workspaces is instant and deterministic. Agents get noticed when they need you.
 
-Nexus is a **primitive, not a framework** — it doesn't dictate how you code, which agent you use, or how you structure your repos. It gives you the switching, the visibility, and the alerting.
+Nex is a **primitive, not a framework** — it doesn't dictate how you code, which agent you use, or how you structure your repos. It gives you the switching, the visibility, and the alerting.
 
 ---
 
@@ -16,7 +16,7 @@ Nexus is a **primitive, not a framework** — it doesn't dictate how you code, w
 
 ### Workspace
 
-The top-level unit in Nexus. A workspace is:
+The top-level unit in Nex. A workspace is:
 
 - A **named context** with an optional description and color label
 - A collection of **terminal panes** in a free-form split layout (user-defined, persisted)
@@ -37,7 +37,7 @@ A terminal emulator surface inside a workspace. Panes can be split freely — ho
 
 ### Repo Registry
 
-A global list of all repos Nexus knows about (~63 repos in your case). Each registry entry stores:
+A global list of all repos Nex knows about (~63 repos in your case). Each registry entry stores:
 
 - Local path on disk
 - Remote URL (for display and GitHub integration)
@@ -53,11 +53,11 @@ A workspace can associate **any number of repo+worktree pairs**. Each associatio
 - A specific worktree path within that repo (or the main working tree)
 - An optional branch label for display
 
-When you create a new workspace, you can create new worktrees (in one or multiple repos), link existing ones, or associate none at all. Nexus does not force worktree creation — you choose per workspace.
+When you create a new workspace, you can create new worktrees (in one or multiple repos), link existing ones, or associate none at all. Nex does not force worktree creation — you choose per workspace.
 
 ### Agent Process
 
-Any pane running Claude Code or OpenAI Codex CLI gets first-class treatment. Nexus watches its PTY output stream for signals:
+Any pane running Claude Code or OpenAI Codex CLI gets first-class treatment. Nex watches its PTY output stream for signals:
 
 - **OSC 9/99/777 escape sequences** (used by Claude Code, cmux, and others for notifications)
 - **Prompt pattern matching** (regex-based detection of "Do you want to proceed?" and similar)
@@ -83,13 +83,13 @@ These signals drive the notification system.
 | State management | The Composable Architecture (TCA) | Unidirectional flow, composable reducers |
 | Persistence | SQLite via GRDB.swift | Workspace state, repo registry, layout snapshots |
 | Notifications | `UNUserNotificationCenter` + `NSStatusItem` | Full macOS notification stack |
-| CLI companion | Swift ArgumentParser binary (`nexus`) | Scriptable workspace/pane control, agent hook integration |
+| CLI companion | Swift ArgumentParser binary (`nex`) | Scriptable workspace/pane control, agent hook integration |
 | Auto-update | Sparkle | Standard Mac app update mechanism |
 
 ### Process Model
 
 ```
-Nexus.app
+Nex.app
 ├── Main process (SwiftUI)
 │   ├── WorkspaceStore (TCA) — all workspace/pane state
 │   ├── RepoRegistry — SQLite-backed list of known repos
@@ -100,8 +100,8 @@ Nexus.app
 ├── PTY processes (one per pane, forked children)
 │   └── Shell / Claude Code / Codex CLI / any process
 │
-└── nexus CLI (companion binary, communicates via Unix socket)
-    └── /tmp/nexus.sock — JSON protocol (create, switch, notify, status)
+└── nex CLI (companion binary, communicates via Unix socket)
+    └── /tmp/nex.sock — JSON protocol (create, switch, notify, status)
 ```
 
 ### State Model (TCA)
@@ -150,7 +150,7 @@ struct RepoAssociation {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ● ● ●   Nexus                              [status bar icon] │
+│ ● ● ●   Nex                              [status bar icon] │
 ├──────────┬──────────────────────────────────────────────────┤
 │          │                                                   │
 │ WORK-    │                                                   │
@@ -224,12 +224,12 @@ Notifications are dispatched based on **app focus state** and **alert tier**.
 - Sidebar row color shifts amber when any agent is waiting
 
 **Tier 2 — App unfocused, gentle**
-- Menu bar `NSStatusItem` icon changes: Nexus icon with a small amber dot overlay
+- Menu bar `NSStatusItem` icon changes: Nex icon with a small amber dot overlay
 - Menu bar popover (click to expand) shows a list of waiting agents with workspace names
 - Dock badge: count of total agents across all workspaces waiting for input
 
 **Tier 3 — App unfocused, urgent (needs input)**
-- macOS `UNUserNotificationCenter` banner: "Nexus — [workspace name]: Claude Code is waiting for your input"
+- macOS `UNUserNotificationCenter` banner: "Nex — [workspace name]: Claude Code is waiting for your input"
 - Notification has two action buttons: **Open** (switches to that workspace) and **Dismiss**
 - Dock icon bounces once (`NSApp.requestUserAttention(.informationalRequest)`)
 
@@ -240,17 +240,17 @@ Notifications are dispatched based on **app focus state** and **alert tier**.
 
 ### Signal Detection
 
-How Nexus knows an agent needs input:
+How Nex knows an agent needs input:
 
-1. **OSC escape sequences** — Claude Code emits OSC 9;9 (and variants) when it wants notification. Nexus parses these from the raw PTY byte stream before they reach the terminal renderer.
+1. **OSC escape sequences** — Claude Code emits OSC 9;9 (and variants) when it wants notification. Nex parses these from the raw PTY byte stream before they reach the terminal renderer.
 2. **Prompt pattern matching** — configurable regex list, defaults include patterns like `Do you want to`, `Press Enter to`, `[y/n]`, `[Yes/No]`. User can add custom patterns per agent type.
 3. **Silence + cursor position** — if an agent pane has produced no output for 8 seconds AND the VT cursor is on a line ending with a prompt character, treat as potential waiting state (lower confidence, shown as Tier 1 only).
-4. **Claude Code hooks** — the `nexus` CLI provides a `nexus notify` command usable as a Claude Code hook: `claude --notify-command "nexus notify --workspace current --level input"`. This is the most reliable path and should be documented as the recommended setup.
+4. **Claude Code hooks** — the `nex` CLI provides a `nex notify` command usable as a Claude Code hook: `claude --notify-command "nex notify --workspace current --level input"`. This is the most reliable path and should be documented as the recommended setup.
 
 ### Anti-Fatigue Rules
 
 - **De-duplicate**: if a pane fires a waiting signal and is already in "waiting" state, no new notification is emitted
-- **Focus suppression**: Tier 2/3/4 notifications are suppressed when Nexus is the frontmost app AND the relevant workspace is active
+- **Focus suppression**: Tier 2/3/4 notifications are suppressed when Nex is the frontmost app AND the relevant workspace is active
 - **Cooldown**: minimum 30 seconds between Tier 3 notifications for the same pane (configurable)
 - **Completion ≠ Waiting**: "agent finished" and "agent needs input" are distinct signals with distinct UI treatment. Completion gets a subtle Tier 1 indicator only (green flash). Only genuine input requests escalate.
 
@@ -297,7 +297,7 @@ Each workspace row in the sidebar shows a compact git summary:
 
 ### Setup
 
-On first launch, Nexus asks for a root directory. It scans for `.git` directories up to 3 levels deep and pre-populates the registry. For your 63 repos, this scan runs once and takes a few seconds.
+On first launch, Nex asks for a root directory. It scans for `.git` directories up to 3 levels deep and pre-populates the registry. For your 63 repos, this scan runs once and takes a few seconds.
 
 ### Registry UI (Preferences > Repositories)
 
@@ -313,32 +313,32 @@ When adding a repo to a workspace, a fuzzy search picker shows all 63 repos. Typ
 
 ---
 
-## CLI Companion: `nexus`
+## CLI Companion: `nex`
 
-The `nexus` binary installs to `/usr/local/bin/nexus` and communicates with the running app via `/tmp/nexus.sock` (JSON protocol). Designed for use in agent hooks, shell scripts, and automation.
+The `nex` binary installs to `/usr/local/bin/nex` and communicates with the running app via `/tmp/nex.sock` (JSON protocol). Designed for use in agent hooks, shell scripts, and automation.
 
 ### Commands
 
 ```bash
 # Workspace management
-nexus workspace list                          # List all workspaces with status
-nexus workspace new --name "feat-x"           # Create workspace
-nexus workspace switch "feat-x"               # Switch active workspace
-nexus workspace status                        # JSON status of current workspace
+nex workspace list                          # List all workspaces with status
+nex workspace new --name "feat-x"           # Create workspace
+nex workspace switch "feat-x"               # Switch active workspace
+nex workspace status                        # JSON status of current workspace
 
 # Pane control
-nexus pane new --split right --cmd "claude"   # Open new pane with command
-nexus pane list                               # List panes in current workspace
-nexus pane focus <pane-id>                    # Focus a specific pane
+nex pane new --split right --cmd "claude"   # Open new pane with command
+nex pane list                               # List panes in current workspace
+nex pane focus <pane-id>                    # Focus a specific pane
 
 # Notifications (for use in agent hooks)
-nexus notify --level input                    # Signal: agent needs input
-nexus notify --level done                     # Signal: agent completed task
-nexus notify --level error --msg "Build fail" # Signal: error with message
+nex notify --level input                    # Signal: agent needs input
+nex notify --level done                     # Signal: agent completed task
+nex notify --level error --msg "Build fail" # Signal: error with message
 
 # Repo/worktree
-nexus repo list                               # List registry
-nexus worktree add --repo api-service \
+nex repo list                               # List registry
+nex worktree add --repo api-service \
   --branch feat-x                             # Create + associate worktree
 ```
 
@@ -350,10 +350,10 @@ Add to `~/.claude/settings.json`:
 {
   "hooks": {
     "Stop": [
-      { "command": "nexus notify --level input" }
+      { "command": "nex notify --level input" }
     ],
     "PostToolUse": [
-      { "matcher": "Bash", "command": "nexus notify --level done" }
+      { "matcher": "Bash", "command": "nex notify --level done" }
     ]
   }
 }
@@ -424,7 +424,7 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 ---
 
 ### Phase 3 — Agent Awareness + Notifications
-**Goal**: Nexus knows when agents are running and when they need you.
+**Goal**: Nex knows when agents are running and when they need you.
 
 - PTY stream watcher: OSC escape sequence parsing
 - Prompt pattern matching (configurable regex)
@@ -435,16 +435,16 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 - Tier 3/4 macOS notifications (`UNUserNotificationCenter`) with action buttons
 - Dock badge count
 - Anti-fatigue rules (dedup, cooldown, focus suppression)
-- `nexus notify` CLI command + Claude Code hook documentation
+- `nex notify` CLI command + Claude Code hook documentation
 
 **Deliverable**: Run 4 Claude Code agents, go do something else, get notified exactly when you're needed.
 
 ---
 
 ### Phase 4 — CLI Companion + Polish
-**Goal**: Nexus is fully scriptable and feels like a finished Mac app.
+**Goal**: Nex is fully scriptable and feels like a finished Mac app.
 
-- Full `nexus` CLI binary with Unix socket protocol
+- Full `nex` CLI binary with Unix socket protocol
 - All workspace/pane/repo commands
 - Preferences window (notification settings, worktree paths, prompt patterns, repo registry)
 - Workspace templates (save current layout as a template for reuse)
@@ -453,7 +453,7 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 - Onboarding flow (first launch repo scan, hook setup guide)
 - Menu bar app mode (optional — hide dock icon, live in menu bar only)
 
-**Deliverable**: Nexus is your daily driver. Everything is scriptable and configurable.
+**Deliverable**: Nex is your daily driver. Everything is scriptable and configurable.
 
 ---
 
@@ -466,7 +466,7 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 - pane broadcast mode (type in one pane, send to all panes — useful for running a command across all repo worktrees simultaneously)
 - Quick worktree cleanup (archive workspace + prune all associated worktrees)
 - GitHub PR association per workspace (show PR status in inspector)
-- `nexus` CLI shell completions (zsh, fish)
+- `nex` CLI shell completions (zsh, fish)
 
 ---
 

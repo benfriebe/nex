@@ -1,6 +1,6 @@
-name: Nexus
+name: Nex
 options:
-  bundleIdPrefix: com.nexus
+  bundleIdPrefix: com.nex
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -27,21 +27,21 @@ packages:
     from: "0.5.0"
 
 targets:
-  Nexus:
+  Nex:
     type: application
     platform: macOS
     sources:
-      - path: Nexus
+      - path: Nex
         excludes:
           - "**/*.h"
           - "**/*.c"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nexus.app
-        PRODUCT_NAME: Nexus
-        INFOPLIST_FILE: Nexus/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Nexus/Nexus.entitlements
-        SWIFT_OBJC_BRIDGING_HEADER: Nexus/Ghostty/Ghostty-Bridging-Header.h
+        PRODUCT_BUNDLE_IDENTIFIER: com.nex.app
+        PRODUCT_NAME: Nex
+        INFOPLIST_FILE: Nex/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Nex/Nex.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: Nex/Ghostty/Ghostty-Bridging-Header.h
         OTHER_LDFLAGS:
           - "-lc++"
           - "-lz"
@@ -67,24 +67,24 @@ targets:
       - sdk: Carbon.framework
     postCompileScripts:
       - script: |
-          swiftc -O -target arm64-apple-macos14.0 -o "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nexus-notify" "${SRCROOT}/Tools/nexus-notify/nexus-notify.swift"
+          swiftc -O -target arm64-apple-macos14.0 -o "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify" "${SRCROOT}/Tools/nex-notify/nex-notify.swift"
           mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts"
           cp "${SRCROOT}/scripts/install-hooks.sh" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
           chmod +x "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
-        name: Bundle nexus-notify and install script
+        name: Bundle nex-notify and install script
 
-  NexusTests:
+  NexTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: NexusTests
+      - path: NexTests
     dependencies:
-      - target: Nexus
+      - target: Nex
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nexus.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.nex.tests
         GENERATE_INFOPLIST_FILE: true
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Nexus.app/Contents/MacOS/Nexus"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Nex.app/Contents/MacOS/Nex"
         BUNDLE_LOADER: "$(TEST_HOST)"
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/ghostty/include"

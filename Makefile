@@ -14,9 +14,9 @@ format-check:
 
 build:
 	xcodegen generate --spec project.yml
-	xcodebuild -scheme Nexus -destination 'platform=macOS' -skipMacroValidation build
+	xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation build
 
 test:
-	xcodebuild -scheme NexusTests -destination 'platform=macOS' -skipMacroValidation test
+	xcodebuild -scheme NexTests -destination 'platform=macOS' -skipMacroValidation test
 
 check: format-check lint build test

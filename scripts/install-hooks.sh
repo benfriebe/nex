@@ -1,22 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install nexus-notify and configure Claude Code hooks.
-# Run this after installing Nexus.app.
+# Install nex-notify and configure Claude Code hooks.
+# Run this after installing Nex.app.
 
-APP_PATH="/Applications/Nexus.app"
-BINARY="nexus-notify"
+APP_PATH="/Applications/Nex.app"
+BINARY="nex-notify"
 INSTALL_DIR="/usr/local/bin"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 
 # Find the app bundle
 if [ ! -d "$APP_PATH" ]; then
     # Try the current directory
-    if [ -d "./Nexus.app" ]; then
-        APP_PATH="./Nexus.app"
+    if [ -d "./Nex.app" ]; then
+        APP_PATH="./Nex.app"
     else
-        echo "Error: Nexus.app not found in /Applications or current directory."
-        echo "Usage: Run this script from the directory containing Nexus.app, or install it to /Applications first."
+        echo "Error: Nex.app not found in /Applications or current directory."
+        echo "Usage: Run this script from the directory containing Nex.app, or install it to /Applications first."
         exit 1
     fi
 fi
@@ -28,7 +28,7 @@ if [ ! -f "$BINARY_SRC" ]; then
     exit 1
 fi
 
-# Install nexus-notify to /usr/local/bin
+# Install nex-notify to /usr/local/bin
 echo "Installing $BINARY to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 cp "$BINARY_SRC" "$INSTALL_DIR/$BINARY"
@@ -46,7 +46,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nexus-notify --event stop"
+            "command": "nex-notify --event stop"
           }
         ]
       }
@@ -56,7 +56,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nexus-notify --event notification"
+            "command": "nex-notify --event notification"
           }
         ]
       }
@@ -67,7 +67,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nexus-notify --event session-start"
+            "command": "nex-notify --event session-start"
           }
         ]
       }
@@ -77,7 +77,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nexus-notify --event start"
+            "command": "nex-notify --event start"
           }
         ]
       }
@@ -114,5 +114,5 @@ with open('$SETTINGS_FILE', 'w') as f:
 fi
 
 echo ""
-echo "Done! Nexus hooks are configured for Claude Code."
+echo "Done! Nex hooks are configured for Claude Code."
 echo "Restart any running Claude Code sessions to pick up the new hooks."
