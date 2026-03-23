@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Root view: HStack with workspace sidebar + pane grid detail + optional inspector.
 struct ContentView: View {
@@ -127,6 +128,16 @@ struct ContentView: View {
                     }
                 }
                 socketServer.start()
+            }
+            .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+                guard let provider = providers.first else { return false }
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.pathExtension.lowercased() == "md" else { return }
+                    Task { @MainActor in
+                        store.send(.openFileAtPath(url.path))
+                    }
+                }
+                return true
             }
         }
     }

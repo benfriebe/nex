@@ -101,11 +101,20 @@ struct PaneGridView: View {
                 }
             )
 
-            SurfaceContainerView(
-                paneID: pane.id,
-                workingDirectory: pane.workingDirectory,
-                isFocused: pane.id == focusedPaneID
-            )
+            switch pane.type {
+            case .shell:
+                SurfaceContainerView(
+                    paneID: pane.id,
+                    workingDirectory: pane.workingDirectory,
+                    isFocused: pane.id == focusedPaneID
+                )
+            case .markdown:
+                MarkdownPaneView(
+                    paneID: pane.id,
+                    filePath: pane.filePath ?? "",
+                    isFocused: pane.id == focusedPaneID
+                )
+            }
         }
         .overlay {
             if pane.id == focusedPaneID {

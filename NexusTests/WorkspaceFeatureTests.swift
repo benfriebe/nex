@@ -61,6 +61,7 @@ struct WorkspaceFeatureTests {
                 ClosedPaneSnapshot(
                     workingDirectory: state.panes[id: secondPaneID]!.workingDirectory,
                     label: nil,
+                    type: .shell,
                     claudeSessionID: nil
                 )
             ]
@@ -278,6 +279,7 @@ struct WorkspaceFeatureTests {
                 ClosedPaneSnapshot(
                     workingDirectory: "/tmp/test",
                     label: "my-label",
+                    type: .shell,
                     claudeSessionID: "session-abc"
                 )
             ]
@@ -294,6 +296,7 @@ struct WorkspaceFeatureTests {
             ClosedPaneSnapshot(
                 workingDirectory: "/tmp/restored",
                 label: "restored-label",
+                type: .shell,
                 claudeSessionID: nil
             )
         ]

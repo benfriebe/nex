@@ -17,10 +17,17 @@ struct PaneHeaderView: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Circle()
-                .fill(statusDotColor)
-                .frame(width: 10, height: 10)
-                .animation(.easeInOut(duration: 0.3), value: pane.status)
+            if pane.type == .markdown {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+            } else {
+                Circle()
+                    .fill(statusDotColor)
+                    .frame(width: 10, height: 10)
+                    .animation(.easeInOut(duration: 0.3), value: pane.status)
+            }
 
             Text(displayTitle)
                 .font(.system(size: 11, design: .monospaced))
@@ -122,6 +129,9 @@ struct PaneHeaderView: View {
     }
 
     private var displayTitle: String {
+        if pane.type == .markdown, let filePath = pane.filePath {
+            return (filePath as NSString).lastPathComponent
+        }
         if let title = pane.title, !title.isEmpty {
             return title
         }

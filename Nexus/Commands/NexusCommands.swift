@@ -13,6 +13,11 @@ struct NexusCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command])
 
+            Button("Open File...") {
+                store.send(.openFile)
+            }
+            .keyboardShortcut("o", modifiers: [.command])
+
             Divider()
 
             // Switch by number: ⌘1–⌘9

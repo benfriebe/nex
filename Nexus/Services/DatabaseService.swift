@@ -106,6 +106,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v5_markdown_panes") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("filePath") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "filePath", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -134,6 +143,7 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var label: String?
     var type: String
     var workingDirectory: String
+    var filePath: String?
     var claudeSessionID: String?
     var status: String
     var createdAt: Double

@@ -57,12 +57,16 @@
 		CEA2876B7A8C383C24C28BD7 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 705D6277A1B79CE63A2D0AAF /* AppReducer.swift */; };
 		D49DF832989D4C7D953394BA /* SettingsFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7845FB43A113FD179B70B5 /* SettingsFeatureTests.swift */; };
 		D853E5646ACE4A2A4E47E539 /* GhosttySurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C3010C6A7FE17BCD379254 /* GhosttySurface.swift */; };
+		E030C97879751EF1DD1AF011 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = EA7D340DF8C8AB5CFC1DE954 /* Markdown */; };
 		E1AE1880E0973899257BE022 /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = E50A1A944F9AE47DBB6B4763 /* ComposableArchitecture */; };
 		E2EEC6EE25A4E7F372E94A87 /* PaneLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C377966C52CB02012F211F65 /* PaneLayout.swift */; };
 		E31A11FDFB40CB30A5A10A9C /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6359C7E9394EA91ACF09F3 /* DatabaseMigrationTests.swift */; };
 		E71B6E45BE8F61CE19EDD29A /* SurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1CCDF319563AC5D3B26D08C /* SurfaceView.swift */; };
 		EB3E45408A66D86995321209 /* AppReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D1643511C9ADF6E479DFCF /* AppReducerTests.swift */; };
 		EC469F7A77CE8588D4EBFCB2 /* PaneGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D41B355C6BEEDE8BA3B2061 /* PaneGridView.swift */; };
+		ED95440453D9C4F12E308D9E /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 70BA2776B8CC2461E6BD0D76 /* WebKit.framework */; };
+		F347A8A5198A8939FE20CD3E /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EB1F566E5AD226B77BC922 /* MarkdownHTMLRenderer.swift */; };
+		FA54D0DC136FB0B289C0DF86 /* MarkdownPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BF8A33466576160E1BD161 /* MarkdownPaneView.swift */; };
 		FB580C1521D18D37B4ABDD35 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 280C2FE6D0DE2494A16A6DAC /* GhosttyApp.swift */; };
 		FD2E16B90F7189E507A77F3E /* GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74213E213A09D143E1801F5D /* GitStatus.swift */; };
 		FE6E0F3A10AD73C5B216F13A /* WorkspaceInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD73E318BB132E80DF737777 /* WorkspaceInspectorView.swift */; };
@@ -93,6 +97,7 @@
 		4C6359C7E9394EA91ACF09F3 /* DatabaseMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseMigrationTests.swift; sourceTree = "<group>"; };
 		51CA985BADE5CE7057E2E2B4 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		52F0C3330B816C66BB134635 /* SocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketServer.swift; sourceTree = "<group>"; };
+		53EB1F566E5AD226B77BC922 /* MarkdownHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLRenderer.swift; sourceTree = "<group>"; };
 		55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 		5C18E2F1249EAC70CE79F613 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		620FC3BC6EDDA3073A852809 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
@@ -100,6 +105,7 @@
 		69ED62341195FDE8DC9B5405 /* NexusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NexusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6EDF2C4B37E684819F441FA4 /* PaneLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutTests.swift; sourceTree = "<group>"; };
 		705D6277A1B79CE63A2D0AAF /* AppReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducer.swift; sourceTree = "<group>"; };
+		70BA2776B8CC2461E6BD0D76 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		74213E213A09D143E1801F5D /* GitStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatus.swift; sourceTree = "<group>"; };
 		7AA084843197E68484EDF41F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7EC807E893030C5E46495AFF /* WorkspaceRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRowView.swift; sourceTree = "<group>"; };
@@ -135,6 +141,7 @@
 		E7B99B9BACA8153BE1ABE412 /* WorkspaceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListView.swift; sourceTree = "<group>"; };
 		E883F4B1CB4946F40EB6A43B /* StatusBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPopoverView.swift; sourceTree = "<group>"; };
 		F5495E12EC7C814B95EE2732 /* SurfaceContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceContainerView.swift; sourceTree = "<group>"; };
+		F7BF8A33466576160E1BD161 /* MarkdownPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPaneView.swift; sourceTree = "<group>"; };
 		FC04BDAB61F82D3189AC43C6 /* NexusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexusApp.swift; sourceTree = "<group>"; };
 		FCF0E4BE82C411A3DAAED3C7 /* Nexus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nexus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD58D51CC4DC22E568D4B0A3 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
@@ -149,7 +156,9 @@
 				E1AE1880E0973899257BE022 /* ComposableArchitecture in Frameworks */,
 				B737A59624C6208E64752356 /* GRDB in Frameworks */,
 				91705279803AA3B943C3DDBF /* Sparkle in Frameworks */,
+				E030C97879751EF1DD1AF011 /* Markdown in Frameworks */,
 				5C23191D3FB6A6469701D3EA /* Metal.framework in Frameworks */,
+				ED95440453D9C4F12E308D9E /* WebKit.framework in Frameworks */,
 				4EB99A1B277034863DAE58D0 /* QuartzCore.framework in Frameworks */,
 				62A5626A8F79713B8822FC2A /* CoreText.framework in Frameworks */,
 				6E3A0DD305DB01F5F0D25EBC /* AppKit.framework in Frameworks */,
@@ -172,6 +181,7 @@
 				CFC6CC21FCE4E91003E7CE82 /* IOKit.framework */,
 				51CA985BADE5CE7057E2E2B4 /* Metal.framework */,
 				8DF4ADB86C4AE07CB9C53E2A /* QuartzCore.framework */,
+				70BA2776B8CC2461E6BD0D76 /* WebKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -267,6 +277,7 @@
 		61089546895321585E6E1719 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				683693813601C0F8F149786B /* MarkdownPane */,
 				98421479324531D11A510B5D /* PaneGrid */,
 				96686C65AF4CD9446D4C1AE0 /* RepoRegistry */,
 				585B7073214DDA4BC17CC01C /* Settings */,
@@ -283,6 +294,15 @@
 				1CE0337B159EEA8C987E0998 /* NexusCommands.swift */,
 			);
 			path = Commands;
+			sourceTree = "<group>";
+		};
+		683693813601C0F8F149786B /* MarkdownPane */ = {
+			isa = PBXGroup;
+			children = (
+				53EB1F566E5AD226B77BC922 /* MarkdownHTMLRenderer.swift */,
+				F7BF8A33466576160E1BD161 /* MarkdownPaneView.swift */,
+			);
+			path = MarkdownPane;
 			sourceTree = "<group>";
 		};
 		79B194B5DA539610FBD78C7E /* Models */ = {
@@ -378,6 +398,7 @@
 				E50A1A944F9AE47DBB6B4763 /* ComposableArchitecture */,
 				1C285DFED557074F51A0ED1D /* GRDB */,
 				5429C81C2DE2C3887E1F5363 /* Sparkle */,
+				EA7D340DF8C8AB5CFC1DE954 /* Markdown */,
 			);
 			productName = Nexus;
 			productReference = FCF0E4BE82C411A3DAAED3C7 /* Nexus.app */;
@@ -407,6 +428,7 @@
 				59C00D0DB2C093DC558EA643 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
 				53F54A08BA1E8F405C26D69B /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				2FFBE80ACC6E19C3A11684D0 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				4D635D2F025867C9F5D37DFE /* XCRemoteSwiftPackageReference "swift-markdown" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 11E3CC88B7BCE0F356595ACA /* Products */;
@@ -472,6 +494,8 @@
 				D853E5646ACE4A2A4E47E539 /* GhosttySurface.swift in Sources */,
 				89537007F8FCAE80F380ACEB /* GitService.swift in Sources */,
 				FD2E16B90F7189E507A77F3E /* GitStatus.swift in Sources */,
+				F347A8A5198A8939FE20CD3E /* MarkdownHTMLRenderer.swift in Sources */,
+				FA54D0DC136FB0B289C0DF86 /* MarkdownPaneView.swift in Sources */,
 				375C8BCC9F11700FEBFAC68D /* NewWorkspaceSheet.swift in Sources */,
 				56A1FC9C1A5285DA29A904AD /* NexusApp.swift in Sources */,
 				665EBD0DA670A820E57863DE /* NexusCommands.swift in Sources */,
@@ -771,6 +795,14 @@
 				minimumVersion = 2.6.0;
 			};
 		};
+		4D635D2F025867C9F5D37DFE /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swiftlang/swift-markdown";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.0;
+			};
+		};
 		53F54A08BA1E8F405C26D69B /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
@@ -804,6 +836,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 59C00D0DB2C093DC558EA643 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
 			productName = ComposableArchitecture;
+		};
+		EA7D340DF8C8AB5CFC1DE954 /* Markdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D635D2F025867C9F5D37DFE /* XCRemoteSwiftPackageReference "swift-markdown" */;
+			productName = Markdown;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

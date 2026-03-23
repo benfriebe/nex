@@ -4,6 +4,8 @@ import Foundation
 struct ClosedPaneSnapshot: Equatable {
     var workingDirectory: String
     var label: String?
+    var type: PaneType
+    var filePath: String?
     var claudeSessionID: String?
 }
 
@@ -98,6 +100,7 @@ struct WorkspaceFeature {
         case agentStatusChanged(paneID: UUID, event: AgentEvent)
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
+        case openMarkdownFile(filePath: String)
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
         case reopenClosedPane
@@ -189,12 +192,44 @@ struct WorkspaceFeature {
                     )
                 }
 
+            case .openMarkdownFile(let filePath):
+                let newPaneID = uuid()
+                let dir = (filePath as NSString).deletingLastPathComponent
+                let fileName = (filePath as NSString).lastPathComponent
+                let newPane = Pane(
+                    id: newPaneID,
+                    label: fileName,
+                    type: .markdown,
+                    title: fileName,
+                    workingDirectory: dir,
+                    filePath: filePath,
+                    createdAt: now,
+                    lastActivityAt: now
+                )
+
+                if let sourceID = state.focusedPaneID {
+                    let (newLayout, _) = state.layout.splitting(
+                        paneID: sourceID,
+                        direction: .horizontal,
+                        newPaneID: newPaneID
+                    )
+                    state.layout = newLayout
+                } else {
+                    state.layout = .leaf(newPaneID)
+                }
+                state.panes.append(newPane)
+                state.focusedPaneID = newPaneID
+                return .none
+
             case .closePane(let paneID):
+                let paneType = state.panes[id: paneID]?.type ?? .shell
                 if let pane = state.panes[id: paneID] {
                     state.recentlyClosedPanes.append(
                         ClosedPaneSnapshot(
                             workingDirectory: pane.workingDirectory,
                             label: pane.label,
+                            type: pane.type,
+                            filePath: pane.filePath,
                             claudeSessionID: pane.claudeSessionID
                         )
                     )
@@ -211,9 +246,12 @@ struct WorkspaceFeature {
                     state.focusedPaneID = newLayout.allPaneIDs.first
                 }
 
-                return .run { _ in
-                    await surfaceManager.destroySurface(paneID: paneID)
+                if paneType == .shell {
+                    return .run { _ in
+                        await surfaceManager.destroySurface(paneID: paneID)
+                    }
                 }
+                return .none
 
             case .focusPane(let paneID):
                 state.focusedPaneID = paneID
@@ -303,7 +341,9 @@ struct WorkspaceFeature {
                 let newPane = Pane(
                     id: newPaneID,
                     label: snapshot.label,
-                    workingDirectory: snapshot.workingDirectory
+                    type: snapshot.type,
+                    workingDirectory: snapshot.workingDirectory,
+                    filePath: snapshot.filePath
                 )
 
                 let (newLayout, _) = state.layout.splitting(
@@ -314,6 +354,11 @@ struct WorkspaceFeature {
                 state.layout = newLayout
                 state.panes.append(newPane)
                 state.focusedPaneID = newPaneID
+
+                // Markdown panes don't need a surface
+                if snapshot.type == .markdown {
+                    return .none
+                }
 
                 let opacity = ghosttyConfig.backgroundOpacity
                 let sessionID = snapshot.claudeSessionID

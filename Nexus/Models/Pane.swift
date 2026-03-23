@@ -14,6 +14,7 @@ struct Pane: Identifiable, Equatable {
     var workingDirectory: String
     var gitBranch: String?
     var status: PaneStatus
+    var filePath: String?
     var claudeSessionID: String?
     var createdAt: Date
     var lastActivityAt: Date
@@ -25,6 +26,7 @@ struct Pane: Identifiable, Equatable {
         title: String? = nil,
         workingDirectory: String = NSHomeDirectory(),
         gitBranch: String? = nil,
+        filePath: String? = nil,
         status: PaneStatus = .idle,
         claudeSessionID: String? = nil,
         createdAt: Date = Date(),
@@ -36,6 +38,7 @@ struct Pane: Identifiable, Equatable {
         self.title = title
         self.workingDirectory = workingDirectory
         self.gitBranch = gitBranch
+        self.filePath = filePath
         self.status = status
         self.claudeSessionID = claudeSessionID
         self.createdAt = createdAt

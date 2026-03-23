@@ -22,6 +22,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: "2.6.0"
+  swift-markdown:
+    url: https://github.com/swiftlang/swift-markdown
+    from: "0.5.0"
 
 targets:
   Nexus:
@@ -52,7 +55,10 @@ targets:
       - package: GRDB
         product: GRDB
       - package: Sparkle
+      - package: swift-markdown
+        product: Markdown
       - sdk: Metal.framework
+      - sdk: WebKit.framework
       - sdk: QuartzCore.framework
       - sdk: CoreText.framework
       - sdk: AppKit.framework

@@ -65,6 +65,10 @@ struct AppReducer {
         case worktreeCreationFailed(workspaceID: UUID, error: String)
         case removeWorktreeAssociation(workspaceID: UUID, associationID: UUID, deleteWorktree: Bool)
 
+        // File Opening
+        case openFile
+        case openFileAtPath(String)
+
         // Inspector + Git Status
         case toggleInspector
         case refreshGitStatus
@@ -238,12 +242,12 @@ struct AppReducer {
                     }
                 }
 
-                // Create surfaces for all panes in all workspaces
+                // Create surfaces for shell panes only (markdown panes use WKWebView)
                 let panesToResume = resumablePanes
                 return .merge(
                     .run { _ in
                         for workspace in workspaces {
-                            for pane in workspace.panes {
+                            for pane in workspace.panes where pane.type == .shell {
                                 await surfaceManager.createSurface(
                                     paneID: pane.id,
                                     workingDirectory: pane.workingDirectory
@@ -287,6 +291,33 @@ struct AppReducer {
 
             case .settings:
                 return .none
+
+            // MARK: - File Opening
+
+            case .openFile:
+                return .run { send in
+                    let path: String? = await MainActor.run {
+                        let panel = NSOpenPanel()
+                        panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+                        panel.allowsMultipleSelection = false
+                        panel.canChooseDirectories = false
+                        panel.message = "Choose a Markdown file to open"
+                        if panel.runModal() == .OK, let url = panel.url {
+                            return url.path
+                        }
+                        return nil
+                    }
+                    if let path {
+                        await send(.openFileAtPath(path))
+                    }
+                }
+
+            case .openFileAtPath(let path):
+                guard let activeID = state.activeWorkspaceID else { return .none }
+                return .send(.workspaces(.element(
+                    id: activeID,
+                    action: .openMarkdownFile(filePath: path)
+                )))
 
             // MARK: - Agent Lifecycle
 
