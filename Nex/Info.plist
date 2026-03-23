@@ -25,7 +25,7 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/benfriebe/nexus/main/appcast.xml</string>
+    <string>https://raw.githubusercontent.com/benfriebe/nex/main/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>ut31p12qPZOXEjkFYoGTOdgMgAEjqMpHwyCRp6OaTa8=</string>
     <key>SUEnableAutomaticChecks</key>

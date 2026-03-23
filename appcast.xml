@@ -2,33 +2,9 @@
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
   <channel>
     <title>Nex</title>
-    <link>https://github.com/benfriebe/nexus</link>
+    <link>https://github.com/benfriebe/nex</link>
     <description>Nex update feed</description>
     <language>en</language>
     <!-- Items will be prepended by the release workflow -->
-    <item>
-    <title>Version 0.3.8</title>
-    <pubDate>Wed, 18 Mar 2026 01:25:46 +0000</pubDate>
-    <sparkle:version>0.3.8</sparkle:version>
-    <sparkle:shortVersionString>0.3.8</sparkle:shortVersionString>
-    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    <enclosure
-      url="https://github.com/benfriebe/nexus/releases/download/v0.3.8/Nexus-0.3.8.dmg"
-      sparkle:edSignature="IFVtCFjV6eITrkVcRE2Pf8mlWVdTMR/Cl6hYVP5apaW9CZKLc74FprtPwPKaSwBwmyivc3pCo1LapUJaOTHPBA=="
-      length="10149535"
-      type="application/octet-stream" />
-  </item>
-    <item>
-    <title>Version 0.3.9</title>
-    <pubDate>Sun, 22 Mar 2026 05:35:34 +0000</pubDate>
-    <sparkle:version>0.3.9</sparkle:version>
-    <sparkle:shortVersionString>0.3.9</sparkle:shortVersionString>
-    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    <enclosure
-      url="https://github.com/benfriebe/nexus/releases/download/v0.3.9/Nexus-0.3.9.dmg"
-      sparkle:edSignature="N0ttfndNv9hQimhFgAU6EQFb12shyIsVg7of5mInLC3TPAOjaG9SQMDaGgCTLeQtfyOo2XGeR8KSAKCuqaRpCA=="
-      length="10151098"
-      type="application/octet-stream" />
-  </item>
   </channel>
 </rss>

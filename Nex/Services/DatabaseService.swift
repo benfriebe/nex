@@ -12,25 +12,8 @@ final class DatabaseService: Sendable {
             in: .userDomainMask
         ).first!.appendingPathComponent("Nex", isDirectory: true)
 
-        // Migrate from old "Nexus" directory if it exists
-        let oldAppSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!.appendingPathComponent("Nexus", isDirectory: true)
-        if FileManager.default.fileExists(atPath: oldAppSupport.path),
-           !FileManager.default.fileExists(atPath: appSupport.path) {
-            try? FileManager.default.moveItem(at: oldAppSupport, to: appSupport)
-        }
-
         try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         let dbPath = appSupport.appendingPathComponent("nex.db").path
-
-        // Migrate old database filename if needed
-        let oldDbPath = appSupport.appendingPathComponent("nexus.db").path
-        if FileManager.default.fileExists(atPath: oldDbPath),
-           !FileManager.default.fileExists(atPath: dbPath) {
-            try? FileManager.default.moveItem(atPath: oldDbPath, toPath: dbPath)
-        }
 
         var config = Configuration()
         config.foreignKeysEnabled = true
