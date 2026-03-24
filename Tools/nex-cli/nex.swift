@@ -1,18 +1,18 @@
 #!/usr/bin/env swift
 //
-// nex-notify — Sends agent lifecycle events to the Nex socket server.
+// nex — Sends agent lifecycle events to the Nex socket server.
 //
 // Usage:
-//   nex-notify --event stop
-//   nex-notify --event error --message "Something went wrong"
-//   nex-notify --event notification --title "Done" --body "Task completed"
-//   nex-notify --event session-start  (reads session_id from stdin JSON)
+//   nex --event stop
+//   nex --event error --message "Something went wrong"
+//   nex --event notification --title "Done" --body "Task completed"
+//   nex --event session-start  (reads session_id from stdin JSON)
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
 // Falls back silently if the socket doesn't exist or NEX_PANE_ID is not set.
 //
 // Claude Code hook config (~/.claude/settings.json):
-//   { "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "nex-notify --event stop" }] }] } }
+//   { "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "nex --event stop" }] }] } }
 
 import Foundation
 
@@ -41,7 +41,7 @@ while let arg = args.popFirst() {
 }
 
 guard let event else {
-    fputs("Usage: nex-notify --event stop|error|notification [--message ...] [--title ...] [--body ...]\n", stderr)
+    fputs("Usage: nex --event stop|error|notification [--message ...] [--title ...] [--body ...]\n", stderr)
     exit(1)
 }
 

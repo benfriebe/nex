@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install nex-notify and configure Claude Code hooks.
+# Install nex CLI and configure Claude Code hooks.
 # Run this after installing Nex.app.
 
 APP_PATH="/Applications/Nex.app"
-BINARY="nex-notify"
+BINARY="nex"
 INSTALL_DIR="/usr/local/bin"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 
@@ -21,14 +21,14 @@ if [ ! -d "$APP_PATH" ]; then
     fi
 fi
 
-BINARY_SRC="$APP_PATH/Contents/MacOS/$BINARY"
+BINARY_SRC="$APP_PATH/Contents/Helpers/$BINARY"
 
 if [ ! -f "$BINARY_SRC" ]; then
     echo "Error: $BINARY not found in app bundle at $BINARY_SRC"
     exit 1
 fi
 
-# Install nex-notify to /usr/local/bin
+# Install nex to /usr/local/bin
 echo "Installing $BINARY to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 cp "$BINARY_SRC" "$INSTALL_DIR/$BINARY"
@@ -46,7 +46,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nex-notify --event stop"
+            "command": "nex --event stop"
           }
         ]
       }
@@ -56,7 +56,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nex-notify --event notification"
+            "command": "nex --event notification"
           }
         ]
       }
@@ -67,7 +67,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nex-notify --event session-start"
+            "command": "nex --event session-start"
           }
         ]
       }
@@ -77,7 +77,7 @@ HOOKS='{
         "hooks": [
           {
             "type": "command",
-            "command": "nex-notify --event start"
+            "command": "nex --event start"
           }
         ]
       }

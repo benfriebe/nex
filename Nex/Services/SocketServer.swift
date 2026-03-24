@@ -11,8 +11,8 @@ enum AgentEvent: Equatable {
 }
 
 /// Unix domain socket server that listens for structured JSON messages
-/// from the `nex-notify` CLI tool. Agent hooks (Claude Code, Codex)
-/// fire `nex-notify` which sends events here.
+/// from the `nex` CLI tool. Agent hooks (Claude Code, Codex)
+/// fire `nex` which sends events here.
 ///
 /// Wire format (newline-terminated JSON):
 /// ```

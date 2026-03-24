@@ -23,7 +23,7 @@ Nex gives you named, persistent terminal workspaces with free-form split layouts
 /Applications/Nex.app/Contents/Resources/scripts/install-hooks.sh
 ```
 
-This installs the `nex-notify` CLI to `/usr/local/bin` and configures Claude Code hooks in `~/.claude/settings.json`.
+This installs the `nex` CLI to `/usr/local/bin` and configures Claude Code hooks in `~/.claude/settings.json`.
 
 ### Building from source
 
@@ -67,10 +67,10 @@ Nex monitors Claude Code sessions through hooks. The install script configures t
 ```json
 {
   "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "nex-notify --event stop" }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "nex-notify --event notification" }] }],
-    "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "nex-notify --event session-start" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex-notify --event start" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "nex --event stop" }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "nex --event notification" }] }],
+    "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "nex --event session-start" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex --event start" }] }]
   }
 }
 ```

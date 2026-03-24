@@ -1,10 +1,10 @@
 PREFIX ?= /usr/local
-BINARY = nex-notify
+BINARY = nex
 
 .PHONY: build install clean
 
 build:
-	swiftc -O -o $(BINARY) nex-notify.swift
+	swiftc -O -o $(BINARY) nex.swift
 
 install: build
 	install -d $(PREFIX)/bin

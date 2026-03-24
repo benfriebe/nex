@@ -395,7 +395,7 @@
 			buildConfigurationList = 26621FC95927D8B985FBEDC2 /* Build configuration list for PBXNativeTarget "Nex" */;
 			buildPhases = (
 				3705E235ADEEAED46F84090D /* Sources */,
-				E287164B27A508CA3630AD96 /* Bundle nex-notify and install script */,
+				3E76F9CB9E967B5724C9973E /* Bundle nex CLI and install script */,
 				6E91527DFFE7D937CC95545F /* Frameworks */,
 			);
 			buildRules = (
@@ -457,7 +457,7 @@
 /* End PBXProject section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		E287164B27A508CA3630AD96 /* Bundle nex-notify and install script */ = {
+		3E76F9CB9E967B5724C9973E /* Bundle nex CLI and install script */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -466,14 +466,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Bundle nex-notify and install script";
+			name = "Bundle nex CLI and install script";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "swiftc -O -target arm64-apple-macos14.0 -o \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify\" \"${SRCROOT}/Tools/nex-notify/nex-notify.swift\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify\"\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts\"\ncp \"${SRCROOT}/scripts/install-hooks.sh\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\n";
+			shellScript = "mkdir -p \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Helpers\"\nswiftc -O -target arm64-apple-macos14.0 -o \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Helpers/nex\" \"${SRCROOT}/Tools/nex-cli/nex.swift\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Helpers/nex\"\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts\"\ncp \"${SRCROOT}/scripts/install-hooks.sh\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
