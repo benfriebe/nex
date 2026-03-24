@@ -79,8 +79,11 @@ jobs:
           xcodebuild archive \
             -scheme Nex \
             -configuration Release \
+            -destination 'generic/platform=macOS' \
             -archivePath build/Nex.xcarchive \
             -skipMacroValidation \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
             CURRENT_PROJECT_VERSION=${{ steps.version.outputs.version }} \
             MARKETING_VERSION=${{ steps.version.outputs.version }}
 
@@ -92,6 +95,7 @@ jobs:
           codesign --verify --verbose "$APP_PATH"
 
       - name: Notarize app
+        timeout-minutes: 30
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}

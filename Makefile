@@ -36,11 +36,15 @@ archive:
 	xcodebuild archive \
 		-scheme Nex \
 		-configuration Release \
+		-destination 'generic/platform=macOS' \
 		-archivePath $(ARCHIVE_PATH) \
 		-skipMacroValidation \
+		ARCHS=arm64 \
+		ONLY_ACTIVE_ARCH=NO \
 		CURRENT_PROJECT_VERSION=$(VERSION) \
 		MARKETING_VERSION=$(VERSION)
 	mkdir -p $(BUILD_DIR)
+	rm -rf $(APP_PATH)
 	cp -R $(ARCHIVE_PATH)/Products/Applications/Nex.app $(APP_PATH)
 
 sign: archive
