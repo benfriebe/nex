@@ -419,6 +419,12 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					C794D3598EDB9E78F540D111 = {
+						DevelopmentTeam = 4ASXCG2599;
+					};
+					F8512F76564374F4F46B6E25 = {
+						DevelopmentTeam = 4ASXCG2599;
+					};
 				};
 			};
 			buildConfigurationList = 8A5A3AC3BD86FE0A3BB6386B /* Build configuration list for PBXProject "Nex" */;
@@ -464,7 +470,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "swiftc -O -target arm64-apple-macos14.0 -o \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify\" \"${SRCROOT}/Tools/nex-notify/nex-notify.swift\"\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts\"\ncp \"${SRCROOT}/scripts/install-hooks.sh\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\n";
+			shellScript = "swiftc -O -target arm64-apple-macos14.0 -o \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify\" \"${SRCROOT}/Tools/nex-notify/nex-notify.swift\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/MacOS/nex-notify\"\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts\"\ncp \"${SRCROOT}/scripts/install-hooks.sh\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\ncodesign --force --sign \"Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)\" --timestamp \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -568,7 +574,7 @@
 					"-L$(SRCROOT)/lib",
 					"-lghostty",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.nex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benfriebe.nex;
 				PRODUCT_NAME = Nex;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Nex/Ghostty/Ghostty-Bridging-Header.h";
@@ -608,8 +614,12 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 4ASXCG2599;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -671,8 +681,12 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 4ASXCG2599;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -708,7 +722,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.nex.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benfriebe.nex.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nex.app/Contents/MacOS/Nex";
 			};
@@ -728,7 +742,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.nex.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benfriebe.nex.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nex.app/Contents/MacOS/Nex";
 			};
@@ -755,7 +769,7 @@
 					"-L$(SRCROOT)/lib",
 					"-lghostty",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.nex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benfriebe.nex;
 				PRODUCT_NAME = Nex;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Nex/Ghostty/Ghostty-Bridging-Header.h";

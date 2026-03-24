@@ -10,6 +10,7 @@ permissions:
 
 env:
   ZIG_VERSION: "0.15.2"
+  SIGNING_IDENTITY: "Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)"
 
 jobs:
   release:
@@ -26,6 +27,30 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Import signing certificate
+        env:
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.DEVELOPER_ID_CERTIFICATE }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          echo "$DEVELOPER_ID_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$DEVELOPER_ID_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
       - name: Install Zig
         uses: mlugg/setup-zig@v2
         with:
@@ -35,13 +60,10 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
-          # Extract the macOS universal lib from the installed xcframework
           mkdir -p ../lib
-          # zig-out may be relative to the ghostty dir or the repo root
           MACOS_LIB=$(find . "$ZIG_LOCAL_CACHE_DIR" -path "*/macos-*/libghostty.a" -type f 2>/dev/null | head -1)
           if [ -z "$MACOS_LIB" ]; then
             echo "::error::Could not find macOS libghostty.a in xcframework output"
-            echo "Searching for any libghostty files:"
             find . "$ZIG_LOCAL_CACHE_DIR" -name "libghostty*" -type f 2>/dev/null
             exit 1
           fi
@@ -56,11 +78,35 @@ jobs:
         run: |
           xcodebuild archive \
             -scheme Nex \
+            -configuration Release \
             -archivePath build/Nex.xcarchive \
             -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ steps.version.outputs.version }} \
             MARKETING_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Sign app
+        run: |
+          APP_PATH="build/Nex.xcarchive/Products/Applications/Nex.app"
+          codesign --force --deep --sign "$SIGNING_IDENTITY" --timestamp --options runtime \
+            --entitlements Nex/Nex.entitlements "$APP_PATH"
+          codesign --verify --verbose "$APP_PATH"
+
+      - name: Notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: "4ASXCG2599"
+        run: |
+          APP_PATH="build/Nex.xcarchive/Products/Applications/Nex.app"
+
+          ditto -c -k --keepParent "$APP_PATH" build/Nex.zip
+          xcrun notarytool submit build/Nex.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$APP_PATH"
+          rm build/Nex.zip
 
       - name: Create DMG
         run: |
@@ -82,7 +128,6 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          # Download Sparkle tools (latest release)
           SPARKLE_TAG=$(curl -sI "https://github.com/sparkle-project/Sparkle/releases/latest" | grep -i location | sed 's/.*tag\///' | tr -d '\r')
           curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_TAG}/Sparkle-${SPARKLE_TAG}.tar.xz" -o /tmp/sparkle.tar.xz
           mkdir -p /tmp/sparkle
@@ -90,10 +135,8 @@ jobs:
 
           DMG="build/Nex-${{ steps.version.outputs.version }}.dmg"
 
-          # sign_update reads the key from stdin when using -f -
           OUTPUT=$(/tmp/sparkle/bin/sign_update "$DMG" -f <(printf '%s' "$SPARKLE_PRIVATE_KEY"))
 
-          # Output format: sparkle:edSignature="..." length="..."
           SIGNATURE=$(echo "$OUTPUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')
           LENGTH=$(stat -f%z "$DMG")
 
