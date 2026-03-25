@@ -37,7 +37,7 @@ make check
 **SwiftUI + TCA (Composable Architecture)** app targeting macOS 14+, Swift 6.
 
 ### Reducer hierarchy
-- `AppReducer` — top-level state: workspace list, repo registry, agent events, git status, external indicators (menu bar/dock badge)
+- `AppReducer` — top-level state: workspace list, repo registry, socket messages (agent lifecycle + pane/workspace commands), git status, external indicators (menu bar/dock badge)
 - `WorkspaceFeature` — per-workspace: panes, layout tree, focus, splits, agent status. Connected via `.forEach(\.workspaces, action: \.workspaces)`
 - `SettingsFeature` — user preferences (worktree base path, appearance)
 
@@ -65,9 +65,13 @@ make check
 - `PersistenceService` — debounced (500ms) full-state serialization. Clears and re-inserts all records on each save. Tables: `WorkspaceRecord`, `PaneRecord`, `RepoRecord`, `RepoAssociationRecord`, `AppStateRecord`.
 - DB location: `~/Library/Application Support/Nex/nex.db`
 
-### Agent monitoring
-- `SocketServer` — Unix domain socket at `/tmp/nex.sock`. Receives newline-delimited JSON from the `nex` CLI (installed as a Claude Code hook). Events: `start`, `stop`, `error`, `notification`, `session-start`.
-- `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`.
+### Agent monitoring & CLI
+- `SocketServer` — Unix domain socket at `/tmp/nex.sock`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `workspace-create`.
+- `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace commands).
+- `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`. Subcommand structure:
+  - `nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]`
+  - `nex pane split|create|close|name|send [options]`
+  - `nex workspace create [--name ...] [--path ...] [--color ...]`
 - `StatusBarController` — menu bar icon + popover showing running/waiting agents across workspaces.
 - `NotificationService` — desktop notifications with "Open"/"Dismiss" actions.
 

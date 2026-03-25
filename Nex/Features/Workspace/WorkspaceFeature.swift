@@ -97,7 +97,10 @@ struct WorkspaceFeature {
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
         case movePane(paneID: UUID, targetPaneID: UUID, zone: PaneLayout.DropZone)
-        case agentStatusChanged(paneID: UUID, event: AgentEvent)
+        case agentStarted(paneID: UUID)
+        case agentStopped(paneID: UUID)
+        case agentError(paneID: UUID)
+        case sessionStarted(paneID: UUID, sessionID: String)
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String)
@@ -306,15 +309,20 @@ struct WorkspaceFeature {
                 state.focusedPaneID = paneID
                 return .none
 
-            case .agentStatusChanged(let paneID, let event):
-                switch event {
-                case .started:
-                    state.panes[id: paneID]?.status = .running
-                case .stopped, .error, .notification:
-                    state.panes[id: paneID]?.status = .waitingForInput
-                case .sessionStarted(let sessionID):
-                    state.panes[id: paneID]?.claudeSessionID = sessionID
-                }
+            case .agentStarted(let paneID):
+                state.panes[id: paneID]?.status = .running
+                return .none
+
+            case .agentStopped(let paneID):
+                state.panes[id: paneID]?.status = .waitingForInput
+                return .none
+
+            case .agentError(let paneID):
+                state.panes[id: paneID]?.status = .waitingForInput
+                return .none
+
+            case .sessionStarted(let paneID, let sessionID):
+                state.panes[id: paneID]?.claudeSessionID = sessionID
                 return .none
 
             case .clearPaneStatus(let paneID):

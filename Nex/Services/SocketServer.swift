@@ -1,13 +1,22 @@
 import ComposableArchitecture
 import Foundation
 
-/// Event received from an agent hook via the Unix socket.
-enum AgentEvent: Equatable {
-    case started
-    case stopped
-    case error(message: String)
-    case notification(title: String, body: String)
-    case sessionStarted(sessionID: String)
+/// Message received from the `nex` CLI via the Unix socket.
+enum SocketMessage: Equatable {
+    // Agent lifecycle
+    case agentStarted(paneID: UUID)
+    case agentStopped(paneID: UUID)
+    case agentError(paneID: UUID, message: String)
+    case notification(paneID: UUID, title: String, body: String)
+    case sessionStarted(paneID: UUID, sessionID: String)
+    // Pane commands
+    case paneSplit(paneID: UUID, direction: PaneLayout.SplitDirection?, path: String?)
+    case paneCreate(paneID: UUID, path: String?)
+    case paneClose(paneID: UUID)
+    case paneName(paneID: UUID, name: String)
+    case paneSend(paneID: UUID, target: String, text: String)
+    /// Workspace commands
+    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?)
 }
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -16,9 +25,10 @@ enum AgentEvent: Equatable {
 ///
 /// Wire format (newline-terminated JSON):
 /// ```
-/// {"event":"stop","pane_id":"<uuid>"}\n
-/// {"event":"error","pane_id":"<uuid>","message":"..."}\n
-/// {"event":"notification","pane_id":"<uuid>","title":"...","body":"..."}\n
+/// {"command":"stop","pane_id":"<uuid>"}\n
+/// {"command":"error","pane_id":"<uuid>","message":"..."}\n
+/// {"command":"pane-split","pane_id":"<uuid>","direction":"horizontal"}\n
+/// {"command":"workspace-create","name":"Test","color":"blue"}\n
 /// ```
 final class SocketServer: Sendable {
     static let socketPath = "/tmp/nex.sock"
@@ -29,8 +39,8 @@ final class SocketServer: Sendable {
     private nonisolated(unsafe) var acceptSource: DispatchSourceRead?
     private nonisolated(unsafe) var clientSources: [Int32: DispatchSourceRead] = [:]
 
-    /// Called on the main queue when a valid event arrives.
-    nonisolated(unsafe) var onEvent: (@Sendable (UUID, AgentEvent) -> Void)?
+    /// Called on the main queue when a valid message arrives.
+    nonisolated(unsafe) var onMessage: (@Sendable (SocketMessage) -> Void)?
 
     func start() {
         let alreadyRunning = lock.withLock {
@@ -155,87 +165,117 @@ final class SocketServer: Sendable {
     }
 
     private func processData(_ data: Data) {
-        let events = Self.parseData(data)
-        guard !events.isEmpty else { return }
+        let messages = Self.parseMessages(data)
+        guard !messages.isEmpty else { return }
 
-        let callback = lock.withLock { onEvent }
+        let callback = lock.withLock { onMessage }
         DispatchQueue.main.async {
-            for (paneID, event) in events {
-                callback?(paneID, event)
+            for message in messages {
+                callback?(message)
             }
         }
     }
 
     // MARK: - Static Parsing (testable)
 
-    struct Message: Decodable {
-        let event: String
-        let paneID: String
+    struct WireMessage: Decodable {
+        let command: String
+        var paneID: String?
         var message: String?
         var title: String?
         var body: String?
         var sessionID: String?
+        var direction: String?
+        var path: String?
+        var name: String?
+        var color: String?
+        var target: String?
+        var text: String?
 
         enum CodingKeys: String, CodingKey {
-            case event
+            case command
             case paneID = "pane_id"
-            case message
-            case title
-            case body
+            case message, title, body
             case sessionID = "session_id"
+            case direction, path, name, color, target, text
         }
     }
 
-    /// Parse a single JSON message into a (paneID, event, message) tuple.
-    /// Returns nil if the data is invalid or the event type is unrecognized.
-    static func parseMessage(_ data: Data) -> (UUID, AgentEvent, Message)? {
-        guard let msg = try? JSONDecoder().decode(Message.self, from: data),
-              let paneID = UUID(uuidString: msg.paneID) else { return nil }
+    /// Parse a single JSON message into a (SocketMessage, WireMessage) tuple.
+    /// Returns nil if the data is invalid or the command is unrecognized.
+    static func parseWireMessage(_ data: Data) -> (SocketMessage, WireMessage)? {
+        guard let wire = try? JSONDecoder().decode(WireMessage.self, from: data) else { return nil }
 
-        let agentEvent: AgentEvent
-        switch msg.event {
+        // workspace-create is the only command that doesn't require pane_id
+        if wire.command == "workspace-create" {
+            let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
+            return (.workspaceCreate(name: wire.name, path: wire.path, color: color), wire)
+        }
+
+        guard let paneIDString = wire.paneID,
+              let paneID = UUID(uuidString: paneIDString) else { return nil }
+
+        let socketMessage: SocketMessage
+        switch wire.command {
         case "start":
-            agentEvent = .started
+            socketMessage = .agentStarted(paneID: paneID)
         case "stop":
-            agentEvent = .stopped
+            socketMessage = .agentStopped(paneID: paneID)
         case "error":
-            agentEvent = .error(message: msg.message ?? "Unknown error")
+            socketMessage = .agentError(paneID: paneID, message: wire.message ?? "Unknown error")
         case "notification":
-            agentEvent = .notification(
-                title: msg.title ?? "Agent",
-                body: msg.body ?? ""
+            socketMessage = .notification(
+                paneID: paneID,
+                title: wire.title ?? "Agent",
+                body: wire.body ?? ""
             )
         case "session-start":
-            guard let sessionID = msg.sessionID, !sessionID.isEmpty else { return nil }
-            agentEvent = .sessionStarted(sessionID: sessionID)
+            guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
+            socketMessage = .sessionStarted(paneID: paneID, sessionID: sessionID)
+        case "pane-split":
+            let dir = wire.direction.flatMap { PaneLayout.SplitDirection(rawValue: $0) }
+            socketMessage = .paneSplit(paneID: paneID, direction: dir, path: wire.path)
+        case "pane-create":
+            socketMessage = .paneCreate(paneID: paneID, path: wire.path)
+        case "pane-close":
+            socketMessage = .paneClose(paneID: paneID)
+        case "pane-name":
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            socketMessage = .paneName(paneID: paneID, name: name)
+        case "pane-send":
+            guard let target = wire.target, !target.isEmpty,
+                  let text = wire.text, !text.isEmpty else { return nil }
+            socketMessage = .paneSend(paneID: paneID, target: target, text: text)
         default:
             return nil
         }
 
-        return (paneID, agentEvent, msg)
+        return (socketMessage, wire)
     }
 
-    /// Parse newline-separated JSON data into an array of (paneID, event) tuples.
-    /// Handles the session_id dual-fire logic: if a non-session-start event
-    /// includes a session_id, a .sessionStarted event is also emitted.
-    static func parseData(_ data: Data) -> [(UUID, AgentEvent)] {
+    /// Parse newline-separated JSON data into an array of SocketMessages.
+    /// Handles the session_id dual-fire logic: if a non-session-start command
+    /// includes a session_id, a .sessionStarted message is also emitted.
+    static func parseMessages(_ data: Data) -> [SocketMessage] {
         guard let text = String(data: data, encoding: .utf8) else { return [] }
 
-        var results: [(UUID, AgentEvent)] = []
+        var results: [SocketMessage] = []
         for line in text.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty,
                   let jsonData = trimmed.data(using: .utf8) else { continue }
 
-            guard let (paneID, event, msg) = parseMessage(jsonData) else { continue }
-            results.append((paneID, event))
+            guard let (message, wire) = parseWireMessage(jsonData) else { continue }
+            results.append(message)
 
             // session_id is a common field on all Claude Code hook stdin JSON.
-            // Fire .sessionStarted whenever it's present (unless the event
+            // Fire .sessionStarted whenever it's present (unless the command
             // itself is already session-start, to avoid a duplicate).
-            if msg.event != "session-start",
-               let sessionID = msg.sessionID, !sessionID.isEmpty {
-                results.append((paneID, .sessionStarted(sessionID: sessionID)))
+            if wire.command != "session-start",
+               let paneIDString = wire.paneID,
+               let paneID = UUID(uuidString: paneIDString),
+               let sessionID = wire.sessionID, !sessionID.isEmpty {
+                results.append(.sessionStarted(paneID: paneID, sessionID: sessionID))
             }
         }
         return results

@@ -127,10 +127,10 @@ struct ContentView: View {
                 store.send(.desktopNotification(paneID: paneID, title: title, body: body))
             }
             .onAppear {
-                // Start socket server and wire events to AppReducer
-                socketServer.onEvent = { paneID, event in
+                // Start socket server and wire messages to AppReducer
+                socketServer.onMessage = { message in
                     Task { @MainActor in
-                        store.send(.socketEvent(paneID: paneID, event: event))
+                        store.send(.socketMessage(message))
                     }
                 }
                 socketServer.start()

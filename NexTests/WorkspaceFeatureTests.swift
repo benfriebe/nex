@@ -180,7 +180,7 @@ struct WorkspaceFeatureTests {
             $0.surfaceManager = SurfaceManager()
         }
 
-        await store.send(.agentStatusChanged(paneID: paneID, event: .stopped)) { state in
+        await store.send(.agentStopped(paneID: paneID)) { state in
             state.panes[id: paneID]?.status = .waitingForInput
         }
     }
@@ -195,7 +195,7 @@ struct WorkspaceFeatureTests {
             $0.surfaceManager = SurfaceManager()
         }
 
-        await store.send(.agentStatusChanged(paneID: paneID, event: .error(message: "fail"))) { state in
+        await store.send(.agentError(paneID: paneID)) { state in
             state.panes[id: paneID]?.status = .waitingForInput
         }
     }
@@ -226,23 +226,8 @@ struct WorkspaceFeatureTests {
             $0.surfaceManager = SurfaceManager()
         }
 
-        await store.send(.agentStatusChanged(paneID: paneID, event: .sessionStarted(sessionID: "abc-123"))) {
+        await store.send(.sessionStarted(paneID: paneID, sessionID: "abc-123")) {
             $0.panes[id: paneID]?.claudeSessionID = "abc-123"
-        }
-    }
-
-    @Test func notificationEventSetsWaitingForInput() async {
-        let workspace = WorkspaceFeature.State(name: "Test")
-        let paneID = workspace.panes.first!.id
-
-        let store = TestStore(initialState: workspace) {
-            WorkspaceFeature()
-        } withDependencies: {
-            $0.surfaceManager = SurfaceManager()
-        }
-
-        await store.send(.agentStatusChanged(paneID: paneID, event: .notification(title: "Done", body: "ok"))) {
-            $0.panes[id: paneID]?.status = .waitingForInput
         }
     }
 

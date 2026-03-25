@@ -24,7 +24,7 @@ struct AgentLifecycleTests {
         return store
     }
 
-    @Test func socketEventRoutesToCorrectWorkspace() async {
+    @Test func socketMessageRoutesToCorrectWorkspace() async {
         let paneID1 = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let paneID2 = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         let wsID1 = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
@@ -46,12 +46,12 @@ struct AgentLifecycleTests {
             activeWorkspaceID: wsID1
         )
 
-        // Send socket event for pane in WS2 (background workspace)
-        await store.send(.socketEvent(paneID: paneID2, event: .stopped))
+        // Send socket message for pane in WS2 (background workspace)
+        await store.send(.socketMessage(.agentStopped(paneID: paneID2)))
 
         // The .send() effect routes to the child — wait for it
         await store.receive(
-            .workspaces(.element(id: wsID2, action: .agentStatusChanged(paneID: paneID2, event: .stopped)))
+            .workspaces(.element(id: wsID2, action: .agentStopped(paneID: paneID2)))
         ) { state in
             state.workspaces[id: wsID2]?.panes[id: paneID2]?.status = .waitingForInput
         }
@@ -114,7 +114,7 @@ struct AgentLifecycleTests {
         }
     }
 
-    @Test func socketEventForUnknownPaneIsIgnored() async {
+    @Test func socketMessageForUnknownPaneIsIgnored() async {
         let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
         let unknownPaneID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
@@ -131,7 +131,7 @@ struct AgentLifecycleTests {
         )
 
         // Should produce no child effects — unknown pane
-        await store.send(.socketEvent(paneID: unknownPaneID, event: .stopped))
+        await store.send(.socketMessage(.agentStopped(paneID: unknownPaneID)))
     }
 
     // MARK: - Desktop Notifications
@@ -171,10 +171,10 @@ struct AgentLifecycleTests {
             activeWorkspaceID: wsID
         )
 
-        await store.send(.socketEvent(paneID: paneID, event: .sessionStarted(sessionID: "abc-123")))
+        await store.send(.socketMessage(.sessionStarted(paneID: paneID, sessionID: "abc-123")))
 
         await store.receive(
-            .workspaces(.element(id: wsID, action: .agentStatusChanged(paneID: paneID, event: .sessionStarted(sessionID: "abc-123"))))
+            .workspaces(.element(id: wsID, action: .sessionStarted(paneID: paneID, sessionID: "abc-123")))
         ) { state in
             state.workspaces[id: wsID]?.panes[id: paneID]?.claudeSessionID = "abc-123"
         }
@@ -196,10 +196,10 @@ struct AgentLifecycleTests {
         )
 
         // Error events always fire a notification (even if focused)
-        await store.send(.socketEvent(paneID: paneID, event: .error(message: "crash")))
+        await store.send(.socketMessage(.agentError(paneID: paneID, message: "crash")))
 
         await store.receive(
-            .workspaces(.element(id: wsID, action: .agentStatusChanged(paneID: paneID, event: .error(message: "crash"))))
+            .workspaces(.element(id: wsID, action: .agentError(paneID: paneID)))
         ) { state in
             state.workspaces[id: wsID]?.panes[id: paneID]?.status = .waitingForInput
         }

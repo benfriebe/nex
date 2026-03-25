@@ -23,7 +23,7 @@ struct AppReducer {
 
     enum Action: Equatable {
         case appLaunched
-        case createWorkspace(name: String, color: WorkspaceColor, repos: [Repo] = [])
+        case createWorkspace(name: String, color: WorkspaceColor, repos: [Repo] = [], workingDirectory: String? = nil)
         case deleteWorkspace(UUID)
         case setActiveWorkspace(UUID)
         case switchToWorkspaceByIndex(Int)
@@ -41,8 +41,8 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
 
-        /// Agent Lifecycle (socket events)
-        case socketEvent(paneID: UUID, event: AgentEvent)
+        /// Socket messages (agent lifecycle + pane/workspace commands)
+        case socketMessage(SocketMessage)
 
         // Cross-workspace surface notifications
         case surfaceTitleChanged(paneID: UUID, title: String)
@@ -107,7 +107,7 @@ struct AppReducer {
                     .send(.settings(.loadSettings))
                 )
 
-            case .createWorkspace(let name, let color, let repos):
+            case .createWorkspace(let name, let color, let repos, let workingDirectory):
                 var workspace = WorkspaceFeature.State(
                     id: uuid(),
                     name: name,
@@ -117,6 +117,8 @@ struct AppReducer {
                 // If exactly one repo, start the first pane in that repo's directory
                 if repos.count == 1 {
                     workspace.panes[workspace.panes.startIndex].workingDirectory = repos[0].path
+                } else if let workingDirectory {
+                    workspace.panes[workspace.panes.startIndex].workingDirectory = workingDirectory
                 }
 
                 // Add repo associations
@@ -279,7 +281,25 @@ struct AppReducer {
                     .send(.startGitStatusTimer)
                 )
 
-            case .workspaces(.element(_, action: .agentStatusChanged)):
+            case .workspaces(.element(_, action: .agentStarted)):
+                return .merge(
+                    .send(.persistState),
+                    .send(.updateExternalIndicators)
+                )
+
+            case .workspaces(.element(_, action: .agentStopped)):
+                return .merge(
+                    .send(.persistState),
+                    .send(.updateExternalIndicators)
+                )
+
+            case .workspaces(.element(_, action: .agentError)):
+                return .merge(
+                    .send(.persistState),
+                    .send(.updateExternalIndicators)
+                )
+
+            case .workspaces(.element(_, action: .sessionStarted)):
                 return .merge(
                     .send(.persistState),
                     .send(.updateExternalIndicators)
@@ -327,76 +347,182 @@ struct AppReducer {
                     action: .openMarkdownFile(filePath: path)
                 )))
 
-            // MARK: - Agent Lifecycle
+            // MARK: - Socket Messages
 
-            case .socketEvent(let paneID, let event):
-                // Route to the workspace that owns this pane
-                guard let workspace = state.workspaces.first(where: { ws in
-                    ws.panes[id: paneID] != nil
-                }) else { return .none }
+            case .socketMessage(let message):
+                switch message {
+                // MARK: Agent lifecycle
 
-                // If we get a "start" while already running, the previous "stop"
-                // was missed (e.g. user interrupted Claude). Reset to idle first
-                // so the status lifecycle stays clean.
-                if case .started = event,
-                   workspace.panes[id: paneID]?.status == .running {
-                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.status = .idle
-                }
+                case .agentStarted(let paneID):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
 
-                // Fire desktop notification for agent events (unless pane is focused)
-                let isFocused = state.activeWorkspaceID == workspace.id
-                    && workspace.focusedPaneID == paneID
-                let notifService = notificationService
-                let wsID = workspace.id
-                var effects: [Effect<Action>] = [
-                    .send(.workspaces(.element(
-                        id: workspace.id,
-                        action: .agentStatusChanged(paneID: paneID, event: event)
-                    ))),
-                    .send(.updateExternalIndicators)
-                ]
-                let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
-                switch event {
-                case .stopped:
+                    // If we get a "start" while already running, the previous "stop"
+                    // was missed (e.g. user interrupted Claude). Reset to idle first
+                    // so the status lifecycle stays clean.
+                    if workspace.panes[id: paneID]?.status == .running {
+                        state.workspaces[id: workspace.id]?.panes[id: paneID]?.status = .idle
+                    }
+
+                    return .merge(
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStarted(paneID: paneID)))),
+                        .send(.updateExternalIndicators)
+                    )
+
+                case .agentStopped(let paneID):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+
+                    let isFocused = state.activeWorkspaceID == workspace.id && workspace.focusedPaneID == paneID
+                    let notifService = notificationService
+                    let wsID = workspace.id
+                    let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
                     let shouldNotify = !isFocused || !isAppActive
                     let shouldBounce = !isAppActive
                     let title = workspace.panes[id: paneID]?.title ?? workspace.name
-                    effects.append(.run { _ in
-                        if shouldNotify {
+
+                    return .merge(
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID)))),
+                        .send(.updateExternalIndicators),
+                        .run { _ in
+                            if shouldNotify {
+                                notifService.post(
+                                    title: title,
+                                    body: "Agent is waiting for input",
+                                    paneID: paneID,
+                                    workspaceID: wsID
+                                )
+                            }
+                            if shouldBounce {
+                                await MainActor.run {
+                                    NSApp.requestUserAttention(.informationalRequest)
+                                }
+                            }
+                        }
+                    )
+
+                case .agentError(let paneID, let message):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+
+                    let notifService = notificationService
+                    let wsID = workspace.id
+
+                    return .merge(
+                        .send(.workspaces(.element(id: workspace.id, action: .agentError(paneID: paneID)))),
+                        .send(.updateExternalIndicators),
+                        .run { _ in
                             notifService.post(
-                                title: title,
-                                body: "Agent is waiting for input",
+                                title: "Agent Error",
+                                body: message,
                                 paneID: paneID,
                                 workspaceID: wsID
                             )
                         }
-                        if shouldBounce {
-                            await MainActor.run {
-                                NSApp.requestUserAttention(.informationalRequest)
-                            }
-                        }
-                    })
-                case .error(let message):
-                    effects.append(.run { _ in
-                        notifService.post(
-                            title: "Agent Error",
-                            body: message,
-                            paneID: paneID,
-                            workspaceID: wsID
-                        )
-                    })
-                case .notification(let title, let body):
-                    if !isFocused || !MainActor.assumeIsolated({ NSApp.isActive }) {
+                    )
+
+                case .notification(let paneID, let title, let body):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+
+                    let isFocused = state.activeWorkspaceID == workspace.id && workspace.focusedPaneID == paneID
+                    let notifService = notificationService
+                    let wsID = workspace.id
+                    let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
+
+                    var effects: [Effect<Action>] = [
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID)))),
+                        .send(.updateExternalIndicators)
+                    ]
+                    if !isFocused || !isAppActive {
                         effects.append(.run { _ in
                             notifService.post(title: title, body: body, paneID: paneID, workspaceID: wsID)
                         })
                     }
-                case .started:
-                    break
-                case .sessionStarted:
-                    break
+                    return .merge(effects)
+
+                case .sessionStarted(let paneID, let sessionID):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+
+                    return .merge(
+                        .send(.workspaces(.element(
+                            id: workspace.id,
+                            action: .sessionStarted(paneID: paneID, sessionID: sessionID)
+                        ))),
+                        .send(.updateExternalIndicators)
+                    )
+
+                // MARK: Pane commands
+
+                case .paneSplit(let paneID, let direction, let path):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                    if let path {
+                        return .send(.workspaces(.element(id: workspace.id, action: .splitPaneAtPath(path))))
+                    }
+                    return .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .splitPane(direction: direction ?? .horizontal, sourcePaneID: paneID)
+                    )))
+
+                case .paneCreate(let paneID, let path):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                    if let path {
+                        return .send(.workspaces(.element(id: workspace.id, action: .splitPaneAtPath(path))))
+                    }
+                    return .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .splitPane(direction: .horizontal, sourcePaneID: paneID)
+                    )))
+
+                case .paneClose(let paneID):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    return .send(.workspaces(.element(id: workspace.id, action: .closePane(paneID))))
+
+                case .paneName(let paneID, let name):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.label = name
+                    return .send(.persistState)
+
+                case .paneSend(let paneID, let target, let text):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+
+                    // Resolve target: try UUID first, then label in same workspace, then all workspaces
+                    let resolvedID: UUID? = if let targetUUID = UUID(uuidString: target) {
+                        targetUUID
+                    } else {
+                        // Search by label — same workspace first
+                        if let match = workspace.panes.first(where: { $0.label == target }) {
+                            match.id
+                        } else {
+                            state.workspaces
+                                .flatMap(\.panes)
+                                .first(where: { $0.label == target })?.id
+                        }
+                    }
+                    guard let resolvedID else { return .none }
+
+                    let mgr = surfaceManager
+                    return .run { _ in
+                        await mgr.sendCommand(to: resolvedID, command: text)
+                    }
+
+                // MARK: Workspace commands
+
+                case .workspaceCreate(let name, let path, let color):
+                    return .send(.createWorkspace(
+                        name: name ?? "Workspace",
+                        color: color ?? .blue,
+                        workingDirectory: path
+                    ))
                 }
-                return .merge(effects)
 
             // MARK: - Cross-Workspace Surface Notifications
 
