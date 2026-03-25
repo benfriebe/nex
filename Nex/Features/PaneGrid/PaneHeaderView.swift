@@ -31,7 +31,21 @@ struct PaneHeaderView: View {
                     .animation(.easeInOut(duration: 0.3), value: pane.status)
             }
 
-            Text(displayTitle)
+            if let label = pane.label, !label.isEmpty, pane.type != .markdown {
+                HStack(spacing: 2) {
+                    Image(systemName: "tag.fill")
+                        .font(.system(size: 8))
+                    Text(label)
+                        .font(.system(size: 10, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+            }
+
+            Text(displayPath)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
@@ -143,17 +157,11 @@ struct PaneHeaderView: View {
         }
     }
 
-    private var displayTitle: String {
+    private var displayPath: String {
         if pane.type == .markdown, let filePath = pane.filePath {
             return (filePath as NSString).lastPathComponent
         }
-        if let label = pane.label, !label.isEmpty {
-            return label
-        }
-        if let title = pane.title, !title.isEmpty {
-            return title
-        }
-        let path = pane.workingDirectory
+        let path = pane.title ?? pane.workingDirectory
         if let home = ProcessInfo.processInfo.environment["HOME"],
            path.hasPrefix(home) {
             return "~" + path.dropFirst(home.count)
