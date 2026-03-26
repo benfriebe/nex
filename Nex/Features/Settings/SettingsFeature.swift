@@ -30,30 +30,30 @@ struct SettingsFeature {
 
     private enum AppearanceDebounceID: Hashable { case debounce }
 
-    private static let defaultsKeyOpacity = "settings.backgroundOpacity"
-    private static let defaultsKeyColorR = "settings.backgroundColorR"
-    private static let defaultsKeyColorG = "settings.backgroundColorG"
-    private static let defaultsKeyColorB = "settings.backgroundColorB"
-    private static let defaultsKeyHasCustomColor = "settings.hasCustomColor"
-    private static let defaultsKeyWorktreeBasePath = "settings.worktreeBasePath"
+    static let defaultsKeyOpacity = "settings.backgroundOpacity"
+    static let defaultsKeyColorR = "settings.backgroundColorR"
+    static let defaultsKeyColorG = "settings.backgroundColorG"
+    static let defaultsKeyColorB = "settings.backgroundColorB"
+    static let defaultsKeyHasCustomColor = "settings.hasCustomColor"
+    static let defaultsKeyWorktreeBasePath = "settings.worktreeBasePath"
 
     @Dependency(\.surfaceManager) var surfaceManager
+    @Dependency(\.userDefaults) var userDefaults
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .loadSettings:
-                let defaults = UserDefaults.standard
-                if defaults.object(forKey: Self.defaultsKeyOpacity) != nil {
-                    state.backgroundOpacity = defaults.double(forKey: Self.defaultsKeyOpacity)
+                if userDefaults.hasKey(Self.defaultsKeyOpacity) {
+                    state.backgroundOpacity = userDefaults.doubleForKey(Self.defaultsKeyOpacity)
                 }
-                if let basePath = defaults.string(forKey: Self.defaultsKeyWorktreeBasePath) {
+                if let basePath = userDefaults.stringForKey(Self.defaultsKeyWorktreeBasePath) {
                     state.worktreeBasePath = basePath
                 }
-                if defaults.bool(forKey: Self.defaultsKeyHasCustomColor) {
-                    state.backgroundColorR = defaults.double(forKey: Self.defaultsKeyColorR)
-                    state.backgroundColorG = defaults.double(forKey: Self.defaultsKeyColorG)
-                    state.backgroundColorB = defaults.double(forKey: Self.defaultsKeyColorB)
+                if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
+                    state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
+                    state.backgroundColorG = userDefaults.doubleForKey(Self.defaultsKeyColorG)
+                    state.backgroundColorB = userDefaults.doubleForKey(Self.defaultsKeyColorB)
                 } else {
                     let config = GhosttyConfigClient.liveValue
                     let color = config.backgroundColor.usingColorSpace(.sRGB) ?? config.backgroundColor
@@ -91,17 +91,16 @@ struct SettingsFeature {
 
             case .setWorktreeBasePath(let path):
                 state.worktreeBasePath = path
-                UserDefaults.standard.set(path, forKey: Self.defaultsKeyWorktreeBasePath)
+                userDefaults.setString(path, Self.defaultsKeyWorktreeBasePath)
                 return .none
 
             case .applyAppearance(let opacity, let r, let g, let b):
                 // Persist to UserDefaults
-                let defaults = UserDefaults.standard
-                defaults.set(opacity, forKey: Self.defaultsKeyOpacity)
-                defaults.set(r, forKey: Self.defaultsKeyColorR)
-                defaults.set(g, forKey: Self.defaultsKeyColorG)
-                defaults.set(b, forKey: Self.defaultsKeyColorB)
-                defaults.set(true, forKey: Self.defaultsKeyHasCustomColor)
+                userDefaults.setDouble(opacity, Self.defaultsKeyOpacity)
+                userDefaults.setDouble(r, Self.defaultsKeyColorR)
+                userDefaults.setDouble(g, Self.defaultsKeyColorG)
+                userDefaults.setDouble(b, Self.defaultsKeyColorB)
+                userDefaults.setBool(true, Self.defaultsKeyHasCustomColor)
 
                 // Update shared config client
                 GhosttyConfigClient.liveValue.backgroundOpacity = opacity

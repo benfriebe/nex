@@ -75,9 +75,6 @@ private struct AppearanceSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear {
-            store.send(.loadSettings)
-        }
     }
 
     private var backgroundColorBinding: Binding<Color> {

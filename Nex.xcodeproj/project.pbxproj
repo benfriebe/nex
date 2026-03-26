@@ -47,6 +47,7 @@
 		A0056823B88DEBC5006159A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */; };
 		A0749EBDDCE764238315879A /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */; };
 		A15BBD1CFDB5E52E44B7ED59 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = A7AC116A099F0911E230E51F /* Markdown */; };
+		A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */; };
 		AC234A5AAADE90A7EC7BB5F8 /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */; };
 		B167B81282ADF716B21B1679 /* VibrancyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D6AE6635332105A3C18A03 /* VibrancyView.swift */; };
 		B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F173122691292BD9062F356E /* CheckForUpdatesView.swift */; };
@@ -121,6 +122,7 @@
 		7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		7F561A2375008B0EC39BF86D /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
 		8322D3C28268495A01EA0597 /* SettingsFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeature.swift; sourceTree = "<group>"; };
+		8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsClient.swift; sourceTree = "<group>"; };
 		94CA6C20BB3882E02348ADF4 /* SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceView.swift; sourceTree = "<group>"; };
 		96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
 		9D96CD47FF756C95404DF4F6 /* Pane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pane.swift; sourceTree = "<group>"; };
@@ -310,6 +312,7 @@
 				309D0F6F13F12FDC350DE875 /* SocketServer.swift */,
 				42A24C1FEC6EA31096603326 /* SurfaceManager.swift */,
 				C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */,
+				8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -537,6 +540,7 @@
 				64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */,
 				75BECE7D63EF981C344D4902 /* SurfaceView.swift in Sources */,
 				B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */,
+				A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */,
 				B167B81282ADF716B21B1679 /* VibrancyView.swift in Sources */,
 				4AF9CB9A4E7CE871FBE1A6F2 /* WorkspaceColor.swift in Sources */,
 				E62618BAC6927017CC4ECC44 /* WorkspaceFeature.swift in Sources */,
