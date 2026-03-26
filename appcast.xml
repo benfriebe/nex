@@ -42,5 +42,17 @@
       length="10631421"
       type="application/octet-stream" />
   </item>
+    <item>
+    <title>Version 0.7.2</title>
+    <pubDate>Thu, 26 Mar 2026 02:49:00 +0000</pubDate>
+    <sparkle:version>0.7.2</sparkle:version>
+    <sparkle:shortVersionString>0.7.2</sparkle:shortVersionString>
+    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    <enclosure
+      url="https://github.com/benfriebe/nex/releases/download/v0.7.2/Nex-0.7.2.dmg"
+      sparkle:edSignature="aU2TKpZdqJGPpQhnHpNz262zJCRB6oiVb0AdiuIYIaBG4HC+T2Se2bg71CjLsFwhsFfxYS58WuNCpt9HEcOiCw=="
+      length="10644896"
+      type="application/octet-stream" />
+  </item>
   </channel>
 </rss>
