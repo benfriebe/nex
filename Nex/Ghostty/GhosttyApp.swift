@@ -23,6 +23,9 @@ final class GhosttyApp {
     /// Notification posted when a surface sends an OSC desktop notification.
     /// userInfo: ["surface": ghostty_surface_t, "title": String, "body": String]
     static let desktopNotification = Notification.Name("GhosttyApp.desktopNotification")
+    /// Notification posted when the user CMD-clicks a .md file path in the terminal.
+    /// userInfo: ["path": String, "surface": ghostty_surface_t?]
+    static let openFileNotification = Notification.Name("GhosttyApp.openFile")
 
     private init() {}
 
@@ -157,6 +160,26 @@ final class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_RING_BELL:
+            return true
+
+        case GHOSTTY_ACTION_OPEN_URL:
+            let openUrl = action.action.open_url
+            guard let urlPtr = openUrl.url else { return false }
+            var urlString = String(cString: urlPtr)
+            while urlString.hasSuffix(".") { urlString.removeLast() }
+            let path = NSString(string: urlString).standardizingPath
+            guard path.hasSuffix(".md") else { return false }
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.openFileNotification,
+                    object: nil,
+                    userInfo: [
+                        "path": path,
+                        "surface": surface as Any
+                    ]
+                )
+            }
             return true
 
         case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS:
