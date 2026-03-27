@@ -17,6 +17,8 @@ enum SocketMessage: Equatable {
     case paneSend(paneID: UUID, target: String, text: String)
     /// Workspace commands
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?)
+    /// File commands
+    case openFile(path: String, paneID: UUID?)
 }
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -206,10 +208,16 @@ final class SocketServer: Sendable {
     static func parseWireMessage(_ data: Data) -> (SocketMessage, WireMessage)? {
         guard let wire = try? JSONDecoder().decode(WireMessage.self, from: data) else { return nil }
 
-        // workspace-create is the only command that doesn't require pane_id
+        // workspace-create and open don't require pane_id
         if wire.command == "workspace-create" {
             let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
             return (.workspaceCreate(name: wire.name, path: wire.path, color: color), wire)
+        }
+
+        if wire.command == "open" {
+            guard let path = wire.path, !path.isEmpty else { return nil }
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.openFile(path: path, paneID: paneID), wire)
         }
 
         guard let paneIDString = wire.paneID,

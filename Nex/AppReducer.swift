@@ -528,6 +528,23 @@ struct AppReducer {
                         color: color ?? .blue,
                         workingDirectory: path
                     ))
+
+                // MARK: File commands
+
+                case .openFile(let path, let paneID):
+                    if let paneID,
+                       let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
+                        state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                        return .send(.workspaces(.element(
+                            id: workspace.id,
+                            action: .openMarkdownFile(filePath: path)
+                        )))
+                    }
+                    guard let activeID = state.activeWorkspaceID else { return .none }
+                    return .send(.workspaces(.element(
+                        id: activeID,
+                        action: .openMarkdownFile(filePath: path)
+                    )))
                 }
 
             // MARK: - Cross-Workspace Surface Notifications

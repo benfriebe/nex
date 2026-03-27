@@ -202,6 +202,42 @@ struct SocketParsingTests {
         #expect(result?.0 == .workspaceCreate(name: "New", path: nil, color: nil))
     }
 
+    // MARK: - parseWireMessage — File commands
+
+    @Test func parseOpenCommand() {
+        let data = jsonData("""
+        {"command":"open","path":"/tmp/plan.md","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: Self.paneUUID))
+    }
+
+    @Test func parseOpenCommandNoPaneID() {
+        let data = jsonData("""
+        {"command":"open","path":"/tmp/plan.md"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: nil))
+    }
+
+    @Test func parseOpenCommandMissingPath() {
+        let data = jsonData("""
+        {"command":"open","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    @Test func parseOpenCommandEmptyPath() {
+        let data = jsonData("""
+        {"command":"open","path":"","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
     // MARK: - parseWireMessage — Error cases
 
     @Test func parseUnknownCommand() {

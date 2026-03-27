@@ -10,6 +10,7 @@
 //   nex pane name <name>
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex workspace create [--name "..."] [--path /dir] [--color blue]
+//   nex open <filepath>
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
 // Falls back silently if the socket doesn't exist or NEX_PANE_ID is not set.
@@ -33,6 +34,7 @@ func printUsage() {
       nex pane name <name>
       nex pane send --to <name-or-uuid> <command...>
       nex workspace create [--name "..."] [--path /dir] [--color blue]
+      nex open <filepath>
     \n
     """, stderr)
 }
@@ -266,6 +268,26 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
     sendJSON(payload)
 }
 
+func handleOpen(_ args: inout ArraySlice<String>) {
+    guard let filePath = args.popFirst() else {
+        fputs("Usage: nex open <filepath>\n", stderr)
+        exit(1)
+    }
+
+    let absolutePath = URL(fileURLWithPath: filePath).standardizedFileURL.path
+
+    var payload: [String: String] = [
+        "command": "open",
+        "path": absolutePath
+    ]
+
+    if let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
+        payload["pane_id"] = paneID
+    }
+
+    sendJSON(payload)
+}
+
 // MARK: - Main
 
 var args = CommandLine.arguments.dropFirst()
@@ -282,6 +304,8 @@ case "pane":
     handlePane(&args)
 case "workspace":
     handleWorkspace(&args)
+case "open":
+    handleOpen(&args)
 default:
     fputs("Unknown command: \(subcommand)\n", stderr)
     printUsage()
