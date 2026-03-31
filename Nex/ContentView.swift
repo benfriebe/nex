@@ -126,6 +126,10 @@ struct ContentView: View {
                       let paneID = surfaceManager.paneID(for: surface) else { return }
                 store.send(.desktopNotification(paneID: paneID, title: title, body: body))
             }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfaceCloseNotification)) { notification in
+                guard let paneID = notification.userInfo?["paneID"] as? UUID else { return }
+                store.send(.surfaceProcessExited(paneID: paneID))
+            }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.openFileNotification)) { notification in
                 guard let path = notification.userInfo?["path"] as? String else { return }
                 store.send(.openFileAtPath(path))

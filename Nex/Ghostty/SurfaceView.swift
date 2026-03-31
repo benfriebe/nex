@@ -41,6 +41,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         config.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
         config.font_size = 0 // 0 = use config default
         config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
+        config.wait_after_command = false
 
         // Inject NEX_PANE_ID so hook scripts know which pane fired.
         // Also prepend Contents/Helpers to PATH so `nex` (CLI) is found before

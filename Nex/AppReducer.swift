@@ -48,6 +48,7 @@ struct AppReducer {
         // Cross-workspace surface notifications
         case surfaceTitleChanged(paneID: UUID, title: String)
         case surfaceDirectoryChanged(paneID: UUID, directory: String)
+        case surfaceProcessExited(paneID: UUID)
 
         /// Desktop notifications (OSC 9/99/777)
         case desktopNotification(paneID: UUID, title: String, body: String)
@@ -565,6 +566,15 @@ struct AppReducer {
                 return .send(.workspaces(.element(
                     id: workspace.id,
                     action: .paneDirectoryChanged(paneID: paneID, directory: directory)
+                )))
+
+            case .surfaceProcessExited(let paneID):
+                guard let workspace = state.workspaces.first(where: { ws in
+                    ws.panes[id: paneID] != nil
+                }) else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .paneProcessTerminated(paneID: paneID)
                 )))
 
             // MARK: - Desktop Notifications (OSC)

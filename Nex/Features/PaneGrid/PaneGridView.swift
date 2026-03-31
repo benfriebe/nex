@@ -195,5 +195,6 @@ struct PaneGridView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: ghosttyConfig.backgroundColor))
     }
 }

@@ -94,9 +94,17 @@ final class GhosttyApp {
             }
         }
 
-        runtime.close_surface_cb = { _, _ in
-            // The close_surface callback fires when a surface's process terminates
-            // We handle this via the action callback instead
+        runtime.close_surface_cb = { userdata, _ in
+            guard let userdata else { return }
+            let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            let paneID = surfaceView.paneID
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: GhosttyApp.surfaceCloseNotification,
+                    object: nil,
+                    userInfo: ["paneID": paneID]
+                )
+            }
         }
 
         app = ghostty_app_new(&runtime, config.rawConfig)
@@ -166,7 +174,9 @@ final class GhosttyApp {
             let openUrl = action.action.open_url
             guard let urlPtr = openUrl.url else { return false }
             var urlString = String(cString: urlPtr)
-            while urlString.hasSuffix(".") { urlString.removeLast() }
+            while urlString.hasSuffix(".") {
+                urlString.removeLast()
+            }
             let path = NSString(string: urlString).standardizingPath
             guard path.hasSuffix(".md") else { return false }
             let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
