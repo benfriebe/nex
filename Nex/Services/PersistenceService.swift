@@ -243,13 +243,21 @@ actor PersistenceService {
 
 extension PersistenceService: DependencyKey {
     static var liveValue: PersistenceService {
-        let db = try! DatabaseService()
-        return PersistenceService(db: db)
+        do {
+            let db = try DatabaseService()
+            return PersistenceService(db: db)
+        } catch {
+            fatalError("Failed to initialize database: \(error)")
+        }
     }
 
     static var testValue: PersistenceService {
-        let db = try! DatabaseService(inMemory: true)
-        return PersistenceService(db: db)
+        do {
+            let db = try DatabaseService(inMemory: true)
+            return PersistenceService(db: db)
+        } catch {
+            fatalError("Failed to initialize test database: \(error)")
+        }
     }
 }
 
