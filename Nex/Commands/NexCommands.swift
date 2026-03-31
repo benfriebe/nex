@@ -114,7 +114,7 @@ final class PaneShortcutMonitor {
         // Arrow keys include .numericPad and .function in their modifier flags
         let arrowFlags = flags.subtracting([.numericPad, .function])
 
-        // ⌘⌥→ — focus next pane
+        // ⌘⌥→ or ⌘] — focus next pane
         if event.keyCode == 124 /* → */, arrowFlags == [.command, .option] {
             store.send(.workspaces(.element(
                 id: activeID,
@@ -122,9 +122,23 @@ final class PaneShortcutMonitor {
             )))
             return true
         }
+        if event.keyCode == 30 /* ] */, flags == .command {
+            store.send(.workspaces(.element(
+                id: activeID,
+                action: .focusNextPane
+            )))
+            return true
+        }
 
-        // ⌘⌥← — focus previous pane
+        // ⌘⌥← or ⌘[ — focus previous pane
         if event.keyCode == 123 /* ← */, arrowFlags == [.command, .option] {
+            store.send(.workspaces(.element(
+                id: activeID,
+                action: .focusPreviousPane
+            )))
+            return true
+        }
+        if event.keyCode == 33 /* [ */, flags == .command {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .focusPreviousPane
