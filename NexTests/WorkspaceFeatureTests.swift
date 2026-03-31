@@ -328,6 +328,145 @@ struct WorkspaceFeatureTests {
         // State unchanged — no assertion closure needed
     }
 
+    // MARK: - Zoom Pane
+
+    @Test func toggleZoomExpandsAndRestores() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        let originalLayout = PaneLayout.split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.layout = originalLayout
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        // Zoom in
+        await store.send(.toggleZoomPane) { state in
+            state.savedLayout = originalLayout
+            state.zoomedPaneID = firstID
+            state.layout = .leaf(firstID)
+        }
+
+        // Zoom out
+        await store.send(.toggleZoomPane) { state in
+            state.savedLayout = nil
+            state.zoomedPaneID = nil
+            state.layout = originalLayout
+        }
+    }
+
+    @Test func zoomSinglePaneIsNoop() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.toggleZoomPane)
+        // State unchanged — single pane already fills workspace
+    }
+
+    @Test func closePaneWhileZoomedRestoresLayout() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        let originalLayout = PaneLayout.split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.layout = .leaf(firstID)
+        workspace.savedLayout = originalLayout
+        workspace.zoomedPaneID = firstID
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.closePane(firstID)) { state in
+            // Zoom state cleared, layout restored then pane removed
+            state.savedLayout = nil
+            state.zoomedPaneID = nil
+            state.recentlyClosedPanes = [
+                ClosedPaneSnapshot(
+                    workingDirectory: state.panes[id: firstID]!.workingDirectory,
+                    label: nil,
+                    type: .shell,
+                    claudeSessionID: nil
+                )
+            ]
+            state.panes.remove(id: firstID)
+            state.layout = .leaf(secondID)
+            state.focusedPaneID = secondID
+        }
+    }
+
+    @Test func splitWhileZoomedExitsZoom() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        let originalLayout = PaneLayout.split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.layout = .leaf(firstID)
+        workspace.savedLayout = originalLayout
+        workspace.zoomedPaneID = firstID
+        workspace.focusedPaneID = firstID
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.uuid = .constant(newPaneID)
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.splitPane(direction: .horizontal, sourcePaneID: firstID)) { state in
+            // Zoom state cleared
+            state.savedLayout = nil
+            state.zoomedPaneID = nil
+            // Split happened on the restored layout
+            state.panes.append(Pane(id: newPaneID, workingDirectory: state.panes[id: firstID]!.workingDirectory))
+            state.focusedPaneID = newPaneID
+            state.layout = .split(
+                .horizontal,
+                ratio: 0.5,
+                first: .split(
+                    .horizontal,
+                    ratio: 0.5,
+                    first: .leaf(firstID),
+                    second: .leaf(newPaneID)
+                ),
+                second: .leaf(secondID)
+            )
+        }
+    }
+
     @Test func closedPaneStackCapsAt10() async {
         var workspace = WorkspaceFeature.State(name: "Test")
         let basePaneID = workspace.panes.first!.id

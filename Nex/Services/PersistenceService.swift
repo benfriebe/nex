@@ -58,7 +58,8 @@ actor PersistenceService {
                 }
 
                 for (index, workspace) in workspaces.enumerated() {
-                    let layoutData = try JSONEncoder().encode(workspace.layout)
+                    let layoutToSave = workspace.savedLayout ?? workspace.layout
+                    let layoutData = try JSONEncoder().encode(layoutToSave)
                     let layoutJSON = String(data: layoutData, encoding: .utf8) ?? "null"
 
                     let record = WorkspaceRecord(

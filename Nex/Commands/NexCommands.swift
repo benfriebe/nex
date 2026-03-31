@@ -157,6 +157,15 @@ final class PaneShortcutMonitor {
             }
         }
 
+        // ⌘⇧↩ — toggle zoom pane
+        if event.keyCode == 36 /* Return */, flags == [.command, .shift] {
+            store.send(.workspaces(.element(
+                id: activeID,
+                action: .toggleZoomPane
+            )))
+            return true
+        }
+
         // ⌘⇧T — reopen closed pane
         if event.keyCode == 17 /* t */, flags == [.command, .shift] {
             store.send(.workspaces(.element(

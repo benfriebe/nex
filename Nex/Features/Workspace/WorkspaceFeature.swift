@@ -22,6 +22,8 @@ struct WorkspaceFeature {
         var focusedPaneID: UUID?
         var repoAssociations: IdentifiedArrayOf<RepoAssociation> = []
         var recentlyClosedPanes: [ClosedPaneSnapshot] = []
+        var zoomedPaneID: UUID?
+        var savedLayout: PaneLayout?
         var createdAt: Date
         var lastAccessedAt: Date
 
@@ -108,6 +110,7 @@ struct WorkspaceFeature {
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
         case reopenClosedPane
+        case toggleZoomPane
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -144,6 +147,11 @@ struct WorkspaceFeature {
                 }
 
             case .splitPaneAtPath(let path, let label):
+                if let saved = state.savedLayout {
+                    state.layout = saved
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                }
                 guard let sourceID = state.focusedPaneID else { return .none }
 
                 let newPaneID = uuid()
@@ -169,6 +177,11 @@ struct WorkspaceFeature {
                 }
 
             case .splitPane(let direction, let sourcePaneID, let label):
+                if let saved = state.savedLayout {
+                    state.layout = saved
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                }
                 let sourceID = sourcePaneID ?? state.focusedPaneID
                 guard let sourceID else { return .none }
                 guard let sourcPane = state.panes[id: sourceID] else { return .none }
@@ -231,6 +244,11 @@ struct WorkspaceFeature {
                 }
 
             case .closePane(let paneID):
+                if let saved = state.savedLayout {
+                    state.layout = saved
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                }
                 let paneType = state.panes[id: paneID]?.type ?? .shell
                 if let pane = state.panes[id: paneID] {
                     state.recentlyClosedPanes.append(
@@ -350,6 +368,23 @@ struct WorkspaceFeature {
 
             case .removeRepoAssociation(let id):
                 state.repoAssociations.remove(id: id)
+                return .none
+
+            case .toggleZoomPane:
+                if state.zoomedPaneID != nil {
+                    // Un-zoom: restore saved layout
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                    }
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                } else if let focusedID = state.focusedPaneID,
+                          state.panes.count > 1 {
+                    // Zoom: save layout and show only focused pane
+                    state.savedLayout = state.layout
+                    state.zoomedPaneID = focusedID
+                    state.layout = .leaf(focusedID)
+                }
                 return .none
 
             case .reopenClosedPane:
