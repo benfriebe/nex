@@ -90,6 +90,19 @@ targets:
           codesign --force --sign "Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)" --timestamp "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
           mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/skills/nex-agentic"
           cp "${SRCROOT}/Resources/skills/nex-agentic/SKILL.md" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/skills/nex-agentic/SKILL.md"
+          # Bundle ghostty shell-integration and terminfo so libghostty can
+          # auto-detect resources and enable shell integration (OSC 7 pwd
+          # reporting, prompt marking, etc.)
+          GHOSTTY_SHARE="${SRCROOT}/ghostty/zig-out/share"
+          RESOURCES="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources"
+          if [ -d "${GHOSTTY_SHARE}/ghostty/shell-integration" ]; then
+            rm -rf "${RESOURCES}/ghostty/shell-integration" "${RESOURCES}/terminfo"
+            mkdir -p "${RESOURCES}/ghostty"
+            cp -R "${GHOSTTY_SHARE}/ghostty/shell-integration" "${RESOURCES}/ghostty/shell-integration"
+            if [ -d "${GHOSTTY_SHARE}/terminfo" ]; then
+              cp -R "${GHOSTTY_SHARE}/terminfo" "${RESOURCES}/terminfo"
+            fi
+          fi
         name: Bundle nex CLI and install script
 
   NexTests:
