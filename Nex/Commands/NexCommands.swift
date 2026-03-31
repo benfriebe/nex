@@ -70,7 +70,7 @@ final class PaneShortcutMonitor {
         monitor = nil
     }
 
-    private func handleKeyEvent(_ event: NSEvent) -> Bool {
+    func handleKeyEvent(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         guard let activeID = store.activeWorkspaceID else { return false }
@@ -115,14 +115,9 @@ final class PaneShortcutMonitor {
         let arrowFlags = flags.subtracting([.numericPad, .function])
 
         // ⌘⌥→ or ⌘] — focus next pane
-        if event.keyCode == 124 /* → */, arrowFlags == [.command, .option] {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .focusNextPane
-            )))
-            return true
-        }
-        if event.keyCode == 30 /* ] */, flags == .command {
+        let isNextPane = (event.keyCode == 124 && arrowFlags == [.command, .option])
+            || (event.keyCode == 30 && flags == .command)
+        if isNextPane {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .focusNextPane
@@ -131,14 +126,9 @@ final class PaneShortcutMonitor {
         }
 
         // ⌘⌥← or ⌘[ — focus previous pane
-        if event.keyCode == 123 /* ← */, arrowFlags == [.command, .option] {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .focusPreviousPane
-            )))
-            return true
-        }
-        if event.keyCode == 33 /* [ */, flags == .command {
+        let isPreviousPane = (event.keyCode == 123 && arrowFlags == [.command, .option])
+            || (event.keyCode == 33 && flags == .command)
+        if isPreviousPane {
             store.send(.workspaces(.element(
                 id: activeID,
                 action: .focusPreviousPane

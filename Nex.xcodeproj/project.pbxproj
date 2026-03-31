@@ -74,6 +74,7 @@
 		EBFB92013428FF7CDE660CB1 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F561A2375008B0EC39BF86D /* Carbon.framework */; };
 		EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9335AE3C92A37DD50A5715A /* AppReducer.swift */; };
 		ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */; };
+		F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */; };
 		FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBEA23E4C37CB5B7A6F4963C /* PersistenceService.swift */; };
 /* End PBXBuildFile section */
 
@@ -139,6 +140,7 @@
 		BECB2222837AC350E94222BB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C58BE92A0878D9CCC786A657 /* WorkspaceRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRowView.swift; sourceTree = "<group>"; };
 		C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterService.swift; sourceTree = "<group>"; };
+		CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneShortcutMonitorTests.swift; sourceTree = "<group>"; };
 		CBEA23E4C37CB5B7A6F4963C /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 		CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducerTests.swift; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 				D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */,
 				21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */,
 				A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */,
+				CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */,
 				4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */,
 				1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */,
 				ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */,
@@ -504,6 +507,7 @@
 				B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */,
 				B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */,
 				4D7F4ECDA338E826904B584E /* PaneLayoutTests.swift in Sources */,
+				F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */,
 				B3FBC9276113E015DA08D41A /* PersistenceTests.swift in Sources */,
 				B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */,
 				EAF43DC55C5612F3AE83BF02 /* SettingsFeatureTests.swift in Sources */,
