@@ -10,6 +10,7 @@ struct PaneHeaderView: View {
     let onSplitHorizontal: () -> Void
     let onSplitVertical: () -> Void
     let onClose: () -> Void
+    var isZoomed: Bool = false
     var isEditing: Bool = false
     var onToggleEdit: (() -> Void)?
     var onDragChanged: ((CGPoint) -> Void)?
@@ -50,6 +51,20 @@ struct PaneHeaderView: View {
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+
+            if isZoomed {
+                HStack(spacing: 2) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 8))
+                    Text("ZOOM")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+            }
 
             Spacer()
 

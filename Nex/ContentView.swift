@@ -42,6 +42,7 @@ struct ContentView: View {
                         onFocusPane: { paneID in
                             store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
                         },
+                        isZoomed: workspace.zoomedPaneID != nil && workspace.panes.count > 1,
                         onToggleMarkdownEdit: { paneID in
                             store.send(.workspaces(.element(
                                 id: activeID,
