@@ -110,8 +110,8 @@ Each workspace contains one or more terminal panes in a split layout.
 | Split vertically | `Cmd+Shift+D` |
 | Close pane | `Cmd+W` |
 | Reopen closed pane | `Cmd+Shift+T` |
-| Focus next pane | `Cmd+Option+Right` |
-| Focus previous pane | `Cmd+Option+Left` |
+| Focus next pane | `Cmd+Option+Right` or `Cmd+]` |
+| Focus previous pane | `Cmd+Option+Left` or `Cmd+[` |
 
 Drag split dividers to resize. Pane headers show the working directory and current git branch.
 
