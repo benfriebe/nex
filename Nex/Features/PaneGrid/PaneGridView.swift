@@ -17,6 +17,14 @@ struct PaneGridView: View {
     let onToggleMarkdownEdit: (UUID) -> Void
     let onUpdateRatio: (String, Double) -> Void
     var onMovePane: ((UUID, UUID, PaneLayout.DropZone) -> Void)?
+    var searchingPaneID: UUID?
+    var searchNeedle: String = ""
+    var searchTotal: Int?
+    var searchSelected: Int?
+    var onSearchNeedleChanged: ((String) -> Void)?
+    var onSearchNavigateNext: (() -> Void)?
+    var onSearchNavigatePrevious: (() -> Void)?
+    var onSearchClose: (() -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
 
@@ -133,6 +141,21 @@ struct PaneGridView: View {
                         backgroundOpacity: ghosttyConfig.backgroundOpacity
                     )
                 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if searchingPaneID == pane.id {
+                PaneSearchOverlay(
+                    needle: searchNeedle,
+                    total: searchTotal,
+                    selected: searchSelected,
+                    onNeedleChanged: { onSearchNeedleChanged?($0) },
+                    onNavigateNext: { onSearchNavigateNext?() },
+                    onNavigatePrevious: { onSearchNavigatePrevious?() },
+                    onClose: { onSearchClose?() }
+                )
+                .padding(.top, 4)
+                .padding(.trailing, 8)
             }
         }
         .background {

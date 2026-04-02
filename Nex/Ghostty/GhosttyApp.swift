@@ -26,6 +26,18 @@ final class GhosttyApp {
     /// Notification posted when the user CMD-clicks a .md file path in the terminal.
     /// userInfo: ["path": String, "surface": ghostty_surface_t?]
     static let openFileNotification = Notification.Name("GhosttyApp.openFile")
+    /// Notification posted when ghostty requests opening the search overlay.
+    /// userInfo: ["surface": ghostty_surface_t, "needle": String]
+    static let searchStartNotification = Notification.Name("GhosttyApp.searchStart")
+    /// Notification posted when ghostty requests closing the search overlay.
+    /// userInfo: ["surface": ghostty_surface_t]
+    static let searchEndNotification = Notification.Name("GhosttyApp.searchEnd")
+    /// Notification posted when ghostty reports the total number of search matches.
+    /// userInfo: ["surface": ghostty_surface_t, "total": Int]
+    static let searchTotalNotification = Notification.Name("GhosttyApp.searchTotal")
+    /// Notification posted when ghostty reports the currently selected search match.
+    /// userInfo: ["surface": ghostty_surface_t, "selected": Int]
+    static let searchSelectedNotification = Notification.Name("GhosttyApp.searchSelected")
 
     private init() {}
 
@@ -187,6 +199,66 @@ final class GhosttyApp {
                     userInfo: [
                         "path": path,
                         "surface": surface as Any
+                    ]
+                )
+            }
+            return true
+
+        case GHOSTTY_ACTION_START_SEARCH:
+            let needle = action.action.start_search.needle.flatMap { String(cString: $0) } ?? ""
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.searchStartNotification,
+                    object: nil,
+                    userInfo: [
+                        "surface": surface as Any,
+                        "needle": needle
+                    ]
+                )
+            }
+            return true
+
+        case GHOSTTY_ACTION_END_SEARCH:
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.searchEndNotification,
+                    object: nil,
+                    userInfo: ["surface": surface as Any]
+                )
+            }
+            return true
+
+        case GHOSTTY_ACTION_SEARCH_TOTAL:
+            let total = Int(action.action.search_total.total)
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.searchTotalNotification,
+                    object: nil,
+                    userInfo: [
+                        "surface": surface as Any,
+                        "total": total
+                    ]
+                )
+            }
+            return true
+
+        case GHOSTTY_ACTION_SEARCH_SELECTED:
+            let selected = Int(action.action.search_selected.selected)
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.searchSelectedNotification,
+                    object: nil,
+                    userInfo: [
+                        "surface": surface as Any,
+                        "selected": selected
                     ]
                 )
             }

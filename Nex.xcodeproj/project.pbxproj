@@ -31,6 +31,7 @@
 		5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3879BA745F8737CA5872F80D /* DatabaseService.swift */; };
 		52D4477AF5CCF1724D609119 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EFC4D8E9A152683486EC7F29 /* Sparkle */; };
 		550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221A3B0170CFD708F3B03A84 /* Repo.swift */; };
+		5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */; };
 		58B6A951A34B2ED1516194C4 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E08D39F8F87D7505CD32D25D /* WebKit.framework */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
 		6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */; };
@@ -148,6 +149,7 @@
 		CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducerTests.swift; sourceTree = "<group>"; };
 		D9335AE3C92A37DD50A5715A /* AppReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducer.swift; sourceTree = "<group>"; };
+		DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSearchOverlay.swift; sourceTree = "<group>"; };
 		DB65E3CCBB3A287C413A6015 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		DDD03468B083223FF50F68E0 /* GhosttySurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurface.swift; sourceTree = "<group>"; };
 		DE56BB11F5C7C34821411297 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
@@ -293,6 +295,7 @@
 				6FD9BCE4ABC267C7E34EAF09 /* PaneFocusView.swift */,
 				005B56542A2F5FD5D3BC588C /* PaneGridView.swift */,
 				BB94DA665D3B322A44251454 /* PaneHeaderView.swift */,
+				DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */,
 				7DED98594372C8E34542A5C2 /* SplitDividerView.swift */,
 				018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */,
 			);
@@ -559,6 +562,7 @@
 				0053A91856EF3EB22FEB03B7 /* PaneGridView.swift in Sources */,
 				8E99D6024CA5451216D39602 /* PaneHeaderView.swift in Sources */,
 				8BACC3111C7193B1AC30B40B /* PaneLayout.swift in Sources */,
+				5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */,
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
 				550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */,

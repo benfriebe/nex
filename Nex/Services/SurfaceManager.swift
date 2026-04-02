@@ -67,6 +67,14 @@ final class SurfaceManager: Sendable {
         surfaceView?.ghosttySurface?.sendText(text)
     }
 
+    /// Execute a ghostty binding action on a pane's surface.
+    @MainActor
+    @discardableResult
+    func performBindingAction(on paneID: UUID, action: String) -> Bool {
+        let surfaceView = lock.withLock { surfaces[paneID] }
+        return surfaceView?.ghosttySurface?.performBindingAction(action) ?? false
+    }
+
     /// Send text to a pane's terminal and press Enter to execute it.
     @MainActor
     func sendCommand(to paneID: UUID, command: String) {

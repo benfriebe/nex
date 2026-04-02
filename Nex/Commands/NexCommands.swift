@@ -199,6 +199,27 @@ final class PaneShortcutMonitor {
             return true
         }
 
+        // ⌘F — toggle search
+        if event.keyCode == 3 /* f */, flags == .command {
+            store.send(.workspaces(.element(
+                id: activeID,
+                action: .toggleSearch
+            )))
+            return true
+        }
+
+        // Escape — close search (only when search is active)
+        if event.keyCode == 53 /* Escape */, flags.isEmpty {
+            if let workspace = store.workspaces[id: activeID],
+               workspace.searchingPaneID != nil {
+                store.send(.workspaces(.element(
+                    id: activeID,
+                    action: .searchClose
+                )))
+                return true
+            }
+        }
+
         return false
     }
 }

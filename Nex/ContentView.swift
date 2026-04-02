@@ -60,6 +60,34 @@ struct ContentView: View {
                                 id: activeID,
                                 action: .movePane(paneID: paneID, targetPaneID: targetPaneID, zone: zone)
                             )))
+                        },
+                        searchingPaneID: workspace.searchingPaneID,
+                        searchNeedle: workspace.searchNeedle,
+                        searchTotal: workspace.searchTotal,
+                        searchSelected: workspace.searchSelected,
+                        onSearchNeedleChanged: { needle in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .searchNeedleChanged(needle)
+                            )))
+                        },
+                        onSearchNavigateNext: {
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .searchNavigateNext
+                            )))
+                        },
+                        onSearchNavigatePrevious: {
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .searchNavigatePrevious
+                            )))
+                        },
+                        onSearchClose: {
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .searchClose
+                            )))
                         }
                     )
                 } else {
@@ -134,6 +162,29 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.openFileNotification)) { notification in
                 guard let path = notification.userInfo?["path"] as? String else { return }
                 store.send(.openFileAtPath(path))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.searchStartNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let needle = notification.userInfo?["needle"] as? String,
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                store.send(.ghosttySearchStarted(paneID: paneID, needle: needle))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.searchEndNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                store.send(.ghosttySearchEnded(paneID: paneID))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.searchTotalNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let total = notification.userInfo?["total"] as? Int,
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                store.send(.searchTotalUpdated(paneID: paneID, total: total))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.searchSelectedNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let selected = notification.userInfo?["selected"] as? Int,
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                store.send(.searchSelectedUpdated(paneID: paneID, selected: selected))
             }
             .onAppear {
                 // Start socket server and wire messages to AppReducer

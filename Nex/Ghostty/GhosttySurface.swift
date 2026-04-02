@@ -111,6 +111,14 @@ final class GhosttySurface {
         return (x, y, w, h)
     }
 
+    /// Execute a ghostty binding action by name (e.g. "search:foo", "end_search").
+    @discardableResult
+    func performBindingAction(_ action: String) -> Bool {
+        action.withCString { ptr in
+            ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+        }
+    }
+
     func destroy() {
         ghostty_surface_free(surface)
     }

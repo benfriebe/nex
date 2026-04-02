@@ -79,6 +79,12 @@ struct AppReducer {
 
         /// External indicators (menu bar, dock badge)
         case updateExternalIndicators
+
+        // Search
+        case ghosttySearchStarted(paneID: UUID, needle: String)
+        case ghosttySearchEnded(paneID: UUID)
+        case searchTotalUpdated(paneID: UUID, total: Int)
+        case searchSelectedUpdated(paneID: UUID, selected: Int)
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -737,6 +743,40 @@ struct AppReducer {
                     }
                 }
                 .cancellable(id: GitStatusTimerID.timer, cancelInFlight: true)
+
+            // MARK: - Search
+
+            case .ghosttySearchStarted(let paneID, let needle):
+                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .ghosttySearchStarted(paneID: paneID, needle: needle)
+                )))
+
+            case .ghosttySearchEnded(let paneID):
+                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .ghosttySearchEnded(paneID: paneID)
+                )))
+
+            case .searchTotalUpdated(let paneID, let total):
+                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .searchTotalUpdated(paneID: paneID, total: total)
+                )))
+
+            case .searchSelectedUpdated(let paneID, let selected):
+                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                else { return .none }
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .searchSelectedUpdated(paneID: paneID, selected: selected)
+                )))
 
             // MARK: - External Indicators
 

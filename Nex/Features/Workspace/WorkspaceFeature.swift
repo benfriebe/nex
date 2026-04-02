@@ -24,6 +24,10 @@ struct WorkspaceFeature {
         var recentlyClosedPanes: [ClosedPaneSnapshot] = []
         var zoomedPaneID: UUID?
         var savedLayout: PaneLayout?
+        var searchingPaneID: UUID?
+        var searchNeedle: String = ""
+        var searchTotal: Int?
+        var searchSelected: Int?
         var createdAt: Date
         var lastAccessedAt: Date
 
@@ -111,7 +115,18 @@ struct WorkspaceFeature {
         case removeRepoAssociation(UUID)
         case reopenClosedPane
         case toggleZoomPane
+        case toggleSearch
+        case ghosttySearchStarted(paneID: UUID, needle: String)
+        case ghosttySearchEnded(paneID: UUID)
+        case searchNeedleChanged(String)
+        case searchNavigateNext
+        case searchNavigatePrevious
+        case searchClose
+        case searchTotalUpdated(paneID: UUID, total: Int)
+        case searchSelectedUpdated(paneID: UUID, selected: Int)
     }
+
+    private enum SearchDebounceID: Hashable { case debounce }
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.ghosttyConfig) var ghosttyConfig
@@ -244,6 +259,13 @@ struct WorkspaceFeature {
                 }
 
             case .closePane(let paneID):
+                // Dismiss search if the pane being closed is the one being searched
+                if state.searchingPaneID == paneID {
+                    state.searchingPaneID = nil
+                    state.searchNeedle = ""
+                    state.searchTotal = nil
+                    state.searchSelected = nil
+                }
                 if let saved = state.savedLayout {
                     state.layout = saved
                     state.zoomedPaneID = nil
@@ -385,6 +407,92 @@ struct WorkspaceFeature {
                     state.zoomedPaneID = focusedID
                     state.layout = .leaf(focusedID)
                 }
+                return .none
+
+            case .toggleSearch:
+                guard let focusedID = state.focusedPaneID,
+                      state.panes[id: focusedID]?.type == .shell else { return .none }
+                if state.searchingPaneID != nil {
+                    return .send(.searchClose)
+                }
+                state.searchingPaneID = focusedID
+                state.searchNeedle = ""
+                state.searchTotal = nil
+                state.searchSelected = nil
+                return .none
+
+            case .ghosttySearchStarted(let paneID, let needle):
+                guard state.panes[id: paneID]?.type == .shell else { return .none }
+                state.searchingPaneID = paneID
+                state.searchNeedle = needle
+                state.searchTotal = nil
+                state.searchSelected = nil
+                return .none
+
+            case .ghosttySearchEnded(let paneID):
+                guard state.searchingPaneID == paneID else { return .none }
+                state.searchingPaneID = nil
+                state.searchNeedle = ""
+                state.searchTotal = nil
+                state.searchSelected = nil
+                return .none
+
+            case .searchNeedleChanged(let needle):
+                state.searchNeedle = needle
+                state.searchSelected = nil
+                guard let paneID = state.searchingPaneID else { return .none }
+                let mgr = surfaceManager
+                if needle.isEmpty {
+                    return .run { _ in
+                        await mgr.performBindingAction(on: paneID, action: "search:")
+                    }
+                }
+                // Debounce short queries to avoid expensive partial searches
+                if needle.count < 3 {
+                    return .run { _ in
+                        try await Task.sleep(for: .milliseconds(300))
+                        await mgr.performBindingAction(on: paneID, action: "search:\(needle)")
+                    }
+                    .cancellable(id: SearchDebounceID.debounce, cancelInFlight: true)
+                }
+                return .run { _ in
+                    await mgr.performBindingAction(on: paneID, action: "search:\(needle)")
+                }
+                .cancellable(id: SearchDebounceID.debounce, cancelInFlight: true)
+
+            case .searchNavigateNext:
+                guard let paneID = state.searchingPaneID else { return .none }
+                let mgr = surfaceManager
+                return .run { _ in
+                    await mgr.performBindingAction(on: paneID, action: "navigate_search:next")
+                }
+
+            case .searchNavigatePrevious:
+                guard let paneID = state.searchingPaneID else { return .none }
+                let mgr = surfaceManager
+                return .run { _ in
+                    await mgr.performBindingAction(on: paneID, action: "navigate_search:previous")
+                }
+
+            case .searchClose:
+                guard let paneID = state.searchingPaneID else { return .none }
+                state.searchingPaneID = nil
+                state.searchNeedle = ""
+                state.searchTotal = nil
+                state.searchSelected = nil
+                let mgr = surfaceManager
+                return .run { _ in
+                    await mgr.performBindingAction(on: paneID, action: "end_search")
+                }
+
+            case .searchTotalUpdated(let paneID, let total):
+                guard state.searchingPaneID == paneID else { return .none }
+                state.searchTotal = total
+                return .none
+
+            case .searchSelectedUpdated(let paneID, let selected):
+                guard state.searchingPaneID == paneID else { return .none }
+                state.searchSelected = selected
                 return .none
 
             case .reopenClosedPane:
