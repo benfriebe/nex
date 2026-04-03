@@ -21,6 +21,11 @@ struct SettingsView: View {
                     .tabItem {
                         Label("Repositories", systemImage: "externaldrive")
                     }
+
+                KeybindingsSettingsView(store: store)
+                    .tabItem {
+                        Label("Keybindings", systemImage: "command")
+                    }
             }
             .frame(width: 500, height: 400)
         }

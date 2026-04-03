@@ -39,7 +39,7 @@ make check
 ### Reducer hierarchy
 - `AppReducer` — top-level state: workspace list, repo registry, socket messages (agent lifecycle + pane/workspace commands), git status, external indicators (menu bar/dock badge)
 - `WorkspaceFeature` — per-workspace: panes, layout tree, focus, splits, agent status. Connected via `.forEach(\.workspaces, action: \.workspaces)`
-- `SettingsFeature` — user preferences (worktree base path, appearance)
+- `SettingsFeature` — user preferences (worktree base path, appearance, keybindings)
 
 ### Terminal rendering — libghostty
 - `GhosttyApp` — singleton wrapping `ghostty_app_t`. Initializes the runtime, dispatches action callbacks (title changes, pwd changes, close, desktop notifications) via `NotificationCenter`.
@@ -74,6 +74,13 @@ make check
   - `nex workspace create [--name ...] [--path ...] [--color ...]`
 - `StatusBarController` — menu bar icon + popover showing running/waiting agents across workspaces.
 - `NotificationService` — desktop notifications with "Open"/"Dismiss" actions.
+
+### Keybindings
+- **Config file**: `~/.config/nex/config` — Ghostty-style `keybind = super+d=split_right` syntax. Parsed by `ConfigParser`, loaded by `KeybindingService`.
+- **Data model** (`KeyBinding.swift`): `KeyTrigger` (keyCode + modifiers), `NexAction` (25 bindable actions), `KeyBindingMap` (trigger → action dictionary with sorted lookups).
+- **Two dispatch layers**: SwiftUI `Commands` (`NexCommands`) handles menu bar shortcuts; `PaneShortcutMonitor` (NSEvent local monitor) handles pane-context shortcuts. Both read from `AppReducer.State.keybindings`.
+- **Settings UI** (`KeybindingsSettingsView`): table grouped by category with key recorder sheet, per-action reset, and reset-all. Changes are persisted to the config file.
+- **Conditional shortcuts**: `toggle_markdown_edit` only fires for markdown panes, `close_search` only when search is active, `close_pane` deletes workspace when it's the last pane.
 
 ### Dependencies (TCA DependencyKey pattern)
 All services are registered as TCA dependencies: `surfaceManager`, `persistenceService`, `gitService`, `socketServer`, `notificationService`, `statusBarController`, `ghosttyConfig`. Tests use `testValue` (e.g., in-memory DB, no-op managers).

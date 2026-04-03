@@ -150,6 +150,20 @@ Notifications clear automatically when you focus the app.
 
 Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nex/workspaces`).
 
+### Custom keybindings
+
+All keyboard shortcuts can be rebound, unbound, or extended via a config file at `~/.config/nex/config` using Ghostty-style syntax:
+
+```
+keybind = super+shift+x=split_right
+keybind = super+d=unbind
+keybind = ctrl+alt+right=focus_next_pane
+```
+
+You can also edit keybindings in **Settings > Keybindings** with a visual key recorder.
+
+Available actions: `new_workspace`, `open_file`, `switch_to_workspace_1`–`9`, `toggle_sidebar`, `toggle_inspector`, `split_right`, `split_down`, `close_pane`, `focus_next_pane`, `focus_previous_pane`, `next_workspace`, `previous_workspace`, `toggle_markdown_edit`, `toggle_zoom`, `reopen_closed_pane`, `toggle_search`, `close_search`.
+
 ### Settings
 
 Open settings with `Cmd+,`. Available options:
@@ -157,6 +171,7 @@ Open settings with `Cmd+,`. Available options:
 - **General**: Worktree base path
 - **Appearance**: Background opacity, background color
 - **Repositories**: Manage the repo registry
+- **Keybindings**: View and customize keyboard shortcuts
 
 ## Data
 

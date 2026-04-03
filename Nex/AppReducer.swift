@@ -14,6 +14,7 @@ struct AppReducer {
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
+        var keybindings: KeyBindingMap = .defaults
 
         var activeWorkspace: WorkspaceFeature.State? {
             guard let id = activeWorkspaceID else { return nil }
@@ -85,6 +86,13 @@ struct AppReducer {
         case ghosttySearchEnded(paneID: UUID)
         case searchTotalUpdated(paneID: UUID, total: Int)
         case searchSelectedUpdated(paneID: UUID, selected: Int)
+
+        // Keybindings
+        case keybindingsLoaded(KeyBindingMap)
+        case setKeybinding(KeyTrigger, NexAction)
+        case removeKeybinding(KeyTrigger)
+        case resetBindingsForAction(NexAction)
+        case resetKeybindings
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -112,7 +120,11 @@ struct AppReducer {
                             repoRegistry: result.repoRegistry
                         ))
                     },
-                    .send(.settings(.loadSettings))
+                    .send(.settings(.loadSettings)),
+                    .run { send in
+                        let bindings = KeybindingService.loadFromDisk()
+                        await send(.keybindingsLoaded(bindings))
+                    }
                 )
 
             case .createWorkspace(let name, let color, let repos, let workingDirectory):
@@ -337,6 +349,43 @@ struct AppReducer {
 
             case .settings:
                 return .none
+
+            // MARK: - Keybindings
+
+            case .keybindingsLoaded(let bindings):
+                state.keybindings = bindings
+                return .none
+
+            case .setKeybinding(let trigger, let action):
+                state.keybindings.setBinding(trigger: trigger, action: action)
+                return .run { [keybindings = state.keybindings] _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                }
+
+            case .removeKeybinding(let trigger):
+                state.keybindings.removeBinding(trigger: trigger)
+                return .run { [keybindings = state.keybindings] _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                }
+
+            case .resetBindingsForAction(let action):
+                state.keybindings.removeAllBindings(for: action)
+                for trigger in KeyBindingMap.defaults.triggers(for: action) {
+                    state.keybindings.setBinding(trigger: trigger, action: action)
+                }
+                return .run { [keybindings = state.keybindings] _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                }
+
+            case .resetKeybindings:
+                state.keybindings = .defaults
+                return .run { _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.writeKeybindings(.defaults, toFile: path)
+                }
 
             // MARK: - File Opening
 

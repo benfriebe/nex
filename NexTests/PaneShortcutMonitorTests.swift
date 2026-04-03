@@ -39,11 +39,13 @@ struct PaneShortcutMonitorTests {
 
     private func makeStoreAndMonitor(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State> = [],
-        activeWorkspaceID: UUID? = nil
+        activeWorkspaceID: UUID? = nil,
+        keybindings: KeyBindingMap = .defaults
     ) -> (Store<AppReducer.State, AppReducer.Action>, PaneShortcutMonitor) {
         var appState = AppReducer.State()
         appState.workspaces = workspaces
         appState.activeWorkspaceID = activeWorkspaceID
+        appState.keybindings = keybindings
 
         let store = Store(initialState: appState) {
             AppReducer()
@@ -317,5 +319,87 @@ struct PaneShortcutMonitorTests {
         // Random key with no binding (keyCode 0 = 'a', no modifiers)
         let event = keyEvent(keyCode: 0)
         #expect(monitor.handleKeyEvent(event) == false)
+    }
+
+    // MARK: - Custom keybindings
+
+    @Test func customBindingRebindsSplitRight() {
+        let ws = Self.makeWorkspace()
+        // Rebind split_right to Ctrl+D (keyCode 2)
+        let customBindings = KeyBindingMap.defaults.applying(overrides: [
+            (KeyTrigger(keyCode: 2, modifiers: .command), .unbind),
+            (KeyTrigger(keyCode: 2, modifiers: .control), .splitRight)
+        ])
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID,
+            keybindings: customBindings
+        )
+
+        // Ctrl+D should now split
+        let ctrlD = keyEvent(keyCode: 2, modifierFlags: .control)
+        #expect(monitor.handleKeyEvent(ctrlD) == true)
+        #expect(store.workspaces[id: Self.wsID]!.panes.count == 2)
+    }
+
+    @Test func unboundDefaultPassesThrough() {
+        let ws = Self.makeWorkspace()
+        let customBindings = KeyBindingMap.defaults.applying(overrides: [
+            (KeyTrigger(keyCode: 2, modifiers: .command), .unbind)
+        ])
+        let (_, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID,
+            keybindings: customBindings
+        )
+
+        // Cmd+D should pass through (unbound)
+        let cmdD = keyEvent(keyCode: 2, modifierFlags: .command)
+        #expect(monitor.handleKeyEvent(cmdD) == false)
+    }
+
+    @Test func customBindingConditionalMarkdownToggle() {
+        // Rebind toggle_markdown_edit to Cmd+M — should still only fire for markdown panes
+        let customBindings = KeyBindingMap.defaults.applying(overrides: [
+            (KeyTrigger(keyCode: 14, modifiers: .command), .unbind),
+            (KeyTrigger(keyCode: 46, modifiers: .command), .toggleMarkdownEdit)
+        ])
+
+        // Shell pane: Cmd+M should NOT be consumed
+        let shellWs = Self.makeWorkspace()
+        let (_, shellMonitor) = makeStoreAndMonitor(
+            workspaces: [shellWs],
+            activeWorkspaceID: Self.wsID,
+            keybindings: customBindings
+        )
+        let cmdM = keyEvent(keyCode: 46, modifierFlags: .command)
+        #expect(shellMonitor.handleKeyEvent(cmdM) == false)
+
+        // Markdown pane: Cmd+M SHOULD be consumed
+        let mdPane = Pane(id: Self.paneID1, type: .markdown, filePath: "/tmp/test.md")
+        let mdWs = WorkspaceFeature.State(
+            id: Self.wsID, name: "Test", slug: "test", color: .blue,
+            panes: [mdPane], layout: .leaf(Self.paneID1),
+            focusedPaneID: Self.paneID1, createdAt: Date(), lastAccessedAt: Date()
+        )
+        let (mdStore, mdMonitor) = makeStoreAndMonitor(
+            workspaces: [mdWs],
+            activeWorkspaceID: Self.wsID,
+            keybindings: customBindings
+        )
+        #expect(mdMonitor.handleKeyEvent(cmdM) == true)
+        #expect(mdStore.workspaces[id: Self.wsID]?.panes[id: Self.paneID1]?.isEditing == true)
+    }
+
+    @Test func menuBarActionNotConsumedByMonitor() {
+        let ws = Self.makeWorkspace()
+        let (_, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID
+        )
+
+        // Cmd+N (new_workspace) is a menu bar action — monitor should not consume
+        let cmdN = keyEvent(keyCode: 45, modifierFlags: .command)
+        #expect(monitor.handleKeyEvent(cmdN) == false)
     }
 }

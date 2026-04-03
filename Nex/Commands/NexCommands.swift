@@ -8,38 +8,66 @@ struct NexCommands: Commands {
     var body: some Commands {
         // Replace the default "New Window" (⌘N) with "New Workspace"
         CommandGroup(replacing: .newItem) {
-            Button("New Workspace") {
+            menuButton("New Workspace", action: .newWorkspace) {
                 store.send(.showNewWorkspaceSheet)
             }
-            .keyboardShortcut("n", modifiers: [.command])
 
-            Button("Open File...") {
+            menuButton("Open File...", action: .openFile) {
                 store.send(.openFile)
             }
-            .keyboardShortcut("o", modifiers: [.command])
 
             Divider()
 
             // Switch by number: ⌘1–⌘9
             ForEach(0 ..< 9, id: \.self) { index in
-                Button("Switch to Workspace \(index + 1)") {
+                menuButton(
+                    "Switch to Workspace \(index + 1)",
+                    action: NexCommands.workspaceAction(for: index)
+                ) {
                     store.send(.switchToWorkspaceByIndex(index))
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
             }
         }
 
         // View
         CommandGroup(after: .sidebar) {
-            Button("Toggle Sidebar") {
+            menuButton("Toggle Sidebar", action: .toggleSidebar) {
                 store.send(.toggleSidebar)
             }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
 
-            Button("Toggle Inspector") {
+            menuButton("Toggle Inspector", action: .toggleInspector) {
                 store.send(.toggleInspector)
             }
-            .keyboardShortcut("i", modifiers: [.command])
+        }
+    }
+
+    /// Build a menu Button with the keyboard shortcut derived from the binding map.
+    @ViewBuilder
+    private func menuButton(
+        _ title: String,
+        action: NexAction,
+        handler: @escaping () -> Void
+    ) -> some View {
+        if let shortcut = store.keybindings.triggers(for: action).first?.keyboardShortcut {
+            Button(title, action: handler)
+                .keyboardShortcut(shortcut)
+        } else {
+            Button(title, action: handler)
+        }
+    }
+
+    private static func workspaceAction(for index: Int) -> NexAction {
+        switch index {
+        case 0: .switchToWorkspace1
+        case 1: .switchToWorkspace2
+        case 2: .switchToWorkspace3
+        case 3: .switchToWorkspace4
+        case 4: .switchToWorkspace5
+        case 5: .switchToWorkspace6
+        case 6: .switchToWorkspace7
+        case 7: .switchToWorkspace8
+        case 8: .switchToWorkspace9
+        default: .switchToWorkspace1
         }
     }
 }
@@ -91,135 +119,110 @@ final class PaneShortcutMonitor {
             return false
         }
 
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
         guard let activeID = store.activeWorkspaceID else { return false }
 
-        // ⌘D — split right
-        if event.keyCode == 2 /* d */, flags == .command {
+        let trigger = KeyTrigger(event: event)
+        guard let action = store.keybindings.action(for: trigger) else { return false }
+
+        // Menu bar actions are handled by SwiftUI Commands — don't consume here.
+        if action.isMenuBarAction { return false }
+
+        return dispatchAction(action, activeWorkspaceID: activeID)
+    }
+
+    // MARK: - Action Dispatch
+
+    private func dispatchAction(_ action: NexAction, activeWorkspaceID id: UUID) -> Bool {
+        switch action {
+        case .splitRight:
             store.send(.workspaces(.element(
-                id: activeID,
+                id: id,
                 action: .splitPane(direction: .horizontal, sourcePaneID: nil)
             )))
             return true
-        }
 
-        // ⌘⇧D — split down
-        if event.keyCode == 2 /* d */, flags == [.command, .shift] {
+        case .splitDown:
             store.send(.workspaces(.element(
-                id: activeID,
+                id: id,
                 action: .splitPane(direction: .vertical, sourcePaneID: nil)
             )))
             return true
-        }
 
-        // ⌘W — close pane
-        if event.keyCode == 13 /* w */, flags == .command {
-            if let workspace = store.workspaces[id: activeID],
-               let focusedID = workspace.focusedPaneID {
-                // Last pane — close the workspace instead
-                if workspace.panes.count <= 1 {
-                    store.send(.deleteWorkspace(activeID))
-                    return true
-                }
-                store.send(.workspaces(.element(
-                    id: activeID,
-                    action: .closePane(focusedID)
-                )))
-                return true
-            }
-            return false
-        }
+        case .closePane:
+            return handleClosePane(activeWorkspaceID: id)
 
-        // Arrow keys include .numericPad and .function in their modifier flags
-        let arrowFlags = flags.subtracting([.numericPad, .function])
-
-        // ⌘⌥→ or ⌘] — focus next pane
-        let isNextPane = (event.keyCode == 124 && arrowFlags == [.command, .option])
-            || (event.keyCode == 30 && flags == .command)
-        if isNextPane {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .focusNextPane
-            )))
+        case .focusNextPane:
+            store.send(.workspaces(.element(id: id, action: .focusNextPane)))
             return true
-        }
 
-        // ⌘⌥← or ⌘[ — focus previous pane
-        let isPreviousPane = (event.keyCode == 123 && arrowFlags == [.command, .option])
-            || (event.keyCode == 33 && flags == .command)
-        if isPreviousPane {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .focusPreviousPane
-            )))
+        case .focusPreviousPane:
+            store.send(.workspaces(.element(id: id, action: .focusPreviousPane)))
             return true
-        }
 
-        // ⌘⌥↓ — next workspace
-        if event.keyCode == 125 /* ↓ */, arrowFlags == [.command, .option] {
+        case .nextWorkspace:
             store.send(.switchToNextWorkspace)
             return true
-        }
 
-        // ⌘⌥↑ — previous workspace
-        if event.keyCode == 126 /* ↑ */, arrowFlags == [.command, .option] {
+        case .previousWorkspace:
             store.send(.switchToPreviousWorkspace)
             return true
-        }
 
-        // ⌘E — toggle markdown edit/preview
-        if event.keyCode == 14 /* e */, flags == .command {
-            if let workspace = store.workspaces[id: activeID],
-               let focusedID = workspace.focusedPaneID,
-               workspace.panes[id: focusedID]?.type == .markdown {
-                store.send(.workspaces(.element(
-                    id: activeID,
-                    action: .toggleMarkdownEdit(focusedID)
-                )))
-                return true
-            }
-        }
+        case .toggleMarkdownEdit:
+            return handleToggleMarkdownEdit(activeWorkspaceID: id)
 
-        // ⌘⇧↩ — toggle zoom pane
-        if event.keyCode == 36 /* Return */, flags == [.command, .shift] {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .toggleZoomPane
-            )))
+        case .toggleZoom:
+            store.send(.workspaces(.element(id: id, action: .toggleZoomPane)))
+            return true
+
+        case .reopenClosedPane:
+            store.send(.workspaces(.element(id: id, action: .reopenClosedPane)))
+            return true
+
+        case .toggleSearch:
+            store.send(.workspaces(.element(id: id, action: .toggleSearch)))
+            return true
+
+        case .closeSearch:
+            return handleCloseSearch(activeWorkspaceID: id)
+
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Conditional Handlers
+
+    private func handleClosePane(activeWorkspaceID id: UUID) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID
+        else { return false }
+
+        // Last pane — close the workspace instead
+        if workspace.panes.count <= 1 {
+            store.send(.deleteWorkspace(id))
             return true
         }
 
-        // ⌘⇧T — reopen closed pane
-        if event.keyCode == 17 /* t */, flags == [.command, .shift] {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .reopenClosedPane
-            )))
-            return true
-        }
+        store.send(.workspaces(.element(id: id, action: .closePane(focusedID))))
+        return true
+    }
 
-        // ⌘F — toggle search
-        if event.keyCode == 3 /* f */, flags == .command {
-            store.send(.workspaces(.element(
-                id: activeID,
-                action: .toggleSearch
-            )))
-            return true
-        }
+    private func handleToggleMarkdownEdit(activeWorkspaceID id: UUID) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID,
+              workspace.panes[id: focusedID]?.type == .markdown
+        else { return false }
 
-        // Escape — close search (only when search is active)
-        if event.keyCode == 53 /* Escape */, flags.isEmpty {
-            if let workspace = store.workspaces[id: activeID],
-               workspace.searchingPaneID != nil {
-                store.send(.workspaces(.element(
-                    id: activeID,
-                    action: .searchClose
-                )))
-                return true
-            }
-        }
+        store.send(.workspaces(.element(id: id, action: .toggleMarkdownEdit(focusedID))))
+        return true
+    }
 
-        return false
+    private func handleCloseSearch(activeWorkspaceID id: UUID) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              workspace.searchingPaneID != nil
+        else { return false }
+
+        store.send(.workspaces(.element(id: id, action: .searchClose)))
+        return true
     }
 }
