@@ -14,6 +14,7 @@ struct PaneGridView: View {
     let onClosePane: (UUID) -> Void
     let onFocusPane: (UUID) -> Void
     let isZoomed: Bool
+    let onToggleZoom: () -> Void
     let onToggleMarkdownEdit: (UUID) -> Void
     let onUpdateRatio: (String, Double) -> Void
     var onMovePane: ((UUID, UUID, PaneLayout.DropZone) -> Void)?
@@ -83,6 +84,7 @@ struct PaneGridView: View {
                 onSplitVertical: { onSplitPane(pane.id, .vertical) },
                 onClose: { onClosePane(pane.id) },
                 isZoomed: isZoomed,
+                onToggleZoom: onToggleZoom,
                 isEditing: pane.isEditing,
                 onToggleEdit: pane.type == .markdown ? { onToggleMarkdownEdit(pane.id) } : nil,
                 onDragChanged: { point in

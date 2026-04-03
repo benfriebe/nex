@@ -43,6 +43,9 @@ struct ContentView: View {
                             store.send(.workspaces(.element(id: activeID, action: .focusPane(paneID))))
                         },
                         isZoomed: workspace.zoomedPaneID != nil && workspace.panes.count > 1,
+                        onToggleZoom: {
+                            store.send(.workspaces(.element(id: activeID, action: .toggleZoomPane)))
+                        },
                         onToggleMarkdownEdit: { paneID in
                             store.send(.workspaces(.element(
                                 id: activeID,
