@@ -207,6 +207,143 @@ struct PaneLayoutTests {
         }
     }
 
+    // MARK: - Swapping leaves
+
+    @Test func swapTwoLeavesInSimpleSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        let swapped = layout.swappingLeaves(a, b)
+        #expect(swapped == .split(.horizontal, ratio: 0.5, first: .leaf(b), second: .leaf(a)))
+    }
+
+    @Test func swapLeavesInNestedSplit() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let layout = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        let swapped = layout.swappingLeaves(a, c)
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(c),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(a))
+        )
+        #expect(swapped == expected)
+    }
+
+    @Test func swapSamePaneIsNoOp() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        let swapped = layout.swappingLeaves(a, a)
+        #expect(swapped == layout)
+    }
+
+    @Test func swapWithNonExistentPaneReplacesOneLeaf() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        let swapped = layout.swappingLeaves(a, c)
+        // c is not in tree, so only a→c replacement happens but c→a never fires
+        #expect(swapped.allPaneIDs.contains(c))
+        #expect(swapped.allPaneIDs.contains(b))
+        #expect(!swapped.allPaneIDs.contains(a))
+    }
+
+    // MARK: - Neighbor finding
+
+    @Test func neighborRightInHorizontalSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.neighborPaneID(of: a, inDirection: .right) == b)
+        #expect(layout.neighborPaneID(of: b, inDirection: .right) == nil)
+    }
+
+    @Test func neighborLeftInHorizontalSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.neighborPaneID(of: b, inDirection: .left) == a)
+        #expect(layout.neighborPaneID(of: a, inDirection: .left) == nil)
+    }
+
+    @Test func neighborDownInVerticalSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.vertical, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.neighborPaneID(of: a, inDirection: .down) == b)
+        #expect(layout.neighborPaneID(of: b, inDirection: .down) == nil)
+    }
+
+    @Test func neighborUpInVerticalSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.vertical, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.neighborPaneID(of: b, inDirection: .up) == a)
+        #expect(layout.neighborPaneID(of: a, inDirection: .up) == nil)
+    }
+
+    @Test func neighborInFourPaneTile() {
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID()
+        // 2x2 grid:  A | C
+        //            B | D
+        let layout = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .split(.vertical, ratio: 0.5, first: .leaf(a), second: .leaf(b)),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(c), second: .leaf(d))
+        )
+        // A: right→C, down→B, left→nil, up→nil
+        #expect(layout.neighborPaneID(of: a, inDirection: .right) == c)
+        #expect(layout.neighborPaneID(of: a, inDirection: .down) == b)
+        #expect(layout.neighborPaneID(of: a, inDirection: .left) == nil)
+        #expect(layout.neighborPaneID(of: a, inDirection: .up) == nil)
+        // D: left→B, up→C, right→nil, down→nil
+        #expect(layout.neighborPaneID(of: d, inDirection: .left) == b)
+        #expect(layout.neighborPaneID(of: d, inDirection: .up) == c)
+        #expect(layout.neighborPaneID(of: d, inDirection: .right) == nil)
+        #expect(layout.neighborPaneID(of: d, inDirection: .down) == nil)
+    }
+
+    @Test func neighborEquidistantPrefersTopleft() {
+        let a = UUID(), b = UUID(), c = UUID()
+        // Main-vertical: A (large left) | B (top-right) / C (bottom-right)
+        // B and C are equidistant from A — tiebreaker should consistently pick B (top).
+        let layout = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        // Run multiple times to catch non-determinism from dictionary iteration order
+        for _ in 0 ..< 20 {
+            #expect(layout.neighborPaneID(of: a, inDirection: .right) == b)
+        }
+    }
+
+    @Test func neighborEquidistantVerticalPrefersLeft() {
+        let a = UUID(), b = UUID(), c = UUID()
+        // Main-horizontal: A (large top) / B (bottom-left) | C (bottom-right)
+        let layout = PaneLayout.split(
+            .vertical, ratio: 0.5,
+            first: .leaf(a),
+            second: .split(.horizontal, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        for _ in 0 ..< 20 {
+            #expect(layout.neighborPaneID(of: a, inDirection: .down) == b)
+        }
+    }
+
+    @Test func neighborSinglePaneReturnsNil() {
+        let a = UUID()
+        let layout = PaneLayout.leaf(a)
+        #expect(layout.neighborPaneID(of: a, inDirection: .left) == nil)
+        #expect(layout.neighborPaneID(of: a, inDirection: .right) == nil)
+        #expect(layout.neighborPaneID(of: a, inDirection: .up) == nil)
+        #expect(layout.neighborPaneID(of: a, inDirection: .down) == nil)
+    }
+
+    @Test func neighborNoAdjacentInDirection() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.neighborPaneID(of: a, inDirection: .up) == nil)
+        #expect(layout.neighborPaneID(of: a, inDirection: .down) == nil)
+    }
+
     // MARK: - Codable round-trip
 
     @Test func codableRoundTrip() throws {

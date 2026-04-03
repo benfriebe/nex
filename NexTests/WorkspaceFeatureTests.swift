@@ -687,6 +687,123 @@ struct WorkspaceFeatureTests {
         #expect(store.state.currentLayoutIndex == nil)
     }
 
+    // MARK: - Move Pane in Direction
+
+    @Test func movePaneRightSwapsWithNeighbor() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.movePaneInDirection(.right)) { state in
+            state.layout = .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(secondID),
+                second: .leaf(firstID)
+            )
+            state.currentLayoutIndex = nil
+        }
+    }
+
+    @Test func movePaneNoNeighborIsNoOp() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = secondID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.movePaneInDirection(.right))
+        // No change — secondID has no right neighbor
+    }
+
+    @Test func movePaneSinglePaneIsNoOp() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.movePaneInDirection(.left))
+    }
+
+    @Test func movePaneWhileZoomedIsNoOp() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .leaf(firstID)
+        workspace.savedLayout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.zoomedPaneID = firstID
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.movePaneInDirection(.right))
+        // No change — zoomed
+    }
+
+    @Test func movePaneResetsLayoutIndex() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+        workspace.currentLayoutIndex = 2
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.movePaneInDirection(.right)) { state in
+            state.layout = .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(secondID),
+                second: .leaf(firstID)
+            )
+            state.currentLayoutIndex = nil
+        }
+    }
+
     @Test func cycleLayoutUnzoomsFirst() async {
         var workspace = WorkspaceFeature.State(name: "Test")
         let firstID = workspace.panes.first!.id

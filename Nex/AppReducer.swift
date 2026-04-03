@@ -593,6 +593,14 @@ struct AppReducer {
                         await mgr.sendCommand(to: resolvedID, command: text)
                     }
 
+                case .paneMove(let paneID, let direction):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                    return .send(.workspaces(.element(
+                        id: workspace.id, action: .movePaneInDirection(direction)
+                    )))
+
                 // MARK: Workspace commands
 
                 case .workspaceCreate(let name, let path, let color):

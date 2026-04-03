@@ -129,6 +129,36 @@ indirect enum PaneLayout: Equatable, Codable {
         }
     }
 
+    // MARK: - Direction
+
+    enum Direction: String, Codable, CaseIterable {
+        case left, right, up, down
+    }
+
+    // MARK: - Swap Leaves
+
+    /// Swap the UUIDs of two leaf nodes in the layout tree.
+    /// The tree structure (split directions, ratios, nesting) is preserved exactly;
+    /// only the two leaf identifiers are exchanged.
+    func swappingLeaves(_ id1: UUID, _ id2: UUID) -> PaneLayout {
+        guard id1 != id2 else { return self }
+        switch self {
+        case .leaf(let id):
+            if id == id1 { return .leaf(id2) }
+            if id == id2 { return .leaf(id1) }
+            return self
+        case .split(let direction, let ratio, let first, let second):
+            return .split(
+                direction,
+                ratio: ratio,
+                first: first.swappingLeaves(id1, id2),
+                second: second.swappingLeaves(id1, id2)
+            )
+        case .empty:
+            return self
+        }
+    }
+
     // MARK: - Move Pane
 
     /// Move a pane to be adjacent to another pane in the given drop zone.
@@ -162,6 +192,63 @@ indirect enum PaneLayout: Equatable, Codable {
         let ids = allPaneIDs
         guard let index = ids.firstIndex(of: currentID), ids.count > 1 else { return nil }
         return ids[(index - 1 + ids.count) % ids.count]
+    }
+
+    /// Find the neighboring pane in the given spatial direction.
+    /// Uses frame geometry with a canonical bounds to determine spatial positions.
+    func neighborPaneID(of paneID: UUID, inDirection direction: Direction) -> UUID? {
+        let bounds = CGRect(x: 0, y: 0, width: 10000, height: 10000)
+        let frames = paneFrames(in: bounds)
+        guard let sourceRect = frames[paneID] else { return nil }
+
+        // paneFrames accounts for divider thickness, leaving a gap between adjacent panes.
+        // Use dividerThickness as tolerance so adjacent panes separated by a divider are found.
+        let tolerance = Self.dividerThickness + 1
+
+        var bestID: UUID?
+        var bestDistance: CGFloat = .greatestFiniteMagnitude
+        var bestSecondary: CGFloat = .greatestFiniteMagnitude
+
+        for (candidateID, candidateRect) in frames where candidateID != paneID {
+            let isInDirection: Bool
+            let distance: CGFloat
+            // Tiebreaker: for equidistant panes, prefer the one closer to the
+            // top-left origin (smaller midY for left/right, smaller midX for up/down).
+            let secondary: CGFloat
+
+            switch direction {
+            case .left:
+                isInDirection = candidateRect.maxX <= sourceRect.minX + tolerance
+                distance = abs(sourceRect.minX - candidateRect.maxX)
+                    + abs(sourceRect.midY - candidateRect.midY)
+                secondary = candidateRect.midY
+            case .right:
+                isInDirection = candidateRect.minX >= sourceRect.maxX - tolerance
+                distance = abs(candidateRect.minX - sourceRect.maxX)
+                    + abs(sourceRect.midY - candidateRect.midY)
+                secondary = candidateRect.midY
+            case .up:
+                isInDirection = candidateRect.maxY <= sourceRect.minY + tolerance
+                distance = abs(sourceRect.minY - candidateRect.maxY)
+                    + abs(sourceRect.midX - candidateRect.midX)
+                secondary = candidateRect.midX
+            case .down:
+                isInDirection = candidateRect.minY >= sourceRect.maxY - tolerance
+                distance = abs(candidateRect.minY - sourceRect.maxY)
+                    + abs(sourceRect.midX - candidateRect.midX)
+                secondary = candidateRect.midX
+            }
+
+            let isBetter = distance < bestDistance
+                || (distance == bestDistance && secondary < bestSecondary)
+            if isInDirection, isBetter {
+                bestDistance = distance
+                bestSecondary = secondary
+                bestID = candidateID
+            }
+        }
+
+        return bestID
     }
 
     // MARK: - Split Ratio Updates

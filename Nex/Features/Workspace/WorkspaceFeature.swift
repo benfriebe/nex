@@ -117,6 +117,7 @@ struct WorkspaceFeature {
         case reopenClosedPane
         case cycleLayout
         case selectLayout(PredefinedLayout)
+        case movePaneInDirection(PaneLayout.Direction)
         case toggleZoomPane
         case toggleSearch
         case ghosttySearchStarted(paneID: UUID, needle: String)
@@ -357,6 +358,16 @@ struct WorkspaceFeature {
                     paneID, toAdjacentOf: targetPaneID, zone: zone
                 )
                 state.focusedPaneID = paneID
+                state.currentLayoutIndex = nil
+                return .none
+
+            case .movePaneInDirection(let direction):
+                guard state.zoomedPaneID == nil else { return .none }
+                guard let focusedID = state.focusedPaneID else { return .none }
+                guard let neighborID = state.layout.neighborPaneID(
+                    of: focusedID, inDirection: direction
+                ) else { return .none }
+                state.layout = state.layout.swappingLeaves(focusedID, neighborID)
                 state.currentLayoutIndex = nil
                 return .none
 

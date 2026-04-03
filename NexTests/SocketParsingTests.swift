@@ -340,6 +340,44 @@ struct SocketParsingTests {
         #expect(results[2] == .workspaceCreate(name: "New", path: nil, color: nil))
     }
 
+    // MARK: - Pane move commands
+
+    @Test func parsePaneMoveLeft() {
+        let data = jsonData("""
+        {"command":"pane-move","pane_id":"\(Self.paneIDString)","direction":"left"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .paneMove(paneID: Self.paneUUID, direction: .left))
+    }
+
+    @Test func parsePaneMoveAllDirections() {
+        for dir in PaneLayout.Direction.allCases {
+            let data = jsonData("""
+            {"command":"pane-move","pane_id":"\(Self.paneIDString)","direction":"\(dir.rawValue)"}
+            """)
+            let result = SocketServer.parseWireMessage(data)
+            #expect(result != nil)
+            #expect(result?.0 == .paneMove(paneID: Self.paneUUID, direction: dir))
+        }
+    }
+
+    @Test func parsePaneMoveMissingDirectionReturnsNil() {
+        let data = jsonData("""
+        {"command":"pane-move","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    @Test func parsePaneMoveInvalidDirectionReturnsNil() {
+        let data = jsonData("""
+        {"command":"pane-move","pane_id":"\(Self.paneIDString)","direction":"diagonal"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
     // MARK: - Layout commands
 
     @Test func parseLayoutCycleCommand() {

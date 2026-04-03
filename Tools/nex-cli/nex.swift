@@ -10,6 +10,7 @@
 //   nex pane close
 //   nex pane name <name>
 //   nex pane send --to <name-or-uuid> <command...>
+//   nex pane move [left|right|up|down]
 //   nex workspace create [--name "..."] [--path /dir] [--color blue]
 //   nex layout cycle
 //   nex layout select <name>
@@ -53,6 +54,7 @@ func printUsage() {
       nex pane close
       nex pane name <name>
       nex pane send --to <name-or-uuid> <command...>
+      nex pane move [left|right|up|down]
       nex workspace create [--name "..."] [--path /dir] [--color blue]
       nex layout cycle
       nex layout select <name>
@@ -180,7 +182,7 @@ func handleEvent(_ args: inout ArraySlice<String>) {
 
 func handlePane(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex pane split|create|close|name|send [...]\n", stderr)
+        fputs("Usage: nex pane split|create|close|name|send|move [...]\n", stderr)
         exit(1)
     }
 
@@ -257,9 +259,26 @@ func handlePane(_ args: inout ArraySlice<String>) {
         ]
         sendJSON(payload)
 
+    case "move":
+        guard let direction = args.popFirst() else {
+            fputs("Usage: nex pane move [left|right|up|down]\n", stderr)
+            exit(1)
+        }
+        let validDirections: Set = ["left", "right", "up", "down"]
+        guard validDirections.contains(direction) else {
+            fputs("Invalid direction: \(direction)\n", stderr)
+            fputs("Valid directions: left, right, up, down\n", stderr)
+            exit(1)
+        }
+        sendJSON([
+            "command": "pane-move",
+            "pane_id": paneID,
+            "direction": direction
+        ])
+
     default:
         fputs("Unknown pane action: \(action)\n", stderr)
-        fputs("Valid actions: split, create, close, name, send\n", stderr)
+        fputs("Valid actions: split, create, close, name, send, move\n", stderr)
         exit(1)
     }
 }

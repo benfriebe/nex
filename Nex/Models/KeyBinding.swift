@@ -235,6 +235,10 @@ enum NexAction: String, CaseIterable {
     case toggleSearch = "toggle_search"
     case closeSearch = "close_search"
     case cycleLayout = "cycle_layout"
+    case movePaneLeft = "move_pane_left"
+    case movePaneRight = "move_pane_right"
+    case movePaneUp = "move_pane_up"
+    case movePaneDown = "move_pane_down"
     case unbind
 
     /// Actions handled by SwiftUI Commands (menu bar items).
@@ -281,6 +285,10 @@ enum NexAction: String, CaseIterable {
         case .toggleSearch: "Toggle Search"
         case .closeSearch: "Close Search"
         case .cycleLayout: "Cycle Layout"
+        case .movePaneLeft: "Move Pane Left"
+        case .movePaneRight: "Move Pane Right"
+        case .movePaneUp: "Move Pane Up"
+        case .movePaneDown: "Move Pane Down"
         case .unbind: "Unbind"
         }
     }
@@ -288,7 +296,8 @@ enum NexAction: String, CaseIterable {
     /// Category for grouping in Settings UI.
     var category: String {
         switch self {
-        case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout:
+        case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout,
+             .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown:
             "Pane Management"
         case .focusNextPane, .focusPreviousPane:
             "Navigation"
@@ -419,6 +428,12 @@ struct KeyBindingMap: Equatable {
         bindings[KeyTrigger(keyCode: 3, modifiers: .command)] = .toggleSearch // ⌘F
         bindings[KeyTrigger(keyCode: 53)] = .closeSearch // Escape
         bindings[KeyTrigger(keyCode: 49, modifiers: [.command, .shift])] = .cycleLayout // ⌘⇧Space
+
+        // Move pane in direction
+        bindings[KeyTrigger(keyCode: 123, modifiers: [.control, .shift])] = .movePaneLeft // ⌃⇧←
+        bindings[KeyTrigger(keyCode: 124, modifiers: [.control, .shift])] = .movePaneRight // ⌃⇧→
+        bindings[KeyTrigger(keyCode: 125, modifiers: [.control, .shift])] = .movePaneDown // ⌃⇧↓
+        bindings[KeyTrigger(keyCode: 126, modifiers: [.control, .shift])] = .movePaneUp // ⌃⇧↑
 
         return KeyBindingMap(bindings: bindings)
     }()

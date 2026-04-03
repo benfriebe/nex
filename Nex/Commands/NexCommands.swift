@@ -189,6 +189,22 @@ final class PaneShortcutMonitor {
             store.send(.workspaces(.element(id: id, action: .cycleLayout)))
             return true
 
+        case .movePaneLeft:
+            store.send(.workspaces(.element(id: id, action: .movePaneInDirection(.left))))
+            return true
+
+        case .movePaneRight:
+            store.send(.workspaces(.element(id: id, action: .movePaneInDirection(.right))))
+            return true
+
+        case .movePaneUp:
+            store.send(.workspaces(.element(id: id, action: .movePaneInDirection(.up))))
+            return true
+
+        case .movePaneDown:
+            store.send(.workspaces(.element(id: id, action: .movePaneInDirection(.down))))
+            return true
+
         default:
             return false
         }
