@@ -95,6 +95,17 @@ All services are registered as TCA dependencies: `surfaceManager`, `persistenceS
 - **Test guard**: `NexApp.isTestMode` prevents ghostty initialization during test runs.
 - **TCA testing**: `TestStore` closure receives pre-action state; mutate to expected post-state. Use `@Dependency(\.uuid)` with `.constant()` for predictable IDs. Test suites need `@MainActor`.
 
+## Release Process
+
+1. Bump version in `Nex/Info.plist` (both `CFBundleShortVersionString` and `CFBundleVersion`)
+2. Commit: `chore: bump version to X.Y.Z`
+3. Push to `main`
+4. Create and push tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. GitHub Actions handles archive, sign, notarize, DMG, and appcast update
+6. Update release notes via `gh release edit` with a proper changelog
+
+Do NOT run `make release`, `make archive`, or `make dmg` locally.
+
 ## Code Style
 
 - SwiftFormat config: 4-space indent, no trailing commas, inline `patternlet`. See `.swiftformat`.
