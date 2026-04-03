@@ -11,6 +11,8 @@
 //   nex pane name <name>
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex workspace create [--name "..."] [--path /dir] [--color blue]
+//   nex layout cycle
+//   nex layout select <name>
 //   nex open <filepath>
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
@@ -52,6 +54,8 @@ func printUsage() {
       nex pane name <name>
       nex pane send --to <name-or-uuid> <command...>
       nex workspace create [--name "..."] [--path /dir] [--color blue]
+      nex layout cycle
+      nex layout select <name>
       nex open <filepath>
     \n
     """, stderr)
@@ -286,6 +290,33 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
     sendJSON(payload)
 }
 
+func handleLayout(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        fputs("Usage: nex layout cycle|select <name>\n", stderr)
+        exit(1)
+    }
+
+    let paneID = requirePaneID()
+
+    switch action {
+    case "cycle":
+        sendJSON(["command": "layout-cycle", "pane_id": paneID])
+
+    case "select":
+        guard let name = args.popFirst() else {
+            fputs("Usage: nex layout select <name>\n", stderr)
+            fputs("Valid layouts: even-horizontal, even-vertical, main-horizontal, main-vertical, tiled\n", stderr)
+            exit(1)
+        }
+        sendJSON(["command": "layout-select", "pane_id": paneID, "name": name])
+
+    default:
+        fputs("Unknown layout action: \(action)\n", stderr)
+        fputs("Valid actions: cycle, select\n", stderr)
+        exit(1)
+    }
+}
+
 func handleOpen(_ args: inout ArraySlice<String>) {
     guard let filePath = args.popFirst() else {
         fputs("Usage: nex open <filepath>\n", stderr)
@@ -327,6 +358,8 @@ case "pane":
     handlePane(&args)
 case "workspace":
     handleWorkspace(&args)
+case "layout":
+    handleLayout(&args)
 case "open":
     handleOpen(&args)
 default:

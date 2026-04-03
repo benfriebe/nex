@@ -254,4 +254,16 @@ struct KeyBindingMapTests {
         let map = KeyBindingMap(bindings: [:])
         #expect(map.triggers(for: .splitRight).isEmpty)
     }
+
+    @Test func cycleLayoutCategory() {
+        #expect(NexAction.cycleLayout.category == "Pane Management")
+        #expect(NexAction.cycleLayout.isMenuBarAction == false)
+        #expect(NexAction.cycleLayout.displayName == "Cycle Layout")
+    }
+
+    @Test func defaultsContainCycleLayout() {
+        let map = KeyBindingMap.defaults
+        let cmdShiftSpace = KeyTrigger(keyCode: 49, modifiers: [.command, .shift])
+        #expect(map.action(for: cmdShiftSpace) == .cycleLayout)
+    }
 }

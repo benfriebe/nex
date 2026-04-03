@@ -234,6 +234,7 @@ enum NexAction: String, CaseIterable {
     case reopenClosedPane = "reopen_closed_pane"
     case toggleSearch = "toggle_search"
     case closeSearch = "close_search"
+    case cycleLayout = "cycle_layout"
     case unbind
 
     /// Actions handled by SwiftUI Commands (menu bar items).
@@ -279,6 +280,7 @@ enum NexAction: String, CaseIterable {
         case .reopenClosedPane: "Reopen Closed Pane"
         case .toggleSearch: "Toggle Search"
         case .closeSearch: "Close Search"
+        case .cycleLayout: "Cycle Layout"
         case .unbind: "Unbind"
         }
     }
@@ -286,7 +288,7 @@ enum NexAction: String, CaseIterable {
     /// Category for grouping in Settings UI.
     var category: String {
         switch self {
-        case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom:
+        case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout:
             "Pane Management"
         case .focusNextPane, .focusPreviousPane:
             "Navigation"
@@ -416,6 +418,7 @@ struct KeyBindingMap: Equatable {
         bindings[KeyTrigger(keyCode: 17, modifiers: [.command, .shift])] = .reopenClosedPane // ⌘⇧T
         bindings[KeyTrigger(keyCode: 3, modifiers: .command)] = .toggleSearch // ⌘F
         bindings[KeyTrigger(keyCode: 53)] = .closeSearch // Escape
+        bindings[KeyTrigger(keyCode: 49, modifiers: [.command, .shift])] = .cycleLayout // ⌘⇧Space
 
         return KeyBindingMap(bindings: bindings)
     }()

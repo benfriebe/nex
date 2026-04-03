@@ -19,6 +19,9 @@ enum SocketMessage: Equatable {
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?)
     /// File commands
     case openFile(path: String, paneID: UUID?)
+    /// Layout commands
+    case layoutCycle(paneID: UUID)
+    case layoutSelect(paneID: UUID, name: String)
 }
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -31,6 +34,8 @@ enum SocketMessage: Equatable {
 /// {"command":"error","pane_id":"<uuid>","message":"..."}\n
 /// {"command":"pane-split","pane_id":"<uuid>","direction":"horizontal"}\n
 /// {"command":"workspace-create","name":"Test","color":"blue"}\n
+/// {"command":"layout-cycle","pane_id":"<uuid>"}\n
+/// {"command":"layout-select","pane_id":"<uuid>","name":"tiled"}\n
 /// ```
 final class SocketServer: Sendable {
     static let socketPath = "/tmp/nex.sock"
@@ -254,6 +259,11 @@ final class SocketServer: Sendable {
             guard let target = wire.target, !target.isEmpty,
                   let text = wire.text, !text.isEmpty else { return nil }
             socketMessage = .paneSend(paneID: paneID, target: target, text: text)
+        case "layout-cycle":
+            socketMessage = .layoutCycle(paneID: paneID)
+        case "layout-select":
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            socketMessage = .layoutSelect(paneID: paneID, name: name)
         default:
             return nil
         }

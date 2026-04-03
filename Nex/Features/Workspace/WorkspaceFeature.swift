@@ -28,6 +28,7 @@ struct WorkspaceFeature {
         var searchNeedle: String = ""
         var searchTotal: Int?
         var searchSelected: Int?
+        var currentLayoutIndex: Int?
         var createdAt: Date
         var lastAccessedAt: Date
 
@@ -114,6 +115,8 @@ struct WorkspaceFeature {
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
         case reopenClosedPane
+        case cycleLayout
+        case selectLayout(PredefinedLayout)
         case toggleZoomPane
         case toggleSearch
         case ghosttySearchStarted(paneID: UUID, needle: String)
@@ -181,6 +184,7 @@ struct WorkspaceFeature {
                 state.panes.append(newPane)
                 if let label { state.panes[id: newPaneID]?.label = label }
                 state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
                 return .run { _ in
@@ -216,6 +220,7 @@ struct WorkspaceFeature {
                 state.panes.append(newPane)
                 if let label { state.panes[id: newPaneID]?.label = label }
                 state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
                 return .run { _ in
@@ -253,6 +258,7 @@ struct WorkspaceFeature {
                 }
                 state.panes.append(newPane)
                 state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
                 return .run { send in
                     let branch = try? await gitService.getCurrentBranch(dir)
                     await send(.paneBranchChanged(paneID: newPaneID, branch: branch))
@@ -289,6 +295,7 @@ struct WorkspaceFeature {
                 state.panes.remove(id: paneID)
                 let newLayout = state.layout.removing(paneID: paneID)
                 state.layout = newLayout
+                state.currentLayoutIndex = nil
 
                 // Update focus
                 if state.focusedPaneID == paneID {
@@ -323,6 +330,7 @@ struct WorkspaceFeature {
                     atPath: splitPath,
                     to: ratio
                 )
+                state.currentLayoutIndex = nil
                 return .none
 
             case .paneTitleChanged(let paneID, let title):
@@ -349,6 +357,7 @@ struct WorkspaceFeature {
                     paneID, toAdjacentOf: targetPaneID, zone: zone
                 )
                 state.focusedPaneID = paneID
+                state.currentLayoutIndex = nil
                 return .none
 
             case .agentStarted(let paneID):
@@ -390,6 +399,61 @@ struct WorkspaceFeature {
 
             case .removeRepoAssociation(let id):
                 state.repoAssociations.remove(id: id)
+                return .none
+
+            case .cycleLayout:
+                guard state.panes.count > 1 else { return .none }
+
+                // Un-zoom if zoomed
+                if let saved = state.savedLayout {
+                    state.layout = saved
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                }
+
+                let layouts = PredefinedLayout.allCases
+                let nextIndex = if let current = state.currentLayoutIndex {
+                    (current + 1) % layouts.count
+                } else {
+                    0
+                }
+
+                // Reorder so focused pane is first (becomes "main" in main-* layouts)
+                let currentIDs = state.layout.allPaneIDs
+                var reordered = currentIDs
+                if let focusedID = state.focusedPaneID,
+                   let idx = reordered.firstIndex(of: focusedID), idx != 0 {
+                    reordered.remove(at: idx)
+                    reordered.insert(focusedID, at: 0)
+                }
+
+                state.layout = layouts[nextIndex].buildLayout(for: reordered)
+                state.currentLayoutIndex = nextIndex
+                return .none
+
+            case .selectLayout(let predefinedLayout):
+                guard state.panes.count > 1 else { return .none }
+
+                // Un-zoom if zoomed
+                if let saved = state.savedLayout {
+                    state.layout = saved
+                    state.zoomedPaneID = nil
+                    state.savedLayout = nil
+                }
+
+                let layouts = PredefinedLayout.allCases
+                guard let index = layouts.firstIndex(of: predefinedLayout) else { return .none }
+
+                let currentIDs = state.layout.allPaneIDs
+                var reordered = currentIDs
+                if let focusedID = state.focusedPaneID,
+                   let idx = reordered.firstIndex(of: focusedID), idx != 0 {
+                    reordered.remove(at: idx)
+                    reordered.insert(focusedID, at: 0)
+                }
+
+                state.layout = predefinedLayout.buildLayout(for: reordered)
+                state.currentLayoutIndex = index
                 return .none
 
             case .toggleZoomPane:
@@ -516,6 +580,7 @@ struct WorkspaceFeature {
                 state.layout = newLayout
                 state.panes.append(newPane)
                 state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
 
                 // Markdown panes don't need a surface
                 if snapshot.type == .markdown {

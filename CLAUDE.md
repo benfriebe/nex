@@ -49,6 +49,7 @@ make check
 
 ### Pane layout
 - `PaneLayout` — recursive enum (`leaf(UUID)` | `split(direction, ratio, first, second)` | `empty`). Handles splitting, removing, moving panes, frame computation, and divider positioning.
+- `PredefinedLayout` — enum of five tmux-style layouts (even-horizontal, even-vertical, main-horizontal, main-vertical, tiled). `buildLayout(for: [UUID])` generates the tree; first UUID is the "main" pane. Cycled via `⌘⇧Space` or `nex layout cycle`.
 - `Pane` — model with id, working directory, git branch, agent status, Claude session ID.
 - `PaneGridView` / `SurfaceContainerView` — SwiftUI views that render the layout tree and embed `SurfaceView` via `NSViewRepresentable`.
 
@@ -66,18 +67,19 @@ make check
 - DB location: `~/Library/Application Support/Nex/nex.db`
 
 ### Agent monitoring & CLI
-- `SocketServer` — Unix domain socket at `/tmp/nex.sock`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `workspace-create`.
+- `SocketServer` — Unix domain socket at `/tmp/nex.sock`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `workspace-create`, `layout-cycle`, `layout-select`.
 - `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace commands).
 - `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`. Subcommand structure:
   - `nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]`
   - `nex pane split|create|close|name|send [options]`
   - `nex workspace create [--name ...] [--path ...] [--color ...]`
+  - `nex layout cycle|select <name>`
 - `StatusBarController` — menu bar icon + popover showing running/waiting agents across workspaces.
 - `NotificationService` — desktop notifications with "Open"/"Dismiss" actions.
 
 ### Keybindings
 - **Config file**: `~/.config/nex/config` — Ghostty-style `keybind = super+d=split_right` syntax. Parsed by `ConfigParser`, loaded by `KeybindingService`.
-- **Data model** (`KeyBinding.swift`): `KeyTrigger` (keyCode + modifiers), `NexAction` (25 bindable actions), `KeyBindingMap` (trigger → action dictionary with sorted lookups).
+- **Data model** (`KeyBinding.swift`): `KeyTrigger` (keyCode + modifiers), `NexAction` (26 bindable actions), `KeyBindingMap` (trigger → action dictionary with sorted lookups).
 - **Two dispatch layers**: SwiftUI `Commands` (`NexCommands`) handles menu bar shortcuts; `PaneShortcutMonitor` (NSEvent local monitor) handles pane-context shortcuts. Both read from `AppReducer.State.keybindings`.
 - **Settings UI** (`KeybindingsSettingsView`): table grouped by category with key recorder sheet, per-action reset, and reset-all. Changes are persisted to the config file.
 - **Conditional shortcuts**: `toggle_markdown_edit` only fires for markdown panes, `close_search` only when search is active, `close_pane` deletes workspace when it's the last pane.

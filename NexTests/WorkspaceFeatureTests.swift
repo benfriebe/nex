@@ -511,4 +511,209 @@ struct WorkspaceFeatureTests {
         #expect(store.state.recentlyClosedPanes.first?.workingDirectory == "/tmp/dir1")
         #expect(store.state.recentlyClosedPanes.last?.workingDirectory == "/tmp/dir10")
     }
+
+    // MARK: - Layout Cycling
+
+    @Test func cycleLayoutWithSinglePaneIsNoop() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.cycleLayout)
+        // State unchanged — single pane
+    }
+
+    @Test func cycleLayoutAppliesFirstLayout() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.cycleLayout) { state in
+            // First layout is evenHorizontal — with focused pane first
+            state.layout = PredefinedLayout.evenHorizontal.buildLayout(for: [firstID, secondID])
+            state.currentLayoutIndex = 0
+        }
+    }
+
+    @Test func cycleLayoutCyclesThroughAll() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let layoutCount = PredefinedLayout.allCases.count
+
+        // Cycle through all layouts
+        for i in 0 ..< layoutCount {
+            await store.send(.cycleLayout)
+            #expect(store.state.currentLayoutIndex == i)
+        }
+
+        // Wraps back to 0
+        await store.send(.cycleLayout)
+        #expect(store.state.currentLayoutIndex == 0)
+    }
+
+    @Test func cycleLayoutPreservesFocus() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = secondID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.cycleLayout)
+        #expect(store.state.focusedPaneID == secondID)
+    }
+
+    @Test func selectLayoutAppliesCorrectLayout() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.selectLayout(.tiled)) { state in
+            state.layout = PredefinedLayout.tiled.buildLayout(for: [firstID, secondID])
+            state.currentLayoutIndex = PredefinedLayout.allCases.firstIndex(of: .tiled)!
+        }
+    }
+
+    @Test func splitPaneResetsLayoutIndex() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+        workspace.currentLayoutIndex = 2
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.uuid = .constant(newPaneID)
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.splitPane(direction: .horizontal, sourcePaneID: firstID))
+        #expect(store.state.currentLayoutIndex == nil)
+    }
+
+    @Test func closePaneResetsLayoutIndex() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = firstID
+        workspace.currentLayoutIndex = 1
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closePane(secondID))
+        #expect(store.state.currentLayoutIndex == nil)
+    }
+
+    @Test func cycleLayoutUnzoomsFirst() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let secondID = UUID()
+        workspace.panes.append(Pane(id: secondID))
+        let originalLayout = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.layout = .leaf(firstID) // zoomed
+        workspace.savedLayout = originalLayout
+        workspace.zoomedPaneID = firstID
+        workspace.focusedPaneID = firstID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.cycleLayout) { state in
+            state.savedLayout = nil
+            state.zoomedPaneID = nil
+            // Layout should be the first predefined layout
+            state.layout = PredefinedLayout.evenHorizontal.buildLayout(for: [firstID, secondID])
+            state.currentLayoutIndex = 0
+        }
+    }
 }

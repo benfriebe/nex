@@ -339,4 +339,32 @@ struct SocketParsingTests {
         #expect(results[1] == .paneSplit(paneID: Self.paneUUID, direction: .horizontal, path: nil, name: nil, target: nil))
         #expect(results[2] == .workspaceCreate(name: "New", path: nil, color: nil))
     }
+
+    // MARK: - Layout commands
+
+    @Test func parseLayoutCycleCommand() {
+        let data = jsonData("""
+        {"command":"layout-cycle","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .layoutCycle(paneID: Self.paneUUID))
+    }
+
+    @Test func parseLayoutSelectCommand() {
+        let data = jsonData("""
+        {"command":"layout-select","pane_id":"\(Self.paneIDString)","name":"tiled"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .layoutSelect(paneID: Self.paneUUID, name: "tiled"))
+    }
+
+    @Test func parseLayoutSelectMissingNameReturnsNil() {
+        let data = jsonData("""
+        {"command":"layout-select","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
 }

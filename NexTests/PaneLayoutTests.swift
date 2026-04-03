@@ -222,3 +222,150 @@ struct PaneLayoutTests {
         #expect(decoded == layout)
     }
 }
+
+// MARK: - PredefinedLayout
+
+struct PredefinedLayoutTests {
+    // MARK: - Single pane
+
+    @Test func singlePaneReturnsLeafForAll() {
+        let id = UUID()
+        for layout in PredefinedLayout.allCases {
+            let result = layout.buildLayout(for: [id])
+            #expect(result == .leaf(id), "Expected .leaf for \(layout.rawValue) with 1 pane")
+        }
+    }
+
+    @Test func emptyPaneIDsReturnsEmpty() {
+        for layout in PredefinedLayout.allCases {
+            let result = layout.buildLayout(for: [])
+            #expect(result == .empty, "Expected .empty for \(layout.rawValue) with 0 panes")
+        }
+    }
+
+    // MARK: - Even Horizontal
+
+    @Test func evenHorizontalTwoPanes() {
+        let a = UUID(), b = UUID()
+        let result = PredefinedLayout.evenHorizontal.buildLayout(for: [a, b])
+        #expect(result == .split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b)))
+    }
+
+    @Test func evenHorizontalThreePanes() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let result = PredefinedLayout.evenHorizontal.buildLayout(for: [a, b, c])
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 1.0 / 3.0,
+            first: .leaf(a),
+            second: .split(.horizontal, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        #expect(result == expected)
+    }
+
+    @Test func evenHorizontalFourPanes() {
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID()
+        let result = PredefinedLayout.evenHorizontal.buildLayout(for: [a, b, c, d])
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 0.25,
+            first: .leaf(a),
+            second: .split(
+                .horizontal, ratio: 1.0 / 3.0,
+                first: .leaf(b),
+                second: .split(.horizontal, ratio: 0.5, first: .leaf(c), second: .leaf(d))
+            )
+        )
+        #expect(result == expected)
+    }
+
+    // MARK: - Even Vertical
+
+    @Test func evenVerticalTwoPanes() {
+        let a = UUID(), b = UUID()
+        let result = PredefinedLayout.evenVertical.buildLayout(for: [a, b])
+        #expect(result == .split(.vertical, ratio: 0.5, first: .leaf(a), second: .leaf(b)))
+    }
+
+    // MARK: - Main Horizontal
+
+    @Test func mainHorizontalTwoPanes() {
+        let a = UUID(), b = UUID()
+        let result = PredefinedLayout.mainHorizontal.buildLayout(for: [a, b])
+        #expect(result == .split(.vertical, ratio: 0.6, first: .leaf(a), second: .leaf(b)))
+    }
+
+    @Test func mainHorizontalThreePanes() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let result = PredefinedLayout.mainHorizontal.buildLayout(for: [a, b, c])
+        let expected = PaneLayout.split(
+            .vertical, ratio: 0.6,
+            first: .leaf(a),
+            second: .split(.horizontal, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        #expect(result == expected)
+    }
+
+    // MARK: - Main Vertical
+
+    @Test func mainVerticalTwoPanes() {
+        let a = UUID(), b = UUID()
+        let result = PredefinedLayout.mainVertical.buildLayout(for: [a, b])
+        #expect(result == .split(.horizontal, ratio: 0.6, first: .leaf(a), second: .leaf(b)))
+    }
+
+    @Test func mainVerticalThreePanes() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let result = PredefinedLayout.mainVertical.buildLayout(for: [a, b, c])
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 0.6,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        #expect(result == expected)
+    }
+
+    // MARK: - Tiled
+
+    @Test func tiledTwoPanes() {
+        let a = UUID(), b = UUID()
+        let result = PredefinedLayout.tiled.buildLayout(for: [a, b])
+        #expect(result == .split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b)))
+    }
+
+    @Test func tiledThreePanes() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let result = PredefinedLayout.tiled.buildLayout(for: [a, b, c])
+        // mid = 1, so first half = [a], second half = [b, c]
+        // second half splits vertically: [b] | [c]
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 1.0 / 3.0,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        #expect(result == expected)
+    }
+
+    @Test func tiledFourPanes() {
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID()
+        let result = PredefinedLayout.tiled.buildLayout(for: [a, b, c, d])
+        // mid = 2, so [a,b] | [c,d]
+        // first half splits vertically: a / b
+        // second half splits vertically: c / d
+        let expected = PaneLayout.split(
+            .horizontal, ratio: 0.5,
+            first: .split(.vertical, ratio: 0.5, first: .leaf(a), second: .leaf(b)),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(c), second: .leaf(d))
+        )
+        #expect(result == expected)
+    }
+
+    // MARK: - Pane ID preservation
+
+    @Test func allPaneIDsPreserved() {
+        let ids = (0 ..< 5).map { _ in UUID() }
+        for layout in PredefinedLayout.allCases {
+            let result = layout.buildLayout(for: ids)
+            let resultIDs = Set(result.allPaneIDs)
+            #expect(resultIDs == Set(ids), "Pane IDs not preserved for \(layout.rawValue)")
+        }
+    }
+}

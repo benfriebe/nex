@@ -185,6 +185,10 @@ final class PaneShortcutMonitor {
         case .closeSearch:
             return handleCloseSearch(activeWorkspaceID: id)
 
+        case .cycleLayout:
+            store.send(.workspaces(.element(id: id, action: .cycleLayout)))
+            return true
+
         default:
             return false
         }

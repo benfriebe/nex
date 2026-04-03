@@ -292,3 +292,88 @@ indirect enum PaneLayout: Equatable, Codable {
         }
     }
 }
+
+// MARK: - Predefined Layouts
+
+enum PredefinedLayout: String, CaseIterable, Codable, Equatable {
+    case evenHorizontal = "even-horizontal"
+    case evenVertical = "even-vertical"
+    case mainHorizontal = "main-horizontal"
+    case mainVertical = "main-vertical"
+    case tiled
+
+    var displayName: String {
+        switch self {
+        case .evenHorizontal: "Even Horizontal"
+        case .evenVertical: "Even Vertical"
+        case .mainHorizontal: "Main Horizontal"
+        case .mainVertical: "Main Vertical"
+        case .tiled: "Tiled"
+        }
+    }
+
+    /// Build a layout tree for this predefined layout using the given pane IDs.
+    /// The first pane ID is treated as the "main" pane for main-* layouts.
+    func buildLayout(for paneIDs: [UUID]) -> PaneLayout {
+        guard let first = paneIDs.first else { return .empty }
+        guard paneIDs.count > 1 else { return .leaf(first) }
+
+        switch self {
+        case .evenHorizontal:
+            return Self.evenSplit(direction: .horizontal, paneIDs: paneIDs)
+        case .evenVertical:
+            return Self.evenSplit(direction: .vertical, paneIDs: paneIDs)
+        case .mainHorizontal:
+            let rest = Array(paneIDs.dropFirst())
+            return .split(
+                .vertical, ratio: 0.6,
+                first: .leaf(first),
+                second: Self.evenSplit(direction: .horizontal, paneIDs: rest)
+            )
+        case .mainVertical:
+            let rest = Array(paneIDs.dropFirst())
+            return .split(
+                .horizontal, ratio: 0.6,
+                first: .leaf(first),
+                second: Self.evenSplit(direction: .vertical, paneIDs: rest)
+            )
+        case .tiled:
+            return Self.tiledSplit(paneIDs: paneIDs, direction: .horizontal)
+        }
+    }
+
+    /// Recursively split panes evenly in the given direction.
+    /// For N panes, the first gets 1/N of the space, the rest split the remainder.
+    static func evenSplit(direction: PaneLayout.SplitDirection, paneIDs: [UUID]) -> PaneLayout {
+        guard let first = paneIDs.first else { return .empty }
+        guard paneIDs.count > 1 else { return .leaf(first) }
+
+        let ratio = 1.0 / Double(paneIDs.count)
+        let rest = Array(paneIDs.dropFirst())
+        return .split(
+            direction, ratio: ratio,
+            first: .leaf(first),
+            second: evenSplit(direction: direction, paneIDs: rest)
+        )
+    }
+
+    /// Recursively tile panes by splitting at the midpoint, alternating direction.
+    private static func tiledSplit(
+        paneIDs: [UUID],
+        direction: PaneLayout.SplitDirection
+    ) -> PaneLayout {
+        guard let first = paneIDs.first else { return .empty }
+        guard paneIDs.count > 1 else { return .leaf(first) }
+
+        let mid = paneIDs.count / 2
+        let firstHalf = Array(paneIDs.prefix(mid))
+        let secondHalf = Array(paneIDs.suffix(from: mid))
+        let nextDirection: PaneLayout.SplitDirection = direction == .horizontal ? .vertical : .horizontal
+
+        return .split(
+            direction, ratio: Double(mid) / Double(paneIDs.count),
+            first: tiledSplit(paneIDs: firstHalf, direction: nextDirection),
+            second: tiledSplit(paneIDs: secondHalf, direction: nextDirection)
+        )
+    }
+}

@@ -618,6 +618,19 @@ struct AppReducer {
                         id: activeID,
                         action: .openMarkdownFile(filePath: path)
                     )))
+
+                // MARK: Layout commands
+
+                case .layoutCycle(let paneID):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    else { return .none }
+                    return .send(.workspaces(.element(id: workspace.id, action: .cycleLayout)))
+
+                case .layoutSelect(let paneID, let name):
+                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }),
+                          let layout = PredefinedLayout(rawValue: name)
+                    else { return .none }
+                    return .send(.workspaces(.element(id: workspace.id, action: .selectLayout(layout))))
                 }
 
             // MARK: - Cross-Workspace Surface Notifications
