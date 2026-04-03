@@ -91,7 +91,9 @@ struct ContentView: View {
                                 id: activeID,
                                 action: .searchClose
                             )))
-                        }
+                        },
+                        focusFollowsMouse: store.focusFollowsMouse,
+                        focusFollowsMouseDelay: store.focusFollowsMouseDelay
                     )
                 } else {
                     VStack(spacing: 8) {

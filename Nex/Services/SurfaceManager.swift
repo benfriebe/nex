@@ -67,6 +67,25 @@ final class SurfaceManager: Sendable {
         surfaceView?.ghosttySurface?.sendText(text)
     }
 
+    /// Query the terminal grid dimensions (columns x rows) for a pane.
+    @MainActor
+    func gridSize(for paneID: UUID) -> (columns: UInt16, rows: UInt16)? {
+        let surfaceView = lock.withLock { surfaces[paneID] }
+        guard let size = surfaceView?.ghosttySurface?.size else { return nil }
+        guard size.columns > 0, size.rows > 0 else { return nil }
+        return (size.columns, size.rows)
+    }
+
+    /// Query the terminal cell size in points for a pane.
+    @MainActor
+    func cellSize(for paneID: UUID) -> (width: CGFloat, height: CGFloat)? {
+        let surfaceView = lock.withLock { surfaces[paneID] }
+        guard let size = surfaceView?.ghosttySurface?.size else { return nil }
+        guard size.cell_width_px > 0, size.cell_height_px > 0 else { return nil }
+        let scale = surfaceView?.window?.backingScaleFactor ?? 2.0
+        return (CGFloat(size.cell_width_px) / scale, CGFloat(size.cell_height_px) / scale)
+    }
+
     /// Execute a ghostty binding action on a pane's surface.
     @MainActor
     @discardableResult

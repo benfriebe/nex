@@ -15,6 +15,8 @@ struct AppReducer {
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
         var keybindings: KeyBindingMap = .defaults
+        var focusFollowsMouse: Bool = false
+        var focusFollowsMouseDelay: Int = 100
 
         var activeWorkspace: WorkspaceFeature.State? {
             guard let id = activeWorkspaceID else { return nil }
@@ -93,6 +95,11 @@ struct AppReducer {
         case removeKeybinding(KeyTrigger)
         case resetBindingsForAction(NexAction)
         case resetKeybindings
+
+        // General config
+        case configLoaded(focusFollowsMouse: Bool, focusFollowsMouseDelay: Int)
+        case setFocusFollowsMouse(Bool)
+        case setFocusFollowsMouseDelay(Int)
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -124,6 +131,15 @@ struct AppReducer {
                     .run { send in
                         let bindings = KeybindingService.loadFromDisk()
                         await send(.keybindingsLoaded(bindings))
+                    },
+                    .run { send in
+                        let config = ConfigParser.parseGeneralSettings(
+                            fromFile: KeybindingService.configPath
+                        )
+                        await send(.configLoaded(
+                            focusFollowsMouse: config.focusFollowsMouse,
+                            focusFollowsMouseDelay: config.focusFollowsMouseDelay
+                        ))
                     }
                 )
 
@@ -385,6 +401,35 @@ struct AppReducer {
                 return .run { _ in
                     let path = KeybindingService.configPath
                     ConfigParser.writeKeybindings(.defaults, toFile: path)
+                }
+
+            // MARK: - General Config
+
+            case .configLoaded(let focusFollowsMouse, let focusFollowsMouseDelay):
+                state.focusFollowsMouse = focusFollowsMouse
+                state.focusFollowsMouseDelay = focusFollowsMouseDelay
+                return .none
+
+            case .setFocusFollowsMouse(let enabled):
+                state.focusFollowsMouse = enabled
+                return .run { _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.setGeneralSetting(
+                        "focus-follows-mouse",
+                        value: enabled ? "true" : "false",
+                        inFile: path
+                    )
+                }
+
+            case .setFocusFollowsMouseDelay(let ms):
+                state.focusFollowsMouseDelay = max(0, ms)
+                return .run { [delay = state.focusFollowsMouseDelay] _ in
+                    let path = KeybindingService.configPath
+                    ConfigParser.setGeneralSetting(
+                        "focus-follows-mouse-delay",
+                        value: "\(delay)",
+                        inFile: path
+                    )
                 }
 
             // MARK: - File Opening

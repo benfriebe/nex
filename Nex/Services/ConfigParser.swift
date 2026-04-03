@@ -8,6 +8,84 @@ enum ConfigParser {
         category: "ConfigParser"
     )
 
+    struct GeneralSettings {
+        var focusFollowsMouse: Bool = false
+        var focusFollowsMouseDelay: Int = 100
+    }
+
+    /// Parse general (non-keybind) settings from a config file.
+    static func parseGeneralSettings(fromFile path: String) -> GeneralSettings {
+        guard FileManager.default.fileExists(atPath: path),
+              let contents = try? String(contentsOfFile: path, encoding: .utf8)
+        else {
+            return GeneralSettings()
+        }
+        return parseGeneralSettings(from: contents)
+    }
+
+    static func parseGeneralSettings(from contents: String) -> GeneralSettings {
+        var settings = GeneralSettings()
+        for line in contents.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard let eqIndex = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces)
+            let value = trimmed[trimmed.index(after: eqIndex)...]
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+
+            switch key {
+            case "focus-follows-mouse":
+                settings.focusFollowsMouse = value == "true"
+            case "focus-follows-mouse-delay":
+                if let ms = Int(value) {
+                    settings.focusFollowsMouseDelay = max(0, ms)
+                }
+            default:
+                break
+            }
+        }
+        return settings
+    }
+
+    /// Set a general setting in the config file, preserving other lines.
+    static func setGeneralSetting(_ key: String, value: String, inFile path: String) {
+        var lines: [String] = []
+        var found = false
+
+        if let contents = try? String(contentsOfFile: path, encoding: .utf8) {
+            for line in contents.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if let eqIndex = trimmed.firstIndex(of: "=") {
+                    let lineKey = trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces)
+                    if lineKey == key {
+                        lines.append("\(key) = \(value)")
+                        found = true
+                        continue
+                    }
+                }
+                lines.append(line)
+            }
+        }
+
+        if !found {
+            // Remove trailing empty lines before appending
+            while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+                lines.removeLast()
+            }
+            lines.append("\(key) = \(value)")
+        }
+
+        // Ensure trailing newline
+        if lines.last?.isEmpty != true {
+            lines.append("")
+        }
+
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
     /// Parse keybind entries from a config file's contents.
     ///
     /// Expected format (one per line):

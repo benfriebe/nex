@@ -81,6 +81,7 @@
 		EBFB92013428FF7CDE660CB1 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F561A2375008B0EC39BF86D /* Carbon.framework */; };
 		EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9335AE3C92A37DD50A5715A /* AppReducer.swift */; };
 		ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */; };
+		ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */; };
 		EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */; };
 		F1139F84E35AF1181F136C9D /* KeyBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF3FB912BD029F17AF0AA25 /* KeyBinding.swift */; };
 		F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */; };
@@ -115,6 +116,7 @@
 		221A3B0170CFD708F3B03A84 /* Repo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repo.swift; sourceTree = "<group>"; };
 		257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoAssociation.swift; sourceTree = "<group>"; };
 		281D0362CA8542610B8329F6 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResizeDimensionsOverlay.swift; sourceTree = "<group>"; };
 		309D0F6F13F12FDC350DE875 /* SocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketServer.swift; sourceTree = "<group>"; };
 		309F641591BB580429299666 /* ConfigParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigParserTests.swift; sourceTree = "<group>"; };
 		30D306AA2907696B7A28F9DA /* PaneLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayout.swift; sourceTree = "<group>"; };
@@ -312,6 +314,7 @@
 				005B56542A2F5FD5D3BC588C /* PaneGridView.swift */,
 				BB94DA665D3B322A44251454 /* PaneHeaderView.swift */,
 				DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */,
+				2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */,
 				7DED98594372C8E34542A5C2 /* SplitDividerView.swift */,
 				018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */,
 			);
@@ -593,6 +596,7 @@
 				6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */,
 				3DF88C2A2966C7B0209E22FE /* RepoPickerView.swift in Sources */,
 				40D01E98BD9BE2397CFC1080 /* RepoRegistryView.swift in Sources */,
+				ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */,
 				29C636F17D2FEF2D5E0BE55D /* SettingsFeature.swift in Sources */,
 				E31F1B84CF270603EF2B93E0 /* SettingsView.swift in Sources */,
 				7D1EEEBEE302F17F8CA2852D /* SocketServer.swift in Sources */,

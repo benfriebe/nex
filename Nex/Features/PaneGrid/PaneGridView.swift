@@ -26,13 +26,19 @@ struct PaneGridView: View {
     var onSearchNavigateNext: (() -> Void)?
     var onSearchNavigatePrevious: (() -> Void)?
     var onSearchClose: (() -> Void)?
+    var focusFollowsMouse: Bool = false
+    var focusFollowsMouseDelay: Int = 0
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
+    @Environment(\.surfaceManager) private var surfaceManager
 
     @State private var dragSourcePaneID: UUID?
     @State private var dragTargetPaneID: UUID?
     @State private var dragDropZone: PaneLayout.DropZone?
     @State private var gridSize: CGSize = .zero
+    @State private var isResizing = false
+    @State private var resizeHideTask: Task<Void, Never>?
+    @State private var focusHoverTask: Task<Void, Never>?
 
     var body: some View {
         if layout.isEmpty {
@@ -66,7 +72,13 @@ struct PaneGridView: View {
             .onGeometryChange(for: CGSize.self) {
                 $0.size
             } action: { newSize in
+                let oldSize = gridSize
                 gridSize = newSize
+                if oldSize != .zero, newSize != oldSize {
+                    resizeHideTask?.cancel()
+                    isResizing = true
+                    scheduleResizeHide()
+                }
             }
             // Prevent implicit animations from interfering with
             // NSView re-parenting during layout transitions.
@@ -172,6 +184,27 @@ struct PaneGridView: View {
                     .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
             }
         }
+        .overlay {
+            if isResizing {
+                ResizeDimensionsView(paneID: pane.id, paneFrame: frame)
+            }
+        }
+        .onHover { hovering in
+            guard focusFollowsMouse else { return }
+            focusHoverTask?.cancel()
+            if hovering, pane.id != focusedPaneID {
+                let delay = focusFollowsMouseDelay
+                if delay > 0 {
+                    focusHoverTask = Task {
+                        try? await Task.sleep(for: .milliseconds(delay))
+                        guard !Task.isCancelled else { return }
+                        onFocusPane(pane.id)
+                    }
+                } else {
+                    onFocusPane(pane.id)
+                }
+            }
+        }
         .opacity(dragSourcePaneID == pane.id ? 0.5 : 1.0)
         .frame(width: frame.width, height: frame.height)
         .offset(x: frame.origin.x, y: frame.origin.y)
@@ -181,9 +214,25 @@ struct PaneGridView: View {
         SplitDividerView(direction: info.direction) { delta in
             let newRatio = (info.firstSize + delta) / info.available
             onUpdateRatio(info.id, newRatio)
+        } onDragStateChanged: { dragging in
+            if dragging {
+                resizeHideTask?.cancel()
+                isResizing = true
+            } else {
+                scheduleResizeHide()
+            }
         }
         .frame(width: info.rect.width, height: info.rect.height)
         .offset(x: info.rect.origin.x, y: info.rect.origin.y)
+    }
+
+    private func scheduleResizeHide() {
+        resizeHideTask?.cancel()
+        resizeHideTask = Task {
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled else { return }
+            isResizing = false
+        }
     }
 
     private func dropZoneOverlay(frame: CGRect, zone: PaneLayout.DropZone) -> some View {

@@ -7,7 +7,7 @@ struct SettingsView: View {
     var body: some View {
         WithPerceptionTracking {
             TabView {
-                GeneralSettingsView(store: store.scope(state: \.settings, action: \.settings))
+                GeneralSettingsView(appStore: store)
                     .tabItem {
                         Label("General", systemImage: "gear")
                     }
@@ -34,22 +34,52 @@ struct SettingsView: View {
 
 /// General settings tab.
 private struct GeneralSettingsView: View {
-    @Bindable var store: StoreOf<SettingsFeature>
+    let appStore: StoreOf<AppReducer>
 
     var body: some View {
-        Form {
-            Section("Worktrees") {
-                HStack {
-                    Text("Base path")
-                    TextField("", text: $store.worktreeBasePath.sending(\.setWorktreeBasePath))
-                        .textFieldStyle(.plain)
+        WithPerceptionTracking {
+            let settingsStore = appStore.scope(state: \.settings, action: \.settings)
+            Form {
+                Section("Worktrees") {
+                    HStack {
+                        Text("Base path")
+                        TextField("", text: Bindable(settingsStore).worktreeBasePath.sending(\.setWorktreeBasePath))
+                            .textFieldStyle(.plain)
+                    }
+                    Text("Worktrees are created at <base path>/<workspace>/<name>")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text("Worktrees are created at <base path>/<workspace>/<name>")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+                Section("Panes") {
+                    Toggle("Focus follows mouse", isOn: Binding(
+                        get: { appStore.focusFollowsMouse },
+                        set: { appStore.send(.setFocusFollowsMouse($0)) }
+                    ))
+                    Text("Automatically focus a pane when the mouse moves over it")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if appStore.focusFollowsMouse {
+                        HStack {
+                            Text("Delay")
+                            Slider(
+                                value: Binding(
+                                    get: { Double(appStore.focusFollowsMouseDelay) },
+                                    set: { appStore.send(.setFocusFollowsMouseDelay(Int($0))) }
+                                ),
+                                in: 0 ... 500,
+                                step: 25
+                            )
+                            Text("\(appStore.focusFollowsMouseDelay) ms")
+                                .monospacedDigit()
+                                .frame(width: 55, alignment: .trailing)
+                        }
+                    }
+                }
             }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
     }
 }
 

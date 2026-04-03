@@ -5,6 +5,7 @@ import SwiftUI
 struct SplitDividerView: View {
     let direction: PaneLayout.SplitDirection
     let onDrag: (Double) -> Void
+    var onDragStateChanged: ((Bool) -> Void)?
 
     @State private var isDragging = false
 
@@ -31,12 +32,16 @@ struct SplitDividerView: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        isDragging = true
+                        if !isDragging {
+                            isDragging = true
+                            onDragStateChanged?(true)
+                        }
                         let delta = isHorizontal ? value.translation.width : value.translation.height
                         onDrag(delta)
                     }
                     .onEnded { _ in
                         isDragging = false
+                        onDragStateChanged?(false)
                     }
             )
     }
