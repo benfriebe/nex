@@ -162,6 +162,14 @@ func handleEvent(_ args: inout ArraySlice<String>) {
         }
     }
 
+    // Sub-agent lifecycle events should not affect the pane indicator.
+    // Claude Code sets agent_id on hooks fired by sub-agents; the root agent omits it.
+    if let agentID = stdinJSON?["agent_id"] as? String, !agentID.isEmpty {
+        if eventType == "stop" || eventType == "start" {
+            return
+        }
+    }
+
     // Extract session_id from stdin JSON (available in all hook events)
     var sessionID: String?
     if let json = stdinJSON {
