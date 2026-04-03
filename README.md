@@ -89,51 +89,19 @@ Open **Settings > Repositories** to add repos Nex should know about. You can sca
 
 ### Workspaces
 
-Workspaces are the core unit in Nex. Each workspace is a named context with its own terminal layout, repo associations, and running processes.
-
-| Action | Shortcut |
-|---|---|
-| New workspace | `Cmd+N` |
-| Switch by index | `Cmd+1` through `Cmd+9` |
-| Next workspace | `Cmd+Option+Down` |
-| Previous workspace | `Cmd+Option+Up` |
-
-Right-click a workspace in the sidebar to rename it, change its color, or delete it.
+Workspaces are the core unit in Nex. Each workspace is a named context with its own terminal layout, repo associations, and running processes. Right-click a workspace in the sidebar to rename it, change its color, or delete it.
 
 ### Panes
 
-Each workspace contains one or more terminal panes in a split layout.
-
-| Action | Shortcut |
-|---|---|
-| Split horizontally | `Cmd+D` |
-| Split vertically | `Cmd+Shift+D` |
-| Close pane | `Cmd+W` |
-| Reopen closed pane | `Cmd+Shift+T` |
-| Focus next pane | `Cmd+Option+Right` or `Cmd+]` |
-| Focus previous pane | `Cmd+Option+Left` or `Cmd+[` |
-
-Drag split dividers to resize. Pane headers show the working directory and current git branch.
+Each workspace contains one or more terminal panes in a split layout. Drag split dividers to resize. Pane headers show the working directory and current git branch. Panes can be split, closed, moved, zoomed, and focused via keyboard shortcuts.
 
 ### Markdown panes
 
-Open a markdown file with `Cmd+O` or drag-and-drop a `.md` file onto the window. The file renders in a styled preview with live file watching — edits from external tools (Vim, VS Code, etc.) update the preview automatically.
-
-| Action | Shortcut |
-|---|---|
-| Open markdown file | `Cmd+O` |
-| Toggle edit/preview | `Cmd+E` |
-
-Press `Cmd+E` to switch to a plain-text editor with auto-save (500ms debounce). Scroll position is preserved when toggling between modes. Markdown panes support the same layout operations as terminal panes — splitting, closing, dragging, and reopening.
+Open a markdown file with the open file shortcut or drag-and-drop a `.md` file onto the window. The file renders in a styled preview with live file watching — edits from external tools (Vim, VS Code, etc.) update the preview automatically. Toggle to a plain-text editor with auto-save (500ms debounce). Scroll position is preserved when toggling between modes. Markdown panes support the same layout operations as terminal panes — splitting, closing, dragging, and reopening.
 
 ### UI panels
 
-| Action | Shortcut |
-|---|---|
-| Toggle sidebar | `Cmd+Shift+S` |
-| Toggle inspector | `Cmd+I` |
-
-The inspector shows repo associations, worktree info, and git status for the current workspace.
+The sidebar shows workspaces. The inspector shows repo associations, worktree info, and git status for the current workspace.
 
 ### Agent monitoring
 
@@ -150,9 +118,9 @@ Notifications clear automatically when you focus the app.
 
 Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nex/workspaces`).
 
-### Custom keybindings
+### Keyboard shortcuts
 
-All keyboard shortcuts can be rebound, unbound, or extended via a config file at `~/.config/nex/config` using Ghostty-style syntax:
+All keyboard shortcuts are viewable and customizable in **Settings > Keybindings**. They can also be configured via a config file at `~/.config/nex/config` using Ghostty-style syntax:
 
 ```
 keybind = super+shift+x=split_right
@@ -162,7 +130,7 @@ keybind = ctrl+alt+right=focus_next_pane
 
 You can also edit keybindings in **Settings > Keybindings** with a visual key recorder.
 
-Available actions: `new_workspace`, `open_file`, `switch_to_workspace_1`–`9`, `toggle_sidebar`, `toggle_inspector`, `split_right`, `split_down`, `close_pane`, `focus_next_pane`, `focus_previous_pane`, `next_workspace`, `previous_workspace`, `toggle_markdown_edit`, `toggle_zoom`, `reopen_closed_pane`, `toggle_search`, `close_search`.
+Available actions: `new_workspace`, `open_file`, `switch_to_workspace_1`–`9`, `toggle_sidebar`, `toggle_inspector`, `split_right`, `split_down`, `close_pane`, `focus_next_pane`, `focus_previous_pane`, `next_workspace`, `previous_workspace`, `toggle_markdown_edit`, `toggle_zoom`, `reopen_closed_pane`, `toggle_search`, `close_search`, `cycle_layout`, `move_pane_left`, `move_pane_right`, `move_pane_up`, `move_pane_down`.
 
 ### Settings
 
