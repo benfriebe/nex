@@ -1,3 +1,4 @@
+import AVFAudio
 import ComposableArchitecture
 import Sparkle
 import SwiftUI
@@ -78,6 +79,9 @@ struct NexApp: App {
                             window.backgroundColor = .white.withAlphaComponent(0.001)
                         }
                     }
+
+                    // Request microphone access so CLI tools (e.g. voice input) can use it
+                    AVAudioApplication.requestRecordPermission { _ in }
 
                     store.send(.appLaunched)
 
