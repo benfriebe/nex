@@ -281,8 +281,8 @@ struct AppReducerTests {
 
         await store.send(.stateLoaded([], activeWorkspaceID: nil, repoRegistry: []))
 
-        // Should fire createWorkspace with "Default"
-        await store.receive(.createWorkspace(name: "Default", color: .blue)) { state in
+        // Should fire createWorkspace with "Default" and a random color
+        await store.receive(\.createWorkspace) { state in
             #expect(state.workspaces.count == 1)
             #expect(state.workspaces.first?.name == "Default")
         }

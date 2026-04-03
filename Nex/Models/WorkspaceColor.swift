@@ -19,4 +19,8 @@ enum WorkspaceColor: String, Codable, CaseIterable, Identifiable {
     }
 
     var displayName: String { rawValue.capitalized }
+
+    static func random() -> WorkspaceColor {
+        allCases.randomElement() ?? .blue
+    }
 }

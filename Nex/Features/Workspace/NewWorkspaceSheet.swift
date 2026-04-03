@@ -6,7 +6,7 @@ struct NewWorkspaceSheet: View {
     let store: StoreOf<AppReducer>
 
     @State private var name = ""
-    @State private var color: WorkspaceColor = .blue
+    @State private var color: WorkspaceColor = .random()
     @State private var selectedRepos: [Repo] = []
     @State private var isRepoPickerPresented = false
 

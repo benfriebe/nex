@@ -248,7 +248,7 @@ struct AppReducer {
             case .stateLoaded(let workspaces, let activeID, let repoRegistry):
                 if workspaces.isEmpty {
                     // First launch — create a default workspace
-                    return .send(.createWorkspace(name: "Default", color: .blue))
+                    return .send(.createWorkspace(name: "Default", color: .random()))
                 }
                 state.workspaces = workspaces
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
@@ -606,7 +606,7 @@ struct AppReducer {
                 case .workspaceCreate(let name, let path, let color):
                     return .send(.createWorkspace(
                         name: name ?? "Workspace",
-                        color: color ?? .blue,
+                        color: color ?? .random(),
                         workingDirectory: path
                     ))
 
