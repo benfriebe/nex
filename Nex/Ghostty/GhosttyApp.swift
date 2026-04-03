@@ -80,9 +80,26 @@ final class GhosttyApp {
             guard let userdata, let request else { return }
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             guard let surface = surfaceView.ghosttySurface?.surface else { return }
-            // read_clipboard_cb is designed for async — ghostty keeps the request alive
-            let str = NSPasteboard.general.string(forType: .string) ?? ""
-            str.withCString { ptr in
+
+            // 1. Try string first (existing behavior — covers text copies and file URLs)
+            if let str = NSPasteboard.general.string(forType: .string), !str.isEmpty {
+                str.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, request, true)
+                }
+                return
+            }
+
+            // 2. Try image data — save to temp PNG and paste the shell-escaped path
+            if let path = ClipboardImageHelper.saveClipboardImageToTempFile() {
+                let escaped = SurfaceView.shellEscape(path)
+                escaped.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, request, true)
+                }
+                return
+            }
+
+            // 3. Nothing usable — complete with empty string (ghostty requires a response)
+            "".withCString { ptr in
                 ghostty_surface_complete_clipboard_request(surface, ptr, request, true)
             }
         }

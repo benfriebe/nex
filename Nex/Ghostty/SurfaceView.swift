@@ -466,9 +466,9 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     /// Escape shell-sensitive characters so dropped paths are safe to paste into a terminal.
-    private static let shellEscapeChars = CharacterSet(charactersIn: " \\()[]{}<>\"'`!#$&;|*?\t")
+    static let shellEscapeChars = CharacterSet(charactersIn: " \\()[]{}<>\"'`!#$&;|*?\t")
 
-    private static func shellEscape(_ str: String) -> String {
+    static func shellEscape(_ str: String) -> String {
         var result = ""
         result.reserveCapacity(str.count)
         for char in str.unicodeScalars {
