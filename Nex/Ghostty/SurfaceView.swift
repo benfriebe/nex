@@ -360,15 +360,24 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange _: NSRange) {
-        guard let str = string as? String else { return }
+        let str: String
+        switch string {
+        case let v as NSAttributedString:
+            str = v.string
+        case let v as String:
+            str = v
+        default:
+            return
+        }
+
+        unmarkText()
+
         if isInKeyDown {
             // During keyDown: store text for the key event, don't send separately
             interpretedText = str
             isComposing = false
-            // Clear any marked text since input was committed
-            markedText = NSMutableAttributedString()
         } else {
-            // Outside keyDown (e.g., paste via services menu): send directly
+            // Outside keyDown (e.g., dictation, paste via services menu): send directly
             ghosttySurface?.sendText(str)
         }
     }
@@ -399,7 +408,16 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func selectedRange() -> NSRange {
-        NSRange(location: NSNotFound, length: 0)
+        guard let surface = ghosttySurface else {
+            return NSRange(location: NSNotFound, length: 0)
+        }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface.surface, &text) else {
+            return NSRange(location: NSNotFound, length: 0)
+        }
+        let range = NSRange(location: Int(text.offset_start), length: Int(text.offset_len))
+        ghostty_surface_free_text(surface.surface, &text)
+        return range
     }
 
     func markedRange() -> NSRange {
@@ -421,14 +439,29 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         []
     }
 
-    func firstRect(forCharacterRange _: NSRange, actualRange _: NSRangePointer?) -> NSRect {
+    func firstRect(forCharacterRange range: NSRange, actualRange _: NSRangePointer?) -> NSRect {
         guard let surface = ghosttySurface else {
             return window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
         }
-        let (x, y, w, h) = surface.imePoint()
-        let viewPoint = NSPoint(x: x, y: frame.height - y)
-        let screenPoint = window?.convertPoint(toScreen: convert(viewPoint, to: nil)) ?? viewPoint
-        return NSRect(x: screenPoint.x, y: screenPoint.y - h, width: w, height: h)
+        var (x, y, w, h) = surface.imePoint()
+
+        // Dictation indicator requests range.length == 0. A positive width
+        // confuses the microphone overlay, so collapse it (matches Ghostty #8493).
+        if range.length == 0, w > 0 {
+            let cellWidth = w
+            w = 0
+            x += cellWidth * Double(range.location + range.length)
+        }
+
+        let viewRect = NSRect(
+            x: x,
+            y: frame.height - y,
+            width: w,
+            height: h
+        )
+        let winRect = convert(viewRect, to: nil)
+        guard let window else { return winRect }
+        return window.convertToScreen(winRect)
     }
 
     func characterIndex(for _: NSPoint) -> Int {
@@ -478,6 +511,20 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             result.append(Character(char))
         }
         return result
+    }
+
+    // MARK: - Accessibility
+
+    override func isAccessibilityElement() -> Bool {
+        true
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        .textArea
+    }
+
+    override func accessibilityHelp() -> String? {
+        "Terminal content area"
     }
 
     // MARK: - Helpers
