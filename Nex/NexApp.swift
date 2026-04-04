@@ -11,7 +11,7 @@ struct NexApp: App {
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
     @StateObject private var updaterViewModel = UpdaterViewModel(
-        startUpdater: !NexApp.isTestMode
+        startUpdater: false
     )
 
     init() {
@@ -34,6 +34,10 @@ struct NexApp: App {
                     guard !Self.isTestMode else { return }
 
                     GhosttyApp.shared.start()
+
+                    // Start Sparkle updater after ghostty init to avoid
+                    // concurrent framework loading / dyld lock contention.
+                    updaterViewModel.startController()
 
                     // Notification service — permission + action callback
                     let notifService = NotificationService.liveValue

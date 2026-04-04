@@ -139,7 +139,11 @@ final class GhosttyApp {
         app = ghostty_app_new(&runtime, config.rawConfig)
     }
 
-    func tick() {
+    /// Called from `DispatchQueue.main.async` in the wakeup callback.
+    /// Marked `nonisolated` to avoid `@MainActor` runtime assertions
+    /// (`_dispatch_assert_queue_fail`) when the Swift 6 runtime on
+    /// macOS Tahoe checks actor isolation for GCD-dispatched blocks.
+    nonisolated func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
     }

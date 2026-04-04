@@ -12,7 +12,14 @@ final class UpdaterViewModel: ObservableObject {
 
     init(startUpdater: Bool = true) {
         guard startUpdater else { return }
+        startController()
+    }
 
+    /// Deferred start — call from `.onAppear` when the updater was created
+    /// with `startUpdater: false` to avoid Sparkle framework loading during
+    /// early app initialization (reduces dyld lock contention).
+    func startController() {
+        guard controller == nil else { return }
         let ctrl = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: nil,
