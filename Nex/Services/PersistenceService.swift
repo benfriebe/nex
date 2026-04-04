@@ -15,100 +15,47 @@ actor PersistenceService {
 
     // MARK: - Save (debounced)
 
-    func save(
-        workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
-        activeWorkspaceID: UUID?,
-        repoRegistry: IdentifiedArrayOf<Repo> = []
-    ) {
+    func save(snapshot: PersistenceSnapshot) {
         pendingTask?.cancel()
         pendingTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            await self?.writeToDatabase(
-                workspaces: workspaces,
-                activeWorkspaceID: activeWorkspaceID,
-                repoRegistry: repoRegistry
+            await self?.writeRecords(
+                repoRecords: snapshot.repoRecords,
+                wsRecords: snapshot.wsRecords,
+                pnRecords: snapshot.pnRecords,
+                arRecords: snapshot.arRecords,
+                stateRecord: snapshot.stateRecord
             )
         }
     }
 
-    private func writeToDatabase(
-        workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
-        activeWorkspaceID: UUID?,
-        repoRegistry: IdentifiedArrayOf<Repo>
+    private func writeRecords(
+        repoRecords: [RepoRecord],
+        wsRecords: [WorkspaceRecord],
+        pnRecords: [PaneRecord],
+        arRecords: [RepoAssociationRecord],
+        stateRecord: AppStateRecord
     ) async {
         do {
             try await db.writer.write { db in
-                // Clear and re-insert (fast at Phase 2 scale)
                 try RepoAssociationRecord.deleteAll(db)
                 try PaneRecord.deleteAll(db)
                 try WorkspaceRecord.deleteAll(db)
                 try RepoRecord.deleteAll(db)
 
-                // Insert repos
-                for repo in repoRegistry {
-                    let repoRecord = RepoRecord(
-                        id: repo.id.uuidString,
-                        path: repo.path,
-                        name: repo.name,
-                        remoteURL: repo.remoteURL,
-                        lastAccessedAt: repo.lastAccessedAt.timeIntervalSince1970
-                    )
-                    try repoRecord.insert(db)
-                }
-
-                for (index, workspace) in workspaces.enumerated() {
-                    let layoutToSave = workspace.savedLayout ?? workspace.layout
-                    let layoutData = try JSONEncoder().encode(layoutToSave)
-                    let layoutJSON = String(data: layoutData, encoding: .utf8) ?? "null"
-
-                    let record = WorkspaceRecord(
-                        id: workspace.id.uuidString,
-                        name: workspace.name,
-                        slug: workspace.slug,
-                        color: workspace.color.rawValue,
-                        layoutJSON: layoutJSON,
-                        focusedPaneID: workspace.focusedPaneID?.uuidString,
-                        createdAt: workspace.createdAt.timeIntervalSince1970,
-                        lastAccessedAt: workspace.lastAccessedAt.timeIntervalSince1970,
-                        sortOrder: index
-                    )
+                for record in repoRecords {
                     try record.insert(db)
-
-                    for pane in workspace.panes {
-                        let paneRecord = PaneRecord(
-                            id: pane.id.uuidString,
-                            workspaceID: workspace.id.uuidString,
-                            label: pane.label,
-                            type: pane.type.rawValue,
-                            workingDirectory: pane.workingDirectory,
-                            filePath: pane.filePath,
-                            claudeSessionID: pane.claudeSessionID,
-                            status: pane.status.rawValue,
-                            createdAt: pane.createdAt.timeIntervalSince1970,
-                            lastActivityAt: pane.lastActivityAt.timeIntervalSince1970
-                        )
-                        try paneRecord.insert(db)
-                    }
-
-                    // Insert repo associations for this workspace
-                    for assoc in workspace.repoAssociations {
-                        let assocRecord = RepoAssociationRecord(
-                            id: assoc.id.uuidString,
-                            workspaceID: workspace.id.uuidString,
-                            repoID: assoc.repoID.uuidString,
-                            worktreePath: assoc.worktreePath,
-                            branchName: assoc.branchName
-                        )
-                        try assocRecord.insert(db)
-                    }
                 }
-
-                // Save active workspace
-                let stateRecord = AppStateRecord(
-                    key: "activeWorkspaceID",
-                    value: activeWorkspaceID?.uuidString
-                )
+                for record in wsRecords {
+                    try record.insert(db)
+                }
+                for record in pnRecords {
+                    try record.insert(db)
+                }
+                for record in arRecords {
+                    try record.insert(db)
+                }
                 try stateRecord.save(db)
             }
         } catch {
@@ -118,7 +65,7 @@ actor PersistenceService {
 
     // MARK: - Load
 
-    struct LoadResult {
+    struct LoadResult: @unchecked Sendable {
         var workspaces: IdentifiedArrayOf<WorkspaceFeature.State>
         var activeWorkspaceID: UUID?
         var repoRegistry: IdentifiedArrayOf<Repo>
@@ -236,6 +183,81 @@ actor PersistenceService {
             print("PersistenceService: load failed — \(error)")
             return LoadResult(workspaces: [], activeWorkspaceID: nil, repoRegistry: [])
         }
+    }
+}
+
+// MARK: - Sendable snapshot for crossing isolation boundaries
+
+/// Pre-built database records that can safely cross actor/Sendable boundaries.
+/// Created from non-Sendable TCA state in the reducer, then passed to the actor.
+struct PersistenceSnapshot {
+    let repoRecords: [RepoRecord]
+    let wsRecords: [WorkspaceRecord]
+    let pnRecords: [PaneRecord]
+    let arRecords: [RepoAssociationRecord]
+    let stateRecord: AppStateRecord
+
+    init(state: AppReducer.State) {
+        repoRecords = state.repoRegistry.map { repo in
+            RepoRecord(
+                id: repo.id.uuidString,
+                path: repo.path,
+                name: repo.name,
+                remoteURL: repo.remoteURL,
+                lastAccessedAt: repo.lastAccessedAt.timeIntervalSince1970
+            )
+        }
+
+        wsRecords = state.workspaces.enumerated().map { index, workspace in
+            let layoutToSave = workspace.savedLayout ?? workspace.layout
+            let layoutData = (try? JSONEncoder().encode(layoutToSave)) ?? Data()
+            let layoutJSON = String(data: layoutData, encoding: .utf8) ?? "null"
+            return WorkspaceRecord(
+                id: workspace.id.uuidString,
+                name: workspace.name,
+                slug: workspace.slug,
+                color: workspace.color.rawValue,
+                layoutJSON: layoutJSON,
+                focusedPaneID: workspace.focusedPaneID?.uuidString,
+                createdAt: workspace.createdAt.timeIntervalSince1970,
+                lastAccessedAt: workspace.lastAccessedAt.timeIntervalSince1970,
+                sortOrder: index
+            )
+        }
+
+        pnRecords = state.workspaces.flatMap { workspace in
+            workspace.panes.map { pane in
+                PaneRecord(
+                    id: pane.id.uuidString,
+                    workspaceID: workspace.id.uuidString,
+                    label: pane.label,
+                    type: pane.type.rawValue,
+                    workingDirectory: pane.workingDirectory,
+                    filePath: pane.filePath,
+                    claudeSessionID: pane.claudeSessionID,
+                    status: pane.status.rawValue,
+                    createdAt: pane.createdAt.timeIntervalSince1970,
+                    lastActivityAt: pane.lastActivityAt.timeIntervalSince1970
+                )
+            }
+        }
+
+        arRecords = state.workspaces.flatMap { workspace in
+            workspace.repoAssociations.map { assoc in
+                RepoAssociationRecord(
+                    id: assoc.id.uuidString,
+                    workspaceID: workspace.id.uuidString,
+                    repoID: assoc.repoID.uuidString,
+                    worktreePath: assoc.worktreePath,
+                    branchName: assoc.branchName
+                )
+            }
+        }
+
+        stateRecord = AppStateRecord(
+            key: "activeWorkspaceID",
+            value: state.activeWorkspaceID?.uuidString
+        )
     }
 }
 

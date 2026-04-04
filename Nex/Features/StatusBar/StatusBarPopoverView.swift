@@ -63,7 +63,7 @@ struct StatusBarPopoverView: View {
             onSelectPane(item.paneID, item.workspaceID)
         } label: {
             HStack(spacing: 8) {
-                Text(item.paneTitle ?? "Shell")
+                Text(item.paneTitle)
                     .font(.system(.body, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)

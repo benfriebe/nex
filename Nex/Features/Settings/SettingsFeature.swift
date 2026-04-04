@@ -87,7 +87,7 @@ struct SettingsFeature {
                     b: state.backgroundColorB,
                     theme: state.selectedTheme
                 ))
-                .debounce(id: AppearanceDebounceID.debounce, for: .milliseconds(100), scheduler: DispatchQueue.main)
+                .cancellable(id: AppearanceDebounceID.debounce, cancelInFlight: true)
 
             case .setBackgroundColor(let r, let g, let b):
                 state.backgroundColorR = r
@@ -100,7 +100,7 @@ struct SettingsFeature {
                     r: r, g: g, b: b,
                     theme: nil
                 ))
-                .debounce(id: AppearanceDebounceID.debounce, for: .milliseconds(100), scheduler: DispatchQueue.main)
+                .cancellable(id: AppearanceDebounceID.debounce, cancelInFlight: true)
 
             case .setWorktreeBasePath(let path):
                 state.worktreeBasePath = path

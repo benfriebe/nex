@@ -28,7 +28,7 @@ settings:
 packages:
   ComposableArchitecture:
     url: https://github.com/pointfreeco/swift-composable-architecture
-    version: 1.17.1
+    version: 1.25.5
   GRDB:
     url: https://github.com/groue/GRDB.swift
     version: 7.3.0
@@ -116,6 +116,7 @@ targets:
             done
           fi
         name: Bundle nex CLI and install script
+        basedOnDependencyAnalysis: false
 
   NexTests:
     type: bundle.unit-test

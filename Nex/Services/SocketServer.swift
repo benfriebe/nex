@@ -150,9 +150,10 @@ final class SocketServer: Sendable {
         }
         clientSource.setCancelHandler { [weak self] in
             close(clientFD)
-            self?.lock.withLock {
-                self?.clientSources.removeValue(forKey: clientFD)
-            }
+            guard let self else { return }
+            lock.lock()
+            clientSources.removeValue(forKey: clientFD)
+            lock.unlock()
         }
         lock.withLock { clientSources[clientFD] = clientSource }
         clientSource.resume()

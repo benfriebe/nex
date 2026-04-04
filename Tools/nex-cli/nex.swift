@@ -147,8 +147,8 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     // Read stdin JSON when piped (Claude Code passes JSON with session_id to all hooks)
     var stdinJSON: [String: Any]?
     if isatty(STDIN_FILENO) == 0 {
-        if let stdinData = try? FileHandle.standardInput.availableData,
-           !stdinData.isEmpty,
+        let stdinData = FileHandle.standardInput.availableData
+        if !stdinData.isEmpty,
            let json = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
             stdinJSON = json
         }

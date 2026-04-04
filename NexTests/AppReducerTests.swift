@@ -74,6 +74,7 @@ struct AppReducerTests {
         let store = makeStore()
 
         await store.send(.createWorkspace(name: "Repo WS", color: .blue, repos: [repo])) { state in
+            state.repoRegistry.append(repo)
             #expect(state.workspaces.count == 1)
             let ws = state.workspaces.first!
             #expect(ws.panes.first?.workingDirectory == "/Users/test/myrepo")

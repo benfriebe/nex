@@ -94,7 +94,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                   let fraction = PaneFocusView.scrollFraction(for: paneID),
                   fraction > 0,
                   let scrollView,
-                  let documentView = scrollView.documentView else { return }
+                  scrollView.documentView != nil else { return }
             // Defer so layout has completed
             DispatchQueue.main.async { [weak self] in
                 guard let scrollView = self?.scrollView,

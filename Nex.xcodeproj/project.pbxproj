@@ -527,6 +527,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		3E76F9CB9E967B5724C9973E /* Bundle nex CLI and install script */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -901,7 +902,7 @@
 			repositoryURL = "https://github.com/pointfreeco/swift-composable-architecture";
 			requirement = {
 				kind = exactVersion;
-				version = 1.17.1;
+				version = 1.25.5;
 			};
 		};
 		74E1DDA9D84597B0F162BA1C /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

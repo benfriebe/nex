@@ -158,8 +158,11 @@ struct AppReducer {
                     workspace.panes[workspace.panes.startIndex].workingDirectory = workingDirectory
                 }
 
-                // Add repo associations
+                // Register repos and add associations
                 for repo in repos {
+                    if state.repoRegistry[id: repo.id] == nil {
+                        state.repoRegistry.append(repo)
+                    }
                     let assoc = RepoAssociation(
                         id: uuid(),
                         repoID: repo.id,
@@ -251,15 +254,9 @@ struct AppReducer {
                 return .none
 
             case .persistState:
-                let workspaces = state.workspaces
-                let activeID = state.activeWorkspaceID
-                let repos = state.repoRegistry
+                let snapshot = PersistenceSnapshot(state: state)
                 return .run { _ in
-                    await persistenceService.save(
-                        workspaces: workspaces,
-                        activeWorkspaceID: activeID,
-                        repoRegistry: repos
-                    )
+                    await persistenceService.save(snapshot: snapshot)
                 }
 
             case .stateLoaded(let workspaces, let activeID, let repoRegistry):
@@ -296,16 +293,17 @@ struct AppReducer {
                 // Create surfaces for shell panes only (markdown panes use WKWebView)
                 let panesToResume = resumablePanes
                 let opacity = ghosttyConfig.backgroundOpacity
+                let shellPanes: [(id: UUID, cwd: String)] = workspaces.flatMap { ws in
+                    ws.panes.filter { $0.type == .shell }.map { (id: $0.id, cwd: $0.workingDirectory) }
+                }
                 return .merge(
                     .run { send in
-                        for workspace in workspaces {
-                            for pane in workspace.panes where pane.type == .shell {
-                                await surfaceManager.createSurface(
-                                    paneID: pane.id,
-                                    workingDirectory: pane.workingDirectory,
-                                    backgroundOpacity: opacity
-                                )
-                            }
+                        for pane in shellPanes {
+                            await surfaceManager.createSurface(
+                                paneID: pane.id,
+                                workingDirectory: pane.cwd,
+                                backgroundOpacity: opacity
+                            )
                         }
 
                         // Auto-resume Claude Code sessions after surfaces are ready.
@@ -527,7 +525,7 @@ struct AppReducer {
                                 )
                             }
                             if shouldBounce {
-                                await MainActor.run {
+                                _ = await MainActor.run {
                                     NSApp.requestUserAttention(.informationalRequest)
                                 }
                             }

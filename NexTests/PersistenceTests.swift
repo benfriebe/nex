@@ -36,7 +36,8 @@ struct PersistenceTests {
         workspaces.append(workspace)
 
         // Save (bypass debounce by calling directly)
-        await persistence.save(workspaces: workspaces, activeWorkspaceID: wsID)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
         // Wait for debounce
         try await Task.sleep(for: .seconds(1))
 
@@ -87,7 +88,8 @@ struct PersistenceTests {
         var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
         workspaces.append(workspace)
 
-        await persistence.save(workspaces: workspaces, activeWorkspaceID: wsID)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
         let result = await persistence.load()
@@ -119,7 +121,8 @@ struct PersistenceTests {
         workspaces.append(ws2)
         workspaces.append(ws3)
 
-        await persistence.save(workspaces: workspaces, activeWorkspaceID: ws2.id)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: ws2.id)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
         let result = await persistence.load()
@@ -150,11 +153,8 @@ struct PersistenceTests {
         var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
         workspaces.append(ws)
 
-        await persistence.save(
-            workspaces: workspaces,
-            activeWorkspaceID: ws.id,
-            repoRegistry: repos
-        )
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: ws.id, repoRegistry: repos)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
         let result = await persistence.load()
@@ -206,11 +206,8 @@ struct PersistenceTests {
         var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
         workspaces.append(ws)
 
-        await persistence.save(
-            workspaces: workspaces,
-            activeWorkspaceID: ws.id,
-            repoRegistry: repos
-        )
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: ws.id, repoRegistry: repos)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
         let result = await persistence.load()
