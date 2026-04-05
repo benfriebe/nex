@@ -161,7 +161,16 @@ struct ContentView: View {
                 store.send(.desktopNotification(paneID: paneID, title: title, body: body))
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfaceCloseNotification)) { notification in
-                guard let paneID = notification.userInfo?["paneID"] as? UUID else { return }
+                // Two posting sites use this notification:
+                //   1) close_surface_cb — posts paneID (it has direct access to SurfaceView's userdata)
+                //   2) SHOW_CHILD_EXITED action — posts the raw ghostty_surface_t
+                //      and we look up the paneID via SurfaceManager.
+                let paneID: UUID? = {
+                    if let direct = notification.userInfo?["paneID"] as? UUID { return direct }
+                    guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t else { return nil }
+                    return surfaceManager.paneID(for: surface)
+                }()
+                guard let paneID else { return }
                 store.send(.surfaceProcessExited(paneID: paneID))
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.openFileNotification)) { notification in

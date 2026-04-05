@@ -135,6 +135,7 @@ struct WorkspaceFeature {
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.ghosttyConfig) var ghosttyConfig
     @Dependency(\.gitService) var gitService
+    @Dependency(\.editorService) var editorService
     @Dependency(\.date.now) var now
     @Dependency(\.uuid) var uuid
 
@@ -279,6 +280,12 @@ struct WorkspaceFeature {
                     state.savedLayout = nil
                 }
                 let paneType = state.panes[id: paneID]?.type ?? .shell
+                // A markdown pane hosts a ghostty surface only while editing
+                // via an external editor. We must destroy that surface on
+                // close too or the PTY and editor process leak behind the
+                // scenes, alongside stale SurfaceManager bookkeeping.
+                let hasBackingSurface = paneType == .shell
+                    || (state.panes[id: paneID]?.isUsingExternalEditor ?? false)
                 if let pane = state.panes[id: paneID] {
                     state.recentlyClosedPanes.append(
                         ClosedPaneSnapshot(
@@ -303,7 +310,7 @@ struct WorkspaceFeature {
                     state.focusedPaneID = newLayout.allPaneIDs.first
                 }
 
-                if paneType == .shell {
+                if hasBackingSurface {
                     return .run { _ in
                         await surfaceManager.destroySurface(paneID: paneID)
                     }
@@ -348,6 +355,18 @@ struct WorkspaceFeature {
                 }
 
             case .paneProcessTerminated(let paneID):
+                // If this was a markdown pane whose external editor just exited,
+                // flip back to view mode instead of closing the pane. The
+                // MarkdownPaneView file watcher will reload any on-disk changes.
+                if let pane = state.panes[id: paneID],
+                   pane.type == .markdown,
+                   pane.isUsingExternalEditor {
+                    state.panes[id: paneID]?.isEditing = false
+                    state.panes[id: paneID]?.externalEditorCommand = nil
+                    return .run { _ in
+                        await surfaceManager.destroySurface(paneID: paneID)
+                    }
+                }
                 // Close the pane when its shell exits
                 return .send(.closePane(paneID))
 
@@ -400,8 +419,43 @@ struct WorkspaceFeature {
                 return .none
 
             case .toggleMarkdownEdit(let paneID):
-                guard state.panes[id: paneID]?.type == .markdown else { return .none }
-                state.panes[id: paneID]?.isEditing.toggle()
+                guard let pane = state.panes[id: paneID], pane.type == .markdown else {
+                    return .none
+                }
+
+                if pane.isEditing {
+                    let wasExternal = pane.isUsingExternalEditor
+                    state.panes[id: paneID]?.isEditing = false
+                    state.panes[id: paneID]?.externalEditorCommand = nil
+                    if wasExternal {
+                        return .run { _ in
+                            await surfaceManager.destroySurface(paneID: paneID)
+                        }
+                    }
+                    return .none
+                }
+
+                // If we can resolve the user's $EDITOR, host it inside a
+                // ghostty surface bound to this pane; otherwise fall back to
+                // the built-in NSTextView editor.
+                if let filePath = pane.filePath,
+                   let command = editorService.buildCommand(filePath) {
+                    state.panes[id: paneID]?.isEditing = true
+                    state.panes[id: paneID]?.externalEditorCommand = command
+                    let opacity = ghosttyConfig.backgroundOpacity
+                    let cwd = pane.workingDirectory
+                    return .run { _ in
+                        await surfaceManager.createSurface(
+                            paneID: paneID,
+                            workingDirectory: cwd,
+                            backgroundOpacity: opacity,
+                            command: command
+                        )
+                    }
+                }
+
+                state.panes[id: paneID]?.isEditing = true
+                state.panes[id: paneID]?.externalEditorCommand = nil
                 return .none
 
             case .addRepoAssociation(let assoc):

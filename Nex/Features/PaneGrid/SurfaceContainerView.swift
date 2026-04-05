@@ -6,6 +6,9 @@ struct SurfaceContainerView: NSViewRepresentable {
     let paneID: UUID
     let workingDirectory: String
     let isFocused: Bool
+    /// Optional launch command for the lazy-create fallback. When non-nil,
+    /// a newly spawned surface runs this command instead of the default shell.
+    var command: String?
     @Environment(\.surfaceManager) private var surfaceManager
     @Environment(\.ghosttyConfig) private var ghosttyConfig
 
@@ -18,7 +21,8 @@ struct SurfaceContainerView: NSViewRepresentable {
             surfaceManager.createSurface(
                 paneID: paneID,
                 workingDirectory: workingDirectory,
-                backgroundOpacity: ghosttyConfig.backgroundOpacity
+                backgroundOpacity: ghosttyConfig.backgroundOpacity,
+                command: command
             )
         }
 

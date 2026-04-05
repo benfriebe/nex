@@ -16,7 +16,15 @@ struct Pane: Identifiable, Equatable {
     var status: PaneStatus
     var filePath: String?
     var isEditing: Bool
+    /// When non-nil on a markdown pane in edit mode, the shell command used
+    /// to launch the user's `$EDITOR` inside a ghostty surface bound to this
+    /// pane. Nil means use the built-in `MarkdownEditorView`. Transient — not
+    /// persisted.
+    var externalEditorCommand: String?
     var claudeSessionID: String?
+
+    /// Convenience accessor for rendering logic.
+    var isUsingExternalEditor: Bool { externalEditorCommand != nil }
     var createdAt: Date
     var lastActivityAt: Date
 
@@ -29,6 +37,7 @@ struct Pane: Identifiable, Equatable {
         gitBranch: String? = nil,
         filePath: String? = nil,
         isEditing: Bool = false,
+        externalEditorCommand: String? = nil,
         status: PaneStatus = .idle,
         claudeSessionID: String? = nil,
         createdAt: Date = Date(),
@@ -42,6 +51,7 @@ struct Pane: Identifiable, Equatable {
         self.gitBranch = gitBranch
         self.filePath = filePath
         self.isEditing = isEditing
+        self.externalEditorCommand = externalEditorCommand
         self.status = status
         self.claudeSessionID = claudeSessionID
         self.createdAt = createdAt

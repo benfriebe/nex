@@ -280,6 +280,27 @@ final class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+            // Fires when a surface's child process exits. Returning `true`
+            // tells ghostty we've handled the notification, which suppresses
+            // its default "Process exited. Press any key to close the
+            // terminal." message. We also need to initiate the close
+            // ourselves because ghostty silently force-sets
+            // `wait-after-command = true` whenever a surface is created with
+            // a command set (see ghostty/src/apprt/embedded.zig:529-535), so
+            // `close_surface_cb` will not otherwise fire for command-backed
+            // surfaces like our external-editor panes.
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.surfaceCloseNotification,
+                    object: nil,
+                    userInfo: ["surface": surface as Any]
+                )
+            }
+            return true
+
         case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS:
             return false
 

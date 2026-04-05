@@ -139,13 +139,25 @@ struct PaneGridView: View {
                 )
             case .markdown:
                 if pane.isEditing {
-                    MarkdownEditorView(
-                        paneID: pane.id,
-                        filePath: pane.filePath ?? "",
-                        isFocused: pane.id == focusedPaneID,
-                        backgroundColor: ghosttyConfig.backgroundColor,
-                        backgroundOpacity: ghosttyConfig.backgroundOpacity
-                    )
+                    if let editorCommand = pane.externalEditorCommand {
+                        // The reducer also calls createSurface with this same
+                        // command; SurfaceManager deduplicates so both code
+                        // paths converge on a single surface.
+                        SurfaceContainerView(
+                            paneID: pane.id,
+                            workingDirectory: pane.workingDirectory,
+                            isFocused: pane.id == focusedPaneID,
+                            command: editorCommand
+                        )
+                    } else {
+                        MarkdownEditorView(
+                            paneID: pane.id,
+                            filePath: pane.filePath ?? "",
+                            isFocused: pane.id == focusedPaneID,
+                            backgroundColor: ghosttyConfig.backgroundColor,
+                            backgroundOpacity: ghosttyConfig.backgroundOpacity
+                        )
+                    }
                 } else {
                     MarkdownPaneView(
                         paneID: pane.id,

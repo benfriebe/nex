@@ -32,6 +32,11 @@ struct NexApp: App {
                 .onAppear {
                     guard !Self.isTestMode else { return }
 
+                    // Warm the editor resolver cache on a background queue
+                    // so the first ⌘E press on a markdown pane doesn't stall
+                    // the reducer while we shell out to read $EDITOR.
+                    EditorService.liveValue.warmUp()
+
                     GhosttyApp.shared.start()
 
                     // Notification service — permission + action callback

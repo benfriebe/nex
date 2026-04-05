@@ -804,6 +804,251 @@ struct WorkspaceFeatureTests {
         }
     }
 
+    // MARK: - Markdown edit mode with $EDITOR
+
+    private func stubbedEditorService(command: String?) -> EditorService {
+        EditorService(
+            resolveEditor: { command == nil ? nil : "nvim" },
+            buildCommand: { _ in command },
+            warmUp: {}
+        )
+    }
+
+    @Test func toggleMarkdownEditLaunchesExternalEditorWhenResolvable() async {
+        // Workspace with a single markdown pane that has a file path.
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/plan.md"
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let editorCommand = "/bin/zsh -l -c \"nvim '/tmp/plan.md'\""
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = stubbedEditorService(command: editorCommand)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleMarkdownEdit(paneID)) { state in
+            state.panes[id: paneID]?.isEditing = true
+            state.panes[id: paneID]?.externalEditorCommand = editorCommand
+        }
+    }
+
+    @Test func toggleMarkdownEditFallsBackToBuiltinWhenEditorUnresolved() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/plan.md"
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = stubbedEditorService(command: nil)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleMarkdownEdit(paneID)) { state in
+            state.panes[id: paneID]?.isEditing = true
+            state.panes[id: paneID]?.externalEditorCommand = nil
+        }
+    }
+
+    @Test func toggleMarkdownEditWithoutFilePathUsesBuiltin() async {
+        // A markdown pane opened without a file path (edge case — shouldn't
+        // normally happen, but the reducer must not crash or launch an editor
+        // on a phantom path).
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: nil
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = stubbedEditorService(command: "nvim ''")
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleMarkdownEdit(paneID)) { state in
+            state.panes[id: paneID]?.isEditing = true
+            state.panes[id: paneID]?.externalEditorCommand = nil
+        }
+    }
+
+    @Test func toggleMarkdownEditExitingExternalModeClearsCommand() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/plan.md",
+                isEditing: true,
+                externalEditorCommand: "nvim /tmp/plan.md"
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleMarkdownEdit(paneID)) { state in
+            state.panes[id: paneID]?.isEditing = false
+            state.panes[id: paneID]?.externalEditorCommand = nil
+        }
+    }
+
+    @Test func paneProcessTerminatedOnExternalEditorFlipsBackToViewMode() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/plan.md",
+                isEditing: true,
+                externalEditorCommand: "nvim /tmp/plan.md"
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.paneProcessTerminated(paneID: paneID)) { state in
+            state.panes[id: paneID]?.isEditing = false
+            state.panes[id: paneID]?.externalEditorCommand = nil
+        }
+
+        // The pane must NOT have been removed by a forwarded closePane.
+        #expect(store.state.panes[id: paneID] != nil)
+    }
+
+    @Test func closePaneDestroysSurfaceForExternalEditorMarkdown() async {
+        // Regression guard: closing a markdown pane while its external editor
+        // is running must tear down the backing ghostty surface, not leak it.
+        let editingID = UUID()
+        let siblingID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: editingID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/plan.md",
+                isEditing: true,
+                externalEditorCommand: "nvim /tmp/plan.md"
+            ),
+            Pane(id: siblingID, type: .shell)
+        ]
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(editingID),
+            second: .leaf(siblingID)
+        )
+        workspace.focusedPaneID = editingID
+
+        // Pre-populate SurfaceManager to mirror production state: when the
+        // pane entered external edit mode the reducer would have created a
+        // surface bound to its UUID. In tests GhosttyApp.shared.app is nil,
+        // so SurfaceView's init bails out before calling ghostty C APIs, but
+        // the SurfaceManager entry is still created — exactly what we need
+        // to observe whether destroySurface runs.
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: editingID, workingDirectory: "/tmp")
+        #expect(surfaceManager.activeSurfaceCount == 1)
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.editorService = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closePane(editingID))
+        await store.finish()
+
+        #expect(store.state.panes[id: editingID] == nil)
+        #expect(surfaceManager.activeSurfaceCount == 0)
+    }
+
+    @Test func paneProcessTerminatedOnShellPaneStillClosesIt() async {
+        // Regression guard: the markdown-editor special case must not affect
+        // the existing shell-pane behaviour.
+        let firstID = UUID()
+        let secondID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(id: firstID, type: .shell),
+            Pane(id: secondID, type: .shell)
+        ]
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(secondID)
+        )
+        workspace.focusedPaneID = secondID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.paneProcessTerminated(paneID: secondID))
+        // Let the forwarded closePane action run.
+        await store.receive(\.closePane)
+        #expect(store.state.panes[id: secondID] == nil)
+    }
+
     @Test func cycleLayoutUnzoomsFirst() async {
         var workspace = WorkspaceFeature.State(name: "Test")
         let firstID = workspace.panes.first!.id

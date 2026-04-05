@@ -10,7 +10,12 @@ final class SurfaceManager: Sendable {
     private nonisolated(unsafe) var surfaces: [UUID: SurfaceView] = [:]
 
     @MainActor
-    func createSurface(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0) {
+    func createSurface(
+        paneID: UUID,
+        workingDirectory: String,
+        backgroundOpacity: Double = 1.0,
+        command: String? = nil
+    ) {
         // Guard against duplicate creation. Both the TCA effect and
         // SurfaceContainerView.makeNSView can call this; whichever runs
         // first wins. Without this check, the second call replaces the
@@ -18,7 +23,12 @@ final class SurfaceManager: Sendable {
         let exists = lock.withLock { surfaces[paneID] != nil }
         guard !exists else { return }
 
-        let surface = SurfaceView(paneID: paneID, workingDirectory: workingDirectory, backgroundOpacity: backgroundOpacity)
+        let surface = SurfaceView(
+            paneID: paneID,
+            workingDirectory: workingDirectory,
+            backgroundOpacity: backgroundOpacity,
+            command: command
+        )
         lock.withLock {
             surfaces[paneID] = surface
         }

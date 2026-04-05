@@ -24,7 +24,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         .string
     ]
 
-    init(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0) {
+    init(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0, command: String? = nil) {
         self.paneID = paneID
         super.init(frame: .zero)
         wantsLayer = true
@@ -75,11 +75,14 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
                     workingDirectory.withCString { cwd in
                         config.working_directory = cwd
-                        let rawSurface = ghostty_surface_new(app, &config)
-                        if let rawSurface {
-                            ghosttySurface = GhosttySurface(surface: rawSurface)
-                            // Start unfocused — focus is granted explicitly via makeFirstResponder
-                            ghosttySurface?.setFocus(false)
+                        Self.withOptionalCString(command) { cmdPtr in
+                            config.command = cmdPtr
+                            let rawSurface = ghostty_surface_new(app, &config)
+                            if let rawSurface {
+                                ghosttySurface = GhosttySurface(surface: rawSurface)
+                                // Start unfocused — focus is granted explicitly via makeFirstResponder
+                                ghosttySurface?.setFocus(false)
+                            }
                         }
                     }
                 }
@@ -90,6 +93,17 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
                 free(pathVal)
             }
         }
+    }
+
+    /// Passes the UTF-8 C representation of `string` to `body`, or nil if `string` is nil.
+    private static func withOptionalCString<Result>(
+        _ string: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        if let string {
+            return string.withCString { body($0) }
+        }
+        return body(nil)
     }
 
     @available(*, unavailable)
