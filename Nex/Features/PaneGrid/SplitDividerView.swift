@@ -24,7 +24,8 @@ struct SplitDividerView: View {
             .contentShape(Rectangle().inset(by: -4))
             .onHover { hovering in
                 if hovering {
-                    NSCursor.resizeLeftRight.push()
+                    let cursor: NSCursor = isHorizontal ? .resizeLeftRight : .resizeUpDown
+                    cursor.push()
                 } else {
                     NSCursor.pop()
                 }
