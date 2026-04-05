@@ -6,9 +6,14 @@ struct NewWorkspaceSheet: View {
     let store: StoreOf<AppReducer>
 
     @State private var name = ""
-    @State private var color: WorkspaceColor = .random()
+    @State private var color: WorkspaceColor
     @State private var selectedRepos: [Repo] = []
     @State private var isRepoPickerPresented = false
+
+    init(store: StoreOf<AppReducer>) {
+        self.store = store
+        _color = State(initialValue: store.workspaces.nextRandomColor())
+    }
 
     var body: some View {
         WithPerceptionTracking {

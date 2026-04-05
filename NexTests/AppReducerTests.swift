@@ -65,6 +65,22 @@ struct AppReducerTests {
         }
     }
 
+    @Test func createWorkspaceWithoutColorPicksNonRepeatingColor() async {
+        // Seed with an existing workspace whose color is red, then create a new
+        // workspace without specifying a color. The reducer should resolve the
+        // default via nextRandomColor(), which must not return red.
+        let existing = Self.makeWorkspace(id: Self.wsID1, name: "Existing", color: .red, paneID: Self.paneID1)
+        let store = makeStore(workspaces: [existing], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.createWorkspace(name: "New"))
+
+        #expect(store.state.workspaces.count == 2)
+        let newColor = store.state.workspaces.last?.color
+        #expect(newColor != nil)
+        #expect(newColor != .red)
+        #expect(WorkspaceColor.allCases.contains(newColor!))
+    }
+
     @Test func createWorkspaceWithSingleRepoSetsWorkingDirectory() async {
         let repo = Repo(
             id: UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000001")!,

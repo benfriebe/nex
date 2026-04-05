@@ -26,7 +26,7 @@ struct AppReducer {
 
     enum Action: Equatable {
         case appLaunched
-        case createWorkspace(name: String, color: WorkspaceColor, repos: [Repo] = [], workingDirectory: String? = nil)
+        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil)
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
         case setActiveWorkspace(UUID)
@@ -145,10 +145,11 @@ struct AppReducer {
                 )
 
             case .createWorkspace(let name, let color, let repos, let workingDirectory):
+                let resolvedColor = color ?? state.workspaces.nextRandomColor()
                 var workspace = WorkspaceFeature.State(
                     id: uuid(),
                     name: name,
-                    color: color
+                    color: resolvedColor
                 )
 
                 // If exactly one repo, start the first pane in that repo's directory
@@ -262,7 +263,7 @@ struct AppReducer {
             case .stateLoaded(let workspaces, let activeID, let repoRegistry):
                 if workspaces.isEmpty {
                     // First launch — create a default workspace
-                    return .send(.createWorkspace(name: "Default", color: .random()))
+                    return .send(.createWorkspace(name: "Default"))
                 }
                 state.workspaces = workspaces
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
@@ -662,7 +663,7 @@ struct AppReducer {
                         let newWS = WorkspaceFeature.State(
                             id: newID, name: toWorkspace,
                             slug: WorkspaceFeature.State.makeSlug(from: toWorkspace, id: newID),
-                            color: .random(), panes: [], layout: .empty,
+                            color: state.workspaces.nextRandomColor(), panes: [], layout: .empty,
                             focusedPaneID: nil, createdAt: Date(), lastAccessedAt: Date()
                         )
                         state.workspaces.append(newWS)
@@ -723,7 +724,7 @@ struct AppReducer {
                 case .workspaceCreate(let name, let path, let color):
                     return .send(.createWorkspace(
                         name: name ?? "Workspace",
-                        color: color ?? .random(),
+                        color: color,
                         workingDirectory: path
                     ))
 

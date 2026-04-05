@@ -618,3 +618,15 @@ struct WorkspaceFeature {
         }
     }
 }
+
+extension IdentifiedArrayOf where Element == WorkspaceFeature.State {
+    /// Returns a random `WorkspaceColor` for a newly created workspace, avoiding
+    /// the colour of the trailing workspace so an appended workspace is visually
+    /// distinct from its neighbour in the sidebar. See benfriebe/nex#26.
+    func nextRandomColor() -> WorkspaceColor {
+        let excluded = last?.color
+        return WorkspaceColor.allCases
+            .filter { $0 != excluded }
+            .randomElement() ?? .blue
+    }
+}
