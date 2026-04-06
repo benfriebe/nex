@@ -98,6 +98,48 @@ struct PersistenceTests {
         #expect(loadedPane.status == .running)
     }
 
+    @Test func scratchpadContentRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let paneID = UUID()
+        let pane = Pane(
+            id: paneID,
+            type: .scratchpad,
+            workingDirectory: "/tmp",
+            isEditing: true,
+            scratchpadContent: "my notes here",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastActivityAt: Date(timeIntervalSince1970: 2000)
+        )
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: wsID,
+            name: "Scratch Test",
+            slug: "scratch-test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .purple,
+            panes: [pane],
+            layout: .leaf(paneID),
+            focusedPaneID: paneID,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 2000)
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(workspace)
+
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        let loadedPane = result.workspaces.first!.panes.first!
+        #expect(loadedPane.type == .scratchpad)
+        #expect(loadedPane.scratchpadContent == "my notes here")
+        #expect(loadedPane.isEditing == true)
+    }
+
     @Test func loadEmptyDatabaseReturnsEmpty() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)

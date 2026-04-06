@@ -106,12 +106,15 @@ actor PersistenceService {
                     var panes = IdentifiedArrayOf<Pane>()
                     for pr in paneRecords {
                         guard let paneID = UUID(uuidString: pr.id) else { continue }
+                        let paneType = PaneType(rawValue: pr.type) ?? .shell
                         let pane = Pane(
                             id: paneID,
                             label: pr.label,
-                            type: PaneType(rawValue: pr.type) ?? .shell,
+                            type: paneType,
                             workingDirectory: pr.workingDirectory,
                             filePath: pr.filePath,
+                            isEditing: paneType == .scratchpad,
+                            scratchpadContent: pr.content,
                             status: PaneStatus(rawValue: pr.status) ?? .idle,
                             claudeSessionID: pr.claudeSessionID,
                             createdAt: Date(timeIntervalSince1970: pr.createdAt),
@@ -234,6 +237,7 @@ struct PersistenceSnapshot {
                     type: pane.type.rawValue,
                     workingDirectory: pane.workingDirectory,
                     filePath: pane.filePath,
+                    content: pane.scratchpadContent,
                     claudeSessionID: pane.claudeSessionID,
                     status: pane.status.rawValue,
                     createdAt: pane.createdAt.timeIntervalSince1970,

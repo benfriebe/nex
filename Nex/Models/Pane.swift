@@ -21,6 +21,9 @@ struct Pane: Identifiable, Equatable {
     /// pane. Nil means use the built-in `MarkdownEditorView`. Transient — not
     /// persisted.
     var externalEditorCommand: String?
+    /// In-memory text content for scratchpad panes. Persisted to the database
+    /// but never written to a file on disk.
+    var scratchpadContent: String?
     var claudeSessionID: String?
 
     /// Convenience accessor for rendering logic.
@@ -38,6 +41,7 @@ struct Pane: Identifiable, Equatable {
         filePath: String? = nil,
         isEditing: Bool = false,
         externalEditorCommand: String? = nil,
+        scratchpadContent: String? = nil,
         status: PaneStatus = .idle,
         claudeSessionID: String? = nil,
         createdAt: Date = Date(),
@@ -52,6 +56,7 @@ struct Pane: Identifiable, Equatable {
         self.filePath = filePath
         self.isEditing = isEditing
         self.externalEditorCommand = externalEditorCommand
+        self.scratchpadContent = scratchpadContent
         self.status = status
         self.claudeSessionID = claudeSessionID
         self.createdAt = createdAt

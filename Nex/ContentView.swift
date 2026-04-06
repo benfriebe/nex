@@ -52,6 +52,12 @@ struct ContentView: View {
                                 action: .toggleMarkdownEdit(paneID)
                             )))
                         },
+                        onScratchpadContentChanged: { paneID, content in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .scratchpadContentChanged(paneID: paneID, content: content)
+                            )))
+                        },
                         onUpdateRatio: { splitPath, ratio in
                             store.send(.workspaces(.element(
                                 id: activeID,

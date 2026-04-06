@@ -512,6 +512,142 @@ struct WorkspaceFeatureTests {
         #expect(store.state.recentlyClosedPanes.last?.workingDirectory == "/tmp/dir10")
     }
 
+    // MARK: - Scratchpad
+
+    @Test func createScratchpadSplitsFromFocused() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let originalPaneID = workspace.panes.first!.id
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000050")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.uuid = .constant(newPaneID)
+        }
+
+        await store.send(.createScratchpad) { state in
+            let newPane = Pane(
+                id: newPaneID,
+                type: .scratchpad,
+                title: "Scratchpad",
+                workingDirectory: NSHomeDirectory(),
+                isEditing: true,
+                createdAt: Date(timeIntervalSince1970: 1000),
+                lastActivityAt: Date(timeIntervalSince1970: 1000)
+            )
+            state.panes.append(newPane)
+            state.layout = .split(
+                .horizontal,
+                ratio: 0.5,
+                first: .leaf(originalPaneID),
+                second: .leaf(newPaneID)
+            )
+            state.focusedPaneID = newPaneID
+        }
+    }
+
+    @Test func scratchpadContentChangedUpdatesState() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = UUID()
+        workspace.panes.append(Pane(
+            id: paneID,
+            type: .scratchpad,
+            isEditing: true
+        ))
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.scratchpadContentChanged(paneID: paneID, content: "hello world")) { state in
+            state.panes[id: paneID]?.scratchpadContent = "hello world"
+        }
+    }
+
+    @Test func closeScratchpadCapturesContent() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstPaneID = workspace.panes.first!.id
+
+        let scratchID = UUID()
+        let scratchPane = Pane(
+            id: scratchID,
+            type: .scratchpad,
+            isEditing: true,
+            scratchpadContent: "saved notes"
+        )
+        workspace.panes.append(scratchPane)
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(firstPaneID),
+            second: .leaf(scratchID)
+        )
+        workspace.focusedPaneID = scratchID
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.closePane(scratchID)) { state in
+            state.recentlyClosedPanes = [
+                ClosedPaneSnapshot(
+                    workingDirectory: NSHomeDirectory(),
+                    type: .scratchpad,
+                    scratchpadContent: "saved notes"
+                )
+            ]
+            state.panes.remove(id: scratchID)
+            state.layout = .leaf(firstPaneID)
+            state.focusedPaneID = firstPaneID
+        }
+    }
+
+    @Test func reopenScratchpadRestoresContent() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstPaneID = workspace.panes.first!.id
+        workspace.recentlyClosedPanes = [
+            ClosedPaneSnapshot(
+                workingDirectory: NSHomeDirectory(),
+                type: .scratchpad,
+                scratchpadContent: "restored notes"
+            )
+        ]
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000051")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .constant(newPaneID)
+        }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.reopenClosedPane) { state in
+            state.recentlyClosedPanes = []
+            state.panes.append(Pane(
+                id: newPaneID,
+                type: .scratchpad,
+                workingDirectory: NSHomeDirectory(),
+                isEditing: true,
+                scratchpadContent: "restored notes"
+            ))
+            state.layout = .split(
+                .horizontal,
+                ratio: 0.5,
+                first: .leaf(firstPaneID),
+                second: .leaf(newPaneID)
+            )
+            state.focusedPaneID = newPaneID
+        }
+    }
+
     // MARK: - Layout Cycling
 
     @Test func cycleLayoutWithSinglePaneIsNoop() async {

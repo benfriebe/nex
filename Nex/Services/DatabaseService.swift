@@ -115,6 +115,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v6_scratchpad_content") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("content") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "content", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -144,6 +153,7 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var type: String
     var workingDirectory: String
     var filePath: String?
+    var content: String?
     var claudeSessionID: String?
     var status: String
     var createdAt: Double

@@ -6,6 +6,7 @@ struct ClosedPaneSnapshot: Equatable {
     var label: String?
     var type: PaneType
     var filePath: String?
+    var scratchpadContent: String?
     var claudeSessionID: String?
 }
 
@@ -112,6 +113,8 @@ struct WorkspaceFeature {
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String)
         case toggleMarkdownEdit(UUID)
+        case createScratchpad
+        case scratchpadContentChanged(paneID: UUID, content: String)
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
         case reopenClosedPane
@@ -266,6 +269,41 @@ struct WorkspaceFeature {
                     await send(.paneBranchChanged(paneID: newPaneID, branch: branch))
                 }
 
+            case .createScratchpad:
+                let newPaneID = uuid()
+                let newPane = Pane(
+                    id: newPaneID,
+                    type: .scratchpad,
+                    title: "Scratchpad",
+                    isEditing: true,
+                    createdAt: now,
+                    lastActivityAt: now
+                )
+
+                if let sourceID = state.focusedPaneID {
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    let (newLayout, _) = state.layout.splitting(
+                        paneID: sourceID,
+                        direction: .horizontal,
+                        newPaneID: newPaneID
+                    )
+                    state.layout = newLayout
+                } else {
+                    state.layout = .leaf(newPaneID)
+                }
+                state.panes.append(newPane)
+                state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
+                return .none
+
+            case .scratchpadContentChanged(let paneID, let content):
+                state.panes[id: paneID]?.scratchpadContent = content
+                return .none
+
             case .closePane(let paneID):
                 // Dismiss search if the pane being closed is the one being searched
                 if state.searchingPaneID == paneID {
@@ -293,6 +331,7 @@ struct WorkspaceFeature {
                             label: pane.label,
                             type: pane.type,
                             filePath: pane.filePath,
+                            scratchpadContent: pane.scratchpadContent,
                             claudeSessionID: pane.claudeSessionID
                         )
                     )
@@ -634,7 +673,9 @@ struct WorkspaceFeature {
                     label: snapshot.label,
                     type: snapshot.type,
                     workingDirectory: snapshot.workingDirectory,
-                    filePath: snapshot.filePath
+                    filePath: snapshot.filePath,
+                    isEditing: snapshot.type == .scratchpad,
+                    scratchpadContent: snapshot.scratchpadContent
                 )
 
                 let (newLayout, _) = state.layout.splitting(
@@ -647,8 +688,8 @@ struct WorkspaceFeature {
                 state.focusedPaneID = newPaneID
                 state.currentLayoutIndex = nil
 
-                // Markdown panes don't need a surface
-                if snapshot.type == .markdown {
+                // Markdown and scratchpad panes don't need a surface
+                if snapshot.type == .markdown || snapshot.type == .scratchpad {
                     return .none
                 }
 

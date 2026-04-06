@@ -26,6 +26,11 @@ struct PaneHeaderView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .frame(width: 10, height: 10)
+            } else if pane.type == .scratchpad {
+                Image(systemName: "note.text")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
             } else {
                 Circle()
                     .fill(statusDotColor)
@@ -178,6 +183,9 @@ struct PaneHeaderView: View {
     }
 
     private var displayPath: String {
+        if pane.type == .scratchpad {
+            return "Scratchpad"
+        }
         if pane.type == .markdown, let filePath = pane.filePath {
             return (filePath as NSString).lastPathComponent
         }

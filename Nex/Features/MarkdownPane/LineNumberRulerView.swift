@@ -125,11 +125,16 @@ final class LineNumberRulerView: NSRulerView {
         // Handle the empty last line (after trailing newline) or empty document
         if string.length == 0 || (string.length > 0 && string.character(at: string.length - 1) == 0x0A) {
             if charIndex == string.length, charIndex <= NSMaxRange(charRange) || string.length == 0 {
-                let glyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
                 var lineRect: NSRect
                 if string.length == 0 {
-                    lineRect = layoutManager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+                    // No glyphs exist yet so lineFragmentRect returns .zero.
+                    // Use the layout manager's own default line height so the
+                    // "1" sits at exactly the same y as after the first keystroke.
+                    let font = textView.font ?? lineNumberFont
+                    let lineHeight = layoutManager.defaultLineHeight(for: font)
+                    lineRect = NSRect(x: 0, y: 0, width: 0, height: lineHeight)
                 } else {
+                    let glyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
                     lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
                     lineRect.origin.y += lineRect.height
                 }

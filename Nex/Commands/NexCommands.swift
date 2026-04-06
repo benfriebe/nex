@@ -205,6 +205,10 @@ final class PaneShortcutMonitor {
             store.send(.workspaces(.element(id: id, action: .movePaneInDirection(.down))))
             return true
 
+        case .createScratchpad:
+            store.send(.workspaces(.element(id: id, action: .createScratchpad)))
+            return true
+
         case .renameWorkspace:
             store.send(.beginRenameActiveWorkspace)
             return true

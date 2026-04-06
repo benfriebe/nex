@@ -93,6 +93,7 @@
 		F408865A1C0FC2282DD6F271 /* NexTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB526BDDE50E6C7948EE832 /* NexTheme.swift */; };
 		F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */; };
 		F9EF0D090461E0518C6EB23F /* EditorServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FDA3FB200AA7846BCDC7A7 /* EditorServiceTests.swift */; };
+		FB45777E3BD181F04B322F93 /* ScratchpadEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */; };
 		FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBEA23E4C37CB5B7A6F4963C /* PersistenceService.swift */; };
 /* End PBXBuildFile section */
 
@@ -185,6 +186,7 @@
 		DE56BB11F5C7C34821411297 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		E08D39F8F87D7505CD32D25D /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		E5859C5B2E1850D1262AFE4B /* Nex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScratchpadEditorView.swift; sourceTree = "<group>"; };
 		EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpDataTests.swift; sourceTree = "<group>"; };
 		EA19A5A6562DDB77C0AE44B6 /* WorkspaceFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFeatureTests.swift; sourceTree = "<group>"; };
 		EB94C2B6250E68349B287AF7 /* GitStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatus.swift; sourceTree = "<group>"; };
@@ -236,6 +238,14 @@
 				A05FDE83E479F0CC46756554 /* Frameworks */,
 				A08F07BEBBB932F6F6C05FAF /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		0E3C930E9EEBE1D0094A6538 /* ScratchpadPane */ = {
+			isa = PBXGroup;
+			children = (
+				E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */,
+			);
+			path = ScratchpadPane;
 			sourceTree = "<group>";
 		};
 		37906607D9F29897C19CCC22 /* Models */ = {
@@ -350,6 +360,7 @@
 				B83E9D548B12F0748394A98C /* MarkdownPane */,
 				575CB385F691D30D4A449F9C /* PaneGrid */,
 				09ECBBE13D93F1F5CFC8849D /* RepoRegistry */,
+				0E3C930E9EEBE1D0094A6538 /* ScratchpadPane */,
 				3C80F4E7F9BFB46382583CF8 /* Settings */,
 				C07DAE9A20D318288C360D1B /* StatusBar */,
 				7D8D8A8C5E2891A6686932C2 /* Workspace */,
@@ -630,6 +641,7 @@
 				3DF88C2A2966C7B0209E22FE /* RepoPickerView.swift in Sources */,
 				40D01E98BD9BE2397CFC1080 /* RepoRegistryView.swift in Sources */,
 				ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */,
+				FB45777E3BD181F04B322F93 /* ScratchpadEditorView.swift in Sources */,
 				29C636F17D2FEF2D5E0BE55D /* SettingsFeature.swift in Sources */,
 				E31F1B84CF270603EF2B93E0 /* SettingsView.swift in Sources */,
 				7D1EEEBEE302F17F8CA2852D /* SocketServer.swift in Sources */,

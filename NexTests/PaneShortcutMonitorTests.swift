@@ -418,4 +418,21 @@ struct PaneShortcutMonitorTests {
         let cmdN = keyEvent(keyCode: 45, modifierFlags: .command)
         #expect(monitor.handleKeyEvent(cmdN) == false)
     }
+
+    // MARK: - Scratchpad
+
+    @Test func cmdShiftNCreatesScratchpad() {
+        let ws = Self.makeWorkspace()
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID
+        )
+
+        let event = keyEvent(keyCode: 45, modifierFlags: [.command, .shift])
+        let handled = monitor.handleKeyEvent(event)
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]!.panes.count == 2)
+        #expect(store.workspaces[id: Self.wsID]!.panes.last?.type == .scratchpad)
+    }
 }

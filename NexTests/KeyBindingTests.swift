@@ -176,7 +176,7 @@ struct NexActionTests {
             .focusNextPane, .focusPreviousPane,
             .nextWorkspace, .previousWorkspace,
             .toggleMarkdownEdit, .toggleZoom, .reopenClosedPane,
-            .toggleSearch, .closeSearch, .unbind
+            .toggleSearch, .closeSearch, .createScratchpad, .unbind
         ]
         for action in paneActions {
             #expect(!action.isMenuBarAction, "Expected \(action.rawValue) NOT to be a menu bar action")
@@ -279,5 +279,19 @@ struct KeyBindingMapTests {
         let map = KeyBindingMap.defaults
         let cmdShiftR = KeyTrigger(keyCode: 15, modifiers: [.command, .shift])
         #expect(map.action(for: cmdShiftR) == .renameWorkspace)
+    }
+
+    @Test func createScratchpadMetadata() {
+        #expect(NexAction(rawValue: "create_scratchpad") == .createScratchpad)
+        #expect(NexAction.createScratchpad.category == "Pane Management")
+        #expect(NexAction.createScratchpad.isMenuBarAction == false)
+        #expect(NexAction.createScratchpad.displayName == "New Scratchpad")
+        #expect(NexAction.bindableActions.contains(.createScratchpad))
+    }
+
+    @Test func defaultsContainCreateScratchpad() {
+        let map = KeyBindingMap.defaults
+        let cmdShiftN = KeyTrigger(keyCode: 45, modifiers: [.command, .shift])
+        #expect(map.action(for: cmdShiftN) == .createScratchpad)
     }
 }

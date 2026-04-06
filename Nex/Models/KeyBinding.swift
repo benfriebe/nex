@@ -240,6 +240,7 @@ enum NexAction: String, CaseIterable {
     case movePaneRight = "move_pane_right"
     case movePaneUp = "move_pane_up"
     case movePaneDown = "move_pane_down"
+    case createScratchpad = "create_scratchpad"
     case unbind
 
     /// Actions handled by SwiftUI Commands (menu bar items).
@@ -291,6 +292,7 @@ enum NexAction: String, CaseIterable {
         case .movePaneRight: "Move Pane Right"
         case .movePaneUp: "Move Pane Up"
         case .movePaneDown: "Move Pane Down"
+        case .createScratchpad: "New Scratchpad"
         case .unbind: "Unbind"
         }
     }
@@ -299,7 +301,7 @@ enum NexAction: String, CaseIterable {
     var category: String {
         switch self {
         case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout,
-             .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown:
+             .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, .createScratchpad:
             "Pane Management"
         case .focusNextPane, .focusPreviousPane:
             "Navigation"
@@ -431,6 +433,9 @@ struct KeyBindingMap: Equatable {
         bindings[KeyTrigger(keyCode: 3, modifiers: .command)] = .toggleSearch // ⌘F
         bindings[KeyTrigger(keyCode: 53)] = .closeSearch // Escape
         bindings[KeyTrigger(keyCode: 49, modifiers: [.command, .shift])] = .cycleLayout // ⌘⇧Space
+
+        // Scratchpad
+        bindings[KeyTrigger(keyCode: 45, modifiers: [.command, .shift])] = .createScratchpad // ⌘⇧N
 
         // Move pane in direction
         bindings[KeyTrigger(keyCode: 123, modifiers: [.control, .shift])] = .movePaneLeft // ⌃⇧←

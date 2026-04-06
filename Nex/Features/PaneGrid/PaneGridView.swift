@@ -16,6 +16,7 @@ struct PaneGridView: View {
     let isZoomed: Bool
     let onToggleZoom: () -> Void
     let onToggleMarkdownEdit: (UUID) -> Void
+    let onScratchpadContentChanged: (UUID, String) -> Void
     let onUpdateRatio: (String, Double) -> Void
     var onMovePane: ((UUID, UUID, PaneLayout.DropZone) -> Void)?
     var searchingPaneID: UUID?
@@ -168,6 +169,18 @@ struct PaneGridView: View {
                         backgroundOpacity: ghosttyConfig.backgroundOpacity
                     )
                 }
+            case .scratchpad:
+                ScratchpadEditorView(
+                    paneID: pane.id,
+                    initialContent: pane.scratchpadContent ?? "",
+                    isFocused: pane.id == focusedPaneID,
+                    onContentChanged: { content in
+                        onScratchpadContentChanged(pane.id, content)
+                    },
+                    backgroundColor: ghosttyConfig.backgroundColor,
+                    backgroundOpacity: ghosttyConfig.backgroundOpacity
+                )
+                .clipped()
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -186,7 +199,7 @@ struct PaneGridView: View {
             }
         }
         .background {
-            if pane.type == .markdown {
+            if pane.type == .markdown || pane.type == .scratchpad {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }
