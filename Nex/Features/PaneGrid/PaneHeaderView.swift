@@ -141,6 +141,7 @@ struct PaneHeaderView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { onToggleZoom?() }
         .onTapGesture { onFocus() }
         .gesture(
             DragGesture(minimumDistance: 8, coordinateSpace: .named("paneGrid"))
