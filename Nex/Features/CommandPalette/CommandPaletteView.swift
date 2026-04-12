@@ -87,7 +87,7 @@ struct CommandPaletteView: View {
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         .onAppear {
             localQuery = query
-            isFieldFocused = true
+            DispatchQueue.main.async { isFieldFocused = true }
         }
         .onKeyPress(.upArrow) {
             scrollToSelection = true
