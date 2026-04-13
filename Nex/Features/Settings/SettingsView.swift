@@ -76,6 +76,16 @@ private struct GeneralSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Repositories") {
+                    Toggle("Auto-detect from pane directories", isOn: Binding(
+                        get: { settingsStore.autoDetectRepos },
+                        set: { settingsStore.send(.setAutoDetectRepos($0)) }
+                    ))
+                    Text("When a pane's working directory is inside a Git repository, automatically associate the repo (or worktree) with the workspace. Removed a few seconds after no pane remains in it. Manually added repos are never auto-removed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Panes") {
                     Toggle("Focus follows mouse", isOn: Binding(
                         get: { appStore.focusFollowsMouse },

@@ -84,7 +84,8 @@ actor PersistenceService {
                         path: rr.path,
                         name: rr.name,
                         remoteURL: rr.remoteURL,
-                        lastAccessedAt: Date(timeIntervalSince1970: rr.lastAccessedAt)
+                        lastAccessedAt: Date(timeIntervalSince1970: rr.lastAccessedAt),
+                        isAutoDiscovered: rr.isAutoDiscovered
                     )
                     repoRegistry.append(repo)
                 }
@@ -136,7 +137,8 @@ actor PersistenceService {
                             id: assocID,
                             repoID: repoID,
                             worktreePath: ar.worktreePath,
-                            branchName: ar.branchName
+                            branchName: ar.branchName,
+                            isAutoDetected: ar.isAutoDetected
                         )
                         repoAssociations.append(assoc)
                     }
@@ -207,7 +209,8 @@ struct PersistenceSnapshot {
                 path: repo.path,
                 name: repo.name,
                 remoteURL: repo.remoteURL,
-                lastAccessedAt: repo.lastAccessedAt.timeIntervalSince1970
+                lastAccessedAt: repo.lastAccessedAt.timeIntervalSince1970,
+                isAutoDiscovered: repo.isAutoDiscovered
             )
         }
 
@@ -253,7 +256,8 @@ struct PersistenceSnapshot {
                     workspaceID: workspace.id.uuidString,
                     repoID: assoc.repoID.uuidString,
                     worktreePath: assoc.worktreePath,
-                    branchName: assoc.branchName
+                    branchName: assoc.branchName,
+                    isAutoDetected: assoc.isAutoDetected
                 )
             }
         }

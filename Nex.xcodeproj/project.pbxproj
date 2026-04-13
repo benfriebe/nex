@@ -77,6 +77,7 @@
 		D9A2EC37D7FABEAFE48E109A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DB65E3CCBB3A287C413A6015 /* Foundation.framework */; };
 		DA4AC555E9C3FC84061F2FB9 /* PaneFocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD9BCE4ABC267C7E34EAF09 /* PaneFocusView.swift */; };
 		DBBD0CD88C3B7EF588D5CB04 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0153509BA13BB205C40DE2D5 /* GitService.swift */; };
+		DC11308E0E92225F551CF162 /* AutoDetectRepoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */; };
 		DE4BB209669A230B465E2722 /* WorkspaceFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA19A5A6562DDB77C0AE44B6 /* WorkspaceFeatureTests.swift */; };
 		E0ABD2D68012C6BF24A92E7D /* KeybindingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D45D65A66C475B0CEEC53C /* KeybindingService.swift */; };
 		E19F4E0C87CB85D959F0C8F2 /* GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB94C2B6250E68349B287AF7 /* GitStatus.swift */; };
@@ -169,6 +170,7 @@
 		A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigClient.swift; sourceTree = "<group>"; };
 		AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingTests.swift; sourceTree = "<group>"; };
+		ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDetectRepoTests.swift; sourceTree = "<group>"; };
 		ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureTests.swift; sourceTree = "<group>"; };
 		B02A888F436610636F5A4D55 /* MarkdownPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPaneView.swift; sourceTree = "<group>"; };
 		B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -287,6 +289,7 @@
 			children = (
 				A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */,
 				D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */,
+				ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */,
 				89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */,
 				309F641591BB580429299666 /* ConfigParserTests.swift */,
 				21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */,
@@ -599,6 +602,7 @@
 			files = (
 				840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */,
 				B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */,
+				DC11308E0E92225F551CF162 /* AutoDetectRepoTests.swift in Sources */,
 				FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */,
 				A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */,
 				B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */,

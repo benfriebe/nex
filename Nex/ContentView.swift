@@ -140,7 +140,7 @@ struct ContentView: View {
                             )
                             .padding(.top, 40)
                         }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .animation(.easeOut(duration: 0.15), value: store.isCommandPaletteVisible)

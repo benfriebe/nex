@@ -12,6 +12,9 @@ struct AgentLifecycleTests {
         var appState = AppReducer.State()
         appState.workspaces = workspaces
         appState.activeWorkspaceID = activeWorkspaceID
+        // Disable auto-detection so tests don't have to deal with the
+        // debounced effects scheduled by paneDirectoryChanged / closePane.
+        appState.settings.autoDetectRepos = false
 
         let store = TestStore(initialState: appState) {
             AppReducer()

@@ -56,11 +56,15 @@ struct RepoRegistryView: View {
     }
 
     private var filteredRepos: IdentifiedArrayOf<Repo> {
+        // Hide transient, auto-discovered repos from the manual registry UI.
+        // They are managed by the auto-detect flow and GC'd when no pane is
+        // still inside them.
+        let manualOnly = store.repoRegistry.filter { !$0.isAutoDiscovered }
         if searchText.isEmpty {
-            return store.repoRegistry
+            return manualOnly
         }
         let query = searchText.lowercased()
-        return store.repoRegistry.filter {
+        return manualOnly.filter {
             $0.name.lowercased().contains(query) || $0.path.lowercased().contains(query)
         }
     }

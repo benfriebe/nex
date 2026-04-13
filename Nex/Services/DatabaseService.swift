@@ -124,6 +124,24 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v7_repo_assoc_auto_detected") { db in
+            let columns = try db.columns(in: "repoAssociation").map(\.name)
+            if !columns.contains("isAutoDetected") {
+                try db.alter(table: "repoAssociation") { t in
+                    t.add(column: "isAutoDetected", .boolean).notNull().defaults(to: false)
+                }
+            }
+        }
+
+        migrator.registerMigration("v8_repo_auto_discovered") { db in
+            let columns = try db.columns(in: "repo").map(\.name)
+            if !columns.contains("isAutoDiscovered") {
+                try db.alter(table: "repo") { t in
+                    t.add(column: "isAutoDiscovered", .boolean).notNull().defaults(to: false)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -175,6 +193,7 @@ struct RepoRecord: Codable, FetchableRecord, PersistableRecord {
     var name: String
     var remoteURL: String?
     var lastAccessedAt: Double
+    var isAutoDiscovered: Bool
 }
 
 struct RepoAssociationRecord: Codable, FetchableRecord, PersistableRecord {
@@ -185,4 +204,5 @@ struct RepoAssociationRecord: Codable, FetchableRecord, PersistableRecord {
     var repoID: String
     var worktreePath: String
     var branchName: String?
+    var isAutoDetected: Bool
 }

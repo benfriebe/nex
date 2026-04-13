@@ -14,6 +14,7 @@ struct SettingsFeature {
         var backgroundColorB: Double = 0.0
         var worktreeBasePath: String = SettingsFeature.defaultWorktreeBasePath
         var selectedTheme: NexTheme?
+        var autoDetectRepos: Bool = true
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -37,6 +38,7 @@ struct SettingsFeature {
         case setBackgroundOpacity(Double)
         case setBackgroundColor(r: Double, g: Double, b: Double)
         case setWorktreeBasePath(String)
+        case setAutoDetectRepos(Bool)
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
     }
@@ -50,6 +52,7 @@ struct SettingsFeature {
     static let defaultsKeyHasCustomColor = "settings.hasCustomColor"
     static let defaultsKeyWorktreeBasePath = "settings.worktreeBasePath"
     static let defaultsKeySelectedTheme = "settings.selectedTheme"
+    static let defaultsKeyAutoDetectRepos = "settings.autoDetectRepos"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -63,6 +66,9 @@ struct SettingsFeature {
                 }
                 if let basePath = userDefaults.stringForKey(Self.defaultsKeyWorktreeBasePath) {
                     state.worktreeBasePath = basePath
+                }
+                if userDefaults.hasKey(Self.defaultsKeyAutoDetectRepos) {
+                    state.autoDetectRepos = userDefaults.boolForKey(Self.defaultsKeyAutoDetectRepos)
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -116,6 +122,11 @@ struct SettingsFeature {
             case .setWorktreeBasePath(let path):
                 state.worktreeBasePath = path
                 userDefaults.setString(path, Self.defaultsKeyWorktreeBasePath)
+                return .none
+
+            case .setAutoDetectRepos(let enabled):
+                state.autoDetectRepos = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyAutoDetectRepos)
                 return .none
 
             case .selectTheme(let theme):

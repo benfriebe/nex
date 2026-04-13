@@ -37,7 +37,8 @@ struct DatabaseMigrationTests {
                 path: "/path/to/repo",
                 name: "my-repo",
                 remoteURL: "https://github.com/user/repo.git",
-                lastAccessedAt: Date().timeIntervalSince1970
+                lastAccessedAt: Date().timeIntervalSince1970,
+                isAutoDiscovered: false
             )
             try record.insert(db)
         }
@@ -61,7 +62,8 @@ struct DatabaseMigrationTests {
                 path: "/same/path",
                 name: "repo1",
                 remoteURL: nil,
-                lastAccessedAt: 1000
+                lastAccessedAt: 1000,
+                isAutoDiscovered: false
             )
             try record1.insert(db)
         }
@@ -73,7 +75,8 @@ struct DatabaseMigrationTests {
                     path: "/same/path",
                     name: "repo2",
                     remoteURL: nil,
-                    lastAccessedAt: 2000
+                    lastAccessedAt: 2000,
+                    isAutoDiscovered: false
                 )
                 try record2.insert(db)
             }
@@ -107,7 +110,8 @@ struct DatabaseMigrationTests {
                 path: "/path",
                 name: "repo",
                 remoteURL: nil,
-                lastAccessedAt: 1000
+                lastAccessedAt: 1000,
+                isAutoDiscovered: false
             )
             try repo.insert(db)
 
@@ -117,7 +121,8 @@ struct DatabaseMigrationTests {
                 workspaceID: wsID,
                 repoID: repoID,
                 worktreePath: "/worktree",
-                branchName: "main"
+                branchName: "main",
+                isAutoDetected: false
             )
             try assoc.insert(db)
         }
@@ -158,7 +163,8 @@ struct DatabaseMigrationTests {
                 path: "/path",
                 name: "repo",
                 remoteURL: nil,
-                lastAccessedAt: 1000
+                lastAccessedAt: 1000,
+                isAutoDiscovered: false
             )
             try repo.insert(db)
 
@@ -167,7 +173,8 @@ struct DatabaseMigrationTests {
                 workspaceID: wsID,
                 repoID: repoID,
                 worktreePath: "/worktree",
-                branchName: "main"
+                branchName: "main",
+                isAutoDetected: false
             )
             try assoc.insert(db)
         }

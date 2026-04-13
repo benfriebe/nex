@@ -54,13 +54,12 @@ struct AppReducer {
                         .replacingOccurrences(of: home, with: "~")
                     let path = pane.workingDirectory
                         .replacingOccurrences(of: home, with: "~")
-                    let subtitle: String
-                    if let label = pane.label, let paneTitle = pane.title, label != paneTitle {
-                        subtitle = paneTitle
+                    let subtitle: String = if let label = pane.label, let paneTitle = pane.title, label != paneTitle {
+                        paneTitle
                     } else if pane.label != nil {
-                        subtitle = path
+                        path
                     } else {
-                        subtitle = ""
+                        ""
                     }
                     let icon = switch pane.type {
                     case .shell: "terminal"
@@ -140,6 +139,13 @@ struct AppReducer {
         case worktreeCreationFailed(workspaceID: UUID, error: String)
         case removeWorktreeAssociation(workspaceID: UUID, associationID: UUID, deleteWorktree: Bool)
 
+        // Auto-detected repo associations
+        case autoLinkRepoForPane(workspaceID: UUID, paneID: UUID, directory: String)
+        case autoLinkResolved(workspaceID: UUID, paneID: UUID, info: RepoRootInfo)
+        case autoUnlinkUnusedRepos(workspaceID: UUID)
+        case repoRemoteURLResolved(repoID: UUID, remoteURL: String?)
+        case repoAssociationBranchResolved(workspaceID: UUID, associationID: UUID, branch: String?)
+
         // File Opening
         case openFile
         case openFileAtPath(String, fromPaneID: UUID?)
@@ -194,6 +200,42 @@ struct AppReducer {
     @Dependency(\.continuousClock) var clock
 
     private enum GitStatusTimerID: Hashable { case timer }
+    private enum AutoLinkResolveID: Hashable { case pane(UUID) }
+    private enum AutoLinkDebounceID: Hashable { case pane(UUID) }
+    private enum AutoUnlinkDebounceID: Hashable { case workspace(UUID) }
+
+    /// Coalesce rapid `cd`s before scanning the directory for a repo root.
+    static let autoLinkDebounce: Duration = .milliseconds(500)
+    /// Wait before tearing down an auto-detected association, in case a pane
+    /// briefly leaves a directory and returns.
+    static let autoUnlinkDebounce: Duration = .seconds(5)
+
+    private func scheduleAutoLink(
+        workspaceID: UUID,
+        paneID: UUID,
+        directory: String,
+        in state: State
+    ) -> Effect<Action> {
+        guard state.settings.autoDetectRepos else { return .none }
+        return .run { [clock] send in
+            try await clock.sleep(for: Self.autoLinkDebounce)
+            await send(.autoLinkRepoForPane(
+                workspaceID: workspaceID,
+                paneID: paneID,
+                directory: directory
+            ))
+        }
+        .cancellable(id: AutoLinkDebounceID.pane(paneID), cancelInFlight: true)
+    }
+
+    private func scheduleAutoUnlink(workspaceID: UUID, in state: State) -> Effect<Action> {
+        guard state.settings.autoDetectRepos else { return .none }
+        return .run { [clock] send in
+            try await clock.sleep(for: Self.autoUnlinkDebounce)
+            await send(.autoUnlinkUnusedRepos(workspaceID: workspaceID))
+        }
+        .cancellable(id: AutoUnlinkDebounceID.workspace(workspaceID), cancelInFlight: true)
+    }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -453,6 +495,25 @@ struct AppReducer {
                     .send(.persistState),
                     .send(.updateExternalIndicators),
                     .run { _ in notifService.removeNotification(for: paneID) }
+                )
+
+            case .workspaces(.element(id: let wsID, action: .paneDirectoryChanged(let paneID, let directory))):
+                return .merge(
+                    .send(.persistState),
+                    scheduleAutoLink(workspaceID: wsID, paneID: paneID, directory: directory, in: state),
+                    scheduleAutoUnlink(workspaceID: wsID, in: state)
+                )
+
+            case .workspaces(.element(id: let wsID, action: .closePane)):
+                return .merge(
+                    .send(.persistState),
+                    scheduleAutoUnlink(workspaceID: wsID, in: state)
+                )
+
+            case .workspaces(.element(id: let wsID, action: .paneProcessTerminated)):
+                return .merge(
+                    .send(.persistState),
+                    scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
 
             case .workspaces:
@@ -1010,8 +1071,14 @@ struct AppReducer {
                 return effects.isEmpty ? .none : .merge(effects)
 
             case .addRepo(let path, let name):
-                // Deduplicate by path
-                guard !state.repoRegistry.contains(where: { $0.path == path }) else {
+                // If the repo is already in the registry, promote it out of
+                // auto-discovered status so it survives GC when panes leave
+                // it.
+                if let existing = state.repoRegistry.first(where: { $0.path == path }) {
+                    if existing.isAutoDiscovered {
+                        state.repoRegistry[id: existing.id]?.isAutoDiscovered = false
+                        return .send(.persistState)
+                    }
                     return .none
                 }
                 let repoID = uuid()
@@ -1074,6 +1141,9 @@ struct AppReducer {
                     branchName: branchName
                 )
                 state.workspaces[id: workspaceID]?.repoAssociations.append(assoc)
+                // A manual worktree flow promotes the repo out of
+                // auto-discovered status.
+                state.repoRegistry[id: repoID]?.isAutoDiscovered = false
                 return .merge(
                     .send(.persistState),
                     .send(.refreshGitStatus)
@@ -1099,6 +1169,165 @@ struct AppReducer {
                         .send(.persistState)
                     )
                 }
+                return .send(.persistState)
+
+            // MARK: - Auto-Detected Repo Associations
+
+            case .autoLinkRepoForPane(let workspaceID, let paneID, let directory):
+                // Re-check the setting and workspace at dispatch time. The
+                // scheduling side also guards, but the user may have toggled
+                // the setting off during the 500ms debounce.
+                guard state.settings.autoDetectRepos,
+                      let workspace = state.workspaces[id: workspaceID],
+                      workspace.panes[id: paneID]?.workingDirectory == directory
+                else { return .none }
+                return .run { send in
+                    if let info = await gitService.resolveRepoRoot(directory) {
+                        await send(.autoLinkResolved(
+                            workspaceID: workspaceID,
+                            paneID: paneID,
+                            info: info
+                        ))
+                    }
+                }
+                .cancellable(id: AutoLinkResolveID.pane(paneID), cancelInFlight: true)
+
+            case .autoLinkResolved(let workspaceID, let paneID, let info):
+                // The async git resolution may have raced with: setting
+                // toggled off, workspace deleted, pane closed, or pane `cd`-ed
+                // out of the resolved worktree. Skip in all those cases so we
+                // don't silently create a stale association.
+                guard state.settings.autoDetectRepos,
+                      let workspace = state.workspaces[id: workspaceID],
+                      let pane = workspace.panes[id: paneID]
+                else { return .none }
+
+                let pwd = (pane.workingDirectory as NSString).standardizingPath
+                let worktreeRoot = (info.worktreeRoot as NSString).standardizingPath
+                let stillInside = pwd == worktreeRoot || pwd.hasPrefix(worktreeRoot + "/")
+                guard stillInside else { return .none }
+
+                // Find or create the parent Repo entry.
+                let repoID: UUID
+                var addedRepo = false
+                if let existing = state.repoRegistry.first(where: { $0.path == info.parentRepoRoot }) {
+                    repoID = existing.id
+                } else {
+                    let newID = uuid()
+                    let repo = Repo(
+                        id: newID,
+                        path: info.parentRepoRoot,
+                        name: (info.parentRepoRoot as NSString).lastPathComponent,
+                        isAutoDiscovered: true
+                    )
+                    state.repoRegistry.append(repo)
+                    repoID = newID
+                    addedRepo = true
+                }
+
+                // Skip if an association for this worktree already exists.
+                let alreadyLinked = workspace.repoAssociations
+                    .contains(where: { $0.worktreePath == info.worktreeRoot })
+
+                var effects: [Effect<Action>] = []
+
+                if !alreadyLinked {
+                    let assoc = RepoAssociation(
+                        id: uuid(),
+                        repoID: repoID,
+                        worktreePath: info.worktreeRoot,
+                        branchName: nil,
+                        isAutoDetected: true
+                    )
+                    state.workspaces[id: workspaceID]?.repoAssociations.append(assoc)
+
+                    let assocID = assoc.id
+                    let resolvedWorktree = info.worktreeRoot
+                    effects.append(
+                        .run { [gitService] send in
+                            let branch = try? await gitService.getCurrentBranch(resolvedWorktree)
+                            let status = await (try? gitService.getStatus(resolvedWorktree)) ?? .unknown
+                            await send(.gitStatusUpdated(associationID: assocID, status: status))
+                            await send(.repoAssociationBranchResolved(
+                                workspaceID: workspaceID,
+                                associationID: assocID,
+                                branch: branch
+                            ))
+                        }
+                    )
+                }
+
+                if addedRepo {
+                    let parentRepoPath = info.parentRepoRoot
+                    effects.append(
+                        .run { [gitService] send in
+                            let url = try? await gitService.getRemoteURL(parentRepoPath)
+                            await send(.repoRemoteURLResolved(repoID: repoID, remoteURL: url))
+                        }
+                    )
+                }
+
+                // One persistState coalesces all the above via the persistence
+                // debounce — the branch/url follow-ups reuse it.
+                if !alreadyLinked || addedRepo {
+                    effects.append(.send(.persistState))
+                }
+                return effects.isEmpty ? .none : .merge(effects)
+
+            case .autoUnlinkUnusedRepos(let workspaceID):
+                guard let workspace = state.workspaces[id: workspaceID] else { return .none }
+
+                let candidateIDs: [UUID] = workspace.repoAssociations
+                    .filter(\.isAutoDetected)
+                    .map(\.id)
+
+                guard !candidateIDs.isEmpty else { return .none }
+
+                let panePaths = workspace.panes.map(\.workingDirectory)
+
+                func isPathInside(_ path: String, _ root: String) -> Bool {
+                    let p = (path as NSString).standardizingPath
+                    let r = (root as NSString).standardizingPath
+                    if p == r { return true }
+                    return p.hasPrefix(r + "/")
+                }
+
+                var removedRepoIDs: Set<UUID> = []
+                for assocID in candidateIDs {
+                    guard let assoc = state.workspaces[id: workspaceID]?
+                        .repoAssociations[id: assocID] else { continue }
+                    let stillInUse = panePaths.contains { isPathInside($0, assoc.worktreePath) }
+                    if !stillInUse {
+                        state.workspaces[id: workspaceID]?.repoAssociations.remove(id: assocID)
+                        state.gitStatuses.removeValue(forKey: assocID)
+                        removedRepoIDs.insert(assoc.repoID)
+                    }
+                }
+
+                // GC auto-discovered repos with no remaining associations
+                // across any workspace. Manually-added repos (isAutoDiscovered
+                // == false) are never removed here.
+                for repoID in removedRepoIDs {
+                    guard let repo = state.repoRegistry[id: repoID],
+                          repo.isAutoDiscovered else { continue }
+                    let stillReferenced = state.workspaces.contains { ws in
+                        ws.repoAssociations.contains(where: { $0.repoID == repoID })
+                    }
+                    if !stillReferenced {
+                        state.repoRegistry.remove(id: repoID)
+                    }
+                }
+
+                return removedRepoIDs.isEmpty ? .none : .send(.persistState)
+
+            case .repoRemoteURLResolved(let repoID, let url):
+                state.repoRegistry[id: repoID]?.remoteURL = url
+                return .send(.persistState)
+
+            case .repoAssociationBranchResolved(let workspaceID, let associationID, let branch):
+                state.workspaces[id: workspaceID]?
+                    .repoAssociations[id: associationID]?
+                    .branchName = branch
                 return .send(.persistState)
 
             // MARK: - Inspector + Git Status
