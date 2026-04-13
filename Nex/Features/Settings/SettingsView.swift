@@ -71,7 +71,7 @@ private struct GeneralSettingsView: View {
                         TextField("", text: Bindable(settingsStore).worktreeBasePath.sending(\.setWorktreeBasePath))
                             .textFieldStyle(.plain)
                     }
-                    Text("Worktrees are created at <base path>/<workspace>/<name>")
+                    Text("Worktrees are created at <base path>/<name>. Use <repo> in the base path to substitute the repository: at the start it resolves to the full repo path (e.g., <repo>/.claude/worktrees), elsewhere it resolves to the repo directory name (e.g., ~/nex/worktrees/<repo>).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

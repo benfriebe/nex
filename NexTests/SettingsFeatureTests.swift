@@ -45,8 +45,36 @@ struct SettingsFeatureTests {
 
     @Test func resolvedWorktreeBasePathExpandsTilde() {
         var state = SettingsFeature.State()
-        state.worktreeBasePath = "~/nex/workspaces"
-        let expected = ("~/nex/workspaces" as NSString).expandingTildeInPath
-        #expect(state.resolvedWorktreeBasePath == expected)
+        state.worktreeBasePath = "~/nex/worktrees"
+        let expected = ("~/nex/worktrees" as NSString).expandingTildeInPath
+        #expect(state.resolvedWorktreeBasePath() == expected)
+    }
+
+    @Test func resolvedWorktreeBasePathSubstitutesFullRepoPathAtStart() {
+        var state = SettingsFeature.State()
+        state.worktreeBasePath = "<repo>/.claude/worktrees"
+        #expect(
+            state.resolvedWorktreeBasePath(forRepoPath: "/Users/me/code/myrepo")
+                == "/Users/me/code/myrepo/.claude/worktrees"
+        )
+    }
+
+    @Test func resolvedWorktreeBasePathSubstitutesRepoNameWhenNotAtStart() {
+        var state = SettingsFeature.State()
+        state.worktreeBasePath = "~/worktrees/<repo>"
+        let expected = ("~/worktrees/myrepo" as NSString).expandingTildeInPath
+        #expect(
+            state.resolvedWorktreeBasePath(forRepoPath: "/Users/me/code/myrepo")
+                == expected
+        )
+    }
+
+    @Test func resolvedWorktreeBasePathHandlesMixedRepoTokens() {
+        var state = SettingsFeature.State()
+        state.worktreeBasePath = "<repo>/worktrees/<repo>"
+        #expect(
+            state.resolvedWorktreeBasePath(forRepoPath: "/Users/me/code/myrepo")
+                == "/Users/me/code/myrepo/worktrees/myrepo"
+        )
     }
 }

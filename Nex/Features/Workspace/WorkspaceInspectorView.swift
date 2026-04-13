@@ -92,8 +92,9 @@ struct WorkspaceInspectorView: View {
                 .sheet(item: $worktreeRepoID) { repoID in
                     CreateWorktreeSheet(
                         repoName: store.repoRegistry[id: repoID]?.name ?? "repo",
-                        workspaceSlug: workspace.slug,
-                        worktreeBasePath: store.settings.worktreeBasePath,
+                        worktreeBasePath: store.settings.resolvedWorktreeBasePath(
+                            forRepoPath: store.repoRegistry[id: repoID]?.path
+                        ),
                         worktreeName: $worktreeName,
                         branchName: $worktreeBranchName,
                         onCreate: {
@@ -107,7 +108,13 @@ struct WorkspaceInspectorView: View {
                         },
                         onCancel: {
                             worktreeRepoID = nil
-                        }
+                        },
+                        onChangeRepo: store.repoRegistry.count > 1 ? {
+                            worktreeRepoID = nil
+                            DispatchQueue.main.async {
+                                isWorktreePickerPresented = true
+                            }
+                        } : nil
                     )
                 }
             }
@@ -155,7 +162,23 @@ struct WorkspaceInspectorView: View {
                     Label("Add Repository", systemImage: "folder.badge.plus")
                 }
 
-                Button(action: { isWorktreePickerPresented = true }) {
+                Button(action: {
+                    let workspaceRepoIDs = Set(workspace.repoAssociations.map(\.repoID))
+                    let candidateID: UUID? = if workspaceRepoIDs.count == 1 {
+                        workspaceRepoIDs.first
+                    } else if store.repoRegistry.count == 1 {
+                        store.repoRegistry.first?.id
+                    } else {
+                        nil
+                    }
+                    if let candidateID, store.repoRegistry[id: candidateID] != nil {
+                        worktreeRepoID = candidateID
+                        worktreeName = ""
+                        worktreeBranchName = ""
+                    } else {
+                        isWorktreePickerPresented = true
+                    }
+                }) {
                     Label("New Worktree", systemImage: "arrow.triangle.branch")
                 }
             } label: {
@@ -198,6 +221,7 @@ struct WorkspaceInspectorView: View {
             .buttonStyle(.plain)
             .help("Open terminal at this path")
         }
+        .contentShape(Rectangle())
         .contextMenu {
             Button("Remove", role: .destructive) {
                 store.send(.removeWorktreeAssociation(
@@ -270,12 +294,14 @@ struct WorkspaceInspectorView: View {
 /// Sheet for entering a branch name when creating a new worktree.
 struct CreateWorktreeSheet: View {
     let repoName: String
-    let workspaceSlug: String
     let worktreeBasePath: String
     @Binding var worktreeName: String
     @Binding var branchName: String
     let onCreate: () -> Void
     let onCancel: () -> Void
+    var onChangeRepo: (() -> Void)?
+
+    @State private var branchEdited = false
 
     private var isValid: Bool {
         !worktreeName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -287,18 +313,41 @@ struct CreateWorktreeSheet: View {
             Text("New Worktree")
                 .font(.headline)
 
-            Text("Create a worktree for **\(repoName)**")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Create a worktree for **\(repoName)**")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let onChangeRepo {
+                    Button("Change", action: onChangeRepo)
+                        .buttonStyle(.link)
+                        .font(.subheadline)
+                }
+            }
 
-            TextField("Worktree name", text: $worktreeName)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Worktree name")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $worktreeName)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: worktreeName) { _, new in
+                        if !branchEdited { branchName = new }
+                    }
+            }
 
-            TextField("Branch name", text: $branchName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { if isValid { onCreate() } }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Branch name")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $branchName)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: branchName) { _, new in
+                        branchEdited = (new != worktreeName)
+                    }
+                    .onSubmit { if isValid { onCreate() } }
+            }
 
-            Text("\(worktreeBasePath)/\(workspaceSlug)/\(worktreeName.isEmpty ? "<name>" : worktreeName)")
+            Text("\(worktreeBasePath)/\(worktreeName.isEmpty ? "<name>" : worktreeName)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)

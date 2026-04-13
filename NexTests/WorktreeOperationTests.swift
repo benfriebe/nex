@@ -30,8 +30,9 @@ struct WorktreeOperationTests {
 
         await store.send(.createWorktree(workspaceID: wsID, repoID: repoID, worktreeName: "my-tree", branchName: "feature/test"))
 
-        let basePath = (SettingsFeature.defaultWorktreeBasePath as NSString).expandingTildeInPath
-        let expectedPath = "\(basePath)/\(ws.slug)/my-tree"
+        let basePath = SettingsFeature.State()
+            .resolvedWorktreeBasePath(forRepoPath: "/code/repo")
+        let expectedPath = "\(basePath)/my-tree"
         await store.receive(.worktreeCreated(
             workspaceID: wsID,
             repoID: repoID,

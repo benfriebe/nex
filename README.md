@@ -116,7 +116,7 @@ Notifications clear automatically when you focus the app.
 
 ### Worktrees
 
-Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nex/workspaces`).
+Workspaces can be associated with git worktrees across multiple repos. When creating a workspace, pick repos from the registry and optionally create new worktrees. The base path for worktrees is configurable in **Settings > General** (defaults to `~/nex/worktrees/<repo>`). Use the `<repo>` placeholder to substitute the repository root (e.g., `<repo>/.claude/worktrees`).
 
 ### Keyboard shortcuts
 

@@ -48,6 +48,7 @@ struct RepoPickerView: View {
                                     .foregroundStyle(.tertiary)
                             }
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .opacity(isAlready ? 0.5 : 1.0)

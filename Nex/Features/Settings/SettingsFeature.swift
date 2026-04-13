@@ -4,7 +4,7 @@ import Foundation
 
 @Reducer
 struct SettingsFeature {
-    static let defaultWorktreeBasePath = "~/nex/workspaces"
+    static let defaultWorktreeBasePath = "~/nex/worktrees/<repo>"
 
     @ObservableState
     struct State: Equatable {
@@ -15,9 +15,20 @@ struct SettingsFeature {
         var worktreeBasePath: String = SettingsFeature.defaultWorktreeBasePath
         var selectedTheme: NexTheme?
 
-        /// The resolved absolute worktree base path (expands ~).
-        var resolvedWorktreeBasePath: String {
-            (worktreeBasePath as NSString).expandingTildeInPath
+        /// The resolved absolute worktree base path. Expands ~ and substitutes
+        /// the `<repo>` placeholder:
+        /// - At the start of the path, `<repo>` resolves to the full repository path.
+        /// - Elsewhere in the path, `<repo>` resolves to the repository's directory name.
+        func resolvedWorktreeBasePath(forRepoPath repoPath: String? = nil) -> String {
+            var path = worktreeBasePath
+            if let repoPath, path.hasPrefix("<repo>") {
+                path = repoPath + path.dropFirst("<repo>".count)
+            }
+            if let repoPath {
+                let repoName = (repoPath as NSString).lastPathComponent
+                path = path.replacingOccurrences(of: "<repo>", with: repoName)
+            }
+            return (path as NSString).expandingTildeInPath
         }
     }
 
