@@ -37,7 +37,6 @@ struct NexCommands: Commands {
             Button("Select All Workspaces") {
                 store.send(.selectAllWorkspaces)
             }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
 
             Button("Deselect All Workspaces") {
                 store.send(.clearWorkspaceSelection)
