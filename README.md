@@ -69,7 +69,7 @@ Nex monitors Claude Code sessions through hooks. The install script configures t
   "hooks": {
     "Stop": [{ "hooks": [{ "type": "command", "command": "nex event stop" }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "nex event notification" }] }],
-    "SessionStart": [{ "matcher": "startup", "hooks": [{ "type": "command", "command": "nex event session-start" }] }],
+    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "nex event session-start" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex event start" }] }]
   }
 }

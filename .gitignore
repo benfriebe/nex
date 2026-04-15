@@ -26,3 +26,6 @@ Package.resolved
 
 # Claude
 .claude/
+
+# Python
+__pycache__/

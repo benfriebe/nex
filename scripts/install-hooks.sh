@@ -4,6 +4,7 @@ set -euo pipefail
 # Install nex CLI and configure Claude Code hooks.
 # Run this after installing Nex.app.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_PATH="/Applications/Nex.app"
 BINARY="nex"
 INSTALL_DIR="/usr/local/bin"
@@ -62,7 +63,7 @@ HOOKS='{
     ],
     "SessionStart": [
       {
-        "matcher": "startup",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
@@ -85,21 +86,7 @@ HOOKS='{
 }'
 
 if [ -f "$SETTINGS_FILE" ]; then
-    # Merge hooks into existing settings using python3 (ships with macOS)
-    python3 -c "
-import json, sys
-
-with open('$SETTINGS_FILE', 'r') as f:
-    settings = json.load(f)
-
-new_hooks = json.loads('''$HOOKS''')['hooks']
-settings.setdefault('hooks', {})
-settings['hooks'].update(new_hooks)
-
-with open('$SETTINGS_FILE', 'w') as f:
-    json.dump(settings, f, indent=2)
-    f.write('\n')
-"
+    python3 "$SCRIPT_DIR/merge_hooks.py" "$SETTINGS_FILE" "$HOOKS"
     echo "  Merged hooks into existing $SETTINGS_FILE"
 else
     echo "$HOOKS" | python3 -c "
