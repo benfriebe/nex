@@ -7,7 +7,7 @@ struct WorkspaceListView: View {
     @State private var draggedWorkspaceID: UUID?
     @State private var dragCurrentY: CGFloat = 0
     @State private var dragGrabOffset: CGFloat = 0
-    @State private var measuredRowHeight: CGFloat = 0
+    @State private var rowHeights: [UUID: CGFloat] = [:]
 
     var body: some View {
         WithPerceptionTracking {
@@ -20,8 +20,15 @@ struct WorkspaceListView: View {
                 .coordinateSpace(name: "workspaceList")
                 .padding(.vertical, 4)
             }
-            .onPreferenceChange(RowHeightKey.self) { height in
-                if height > 0 { measuredRowHeight = height }
+            .onPreferenceChange(RowHeightsKey.self) { heights in
+                // Merge so a partial layout pass does not discard previously
+                // measured rows, then drop any ids no longer in the list.
+                let validIDs = Set(store.workspaces.ids)
+                var merged = rowHeights.filter { validIDs.contains($0.key) }
+                for (id, h) in heights where validIDs.contains(id) {
+                    merged[id] = h
+                }
+                rowHeights = merged
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 selectionHeader
@@ -147,10 +154,13 @@ struct WorkspaceListView: View {
             .padding(.horizontal, 8)
             .background(
                 GeometryReader { geo in
-                    Color.clear.preference(key: RowHeightKey.self, value: geo.size.height)
+                    Color.clear.preference(
+                        key: RowHeightsKey.self,
+                        value: [workspaceID: geo.size.height]
+                    )
                 }
             )
-            .offset(y: isDragging ? dragVisualOffset(for: index) : 0)
+            .offset(y: isDragging ? dragVisualOffset(at: index) : 0)
             .zIndex(isDragging ? 1 : 0)
             .opacity(isDragging ? 0.8 : 1)
             .scaleEffect(isDragging ? 1.03 : 1.0)
@@ -159,17 +169,16 @@ struct WorkspaceListView: View {
             .gesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
                     .onChanged { value in
+                        guard allHeightsMeasured else { return }
                         if draggedWorkspaceID == nil {
                             draggedWorkspaceID = workspaceID
-                            dragGrabOffset = value.startLocation.y - CGFloat(index) * measuredRowHeight
+                            dragGrabOffset = value.startLocation.y - restMinY(at: index)
                         }
                         dragCurrentY = value.location.y
 
-                        guard measuredRowHeight > 0 else { return }
                         let currentIdx = store.workspaces.index(id: workspaceID) ?? 0
-                        let targetIdx = max(0, min(store.workspaces.count - 1,
-                                                   Int(value.location.y / measuredRowHeight)))
-                        if targetIdx != currentIdx {
+                        if let targetIdx = targetIndex(forCursorY: value.location.y),
+                           targetIdx != currentIdx {
                             store.send(.moveWorkspace(id: workspaceID, toIndex: targetIdx))
                         }
                     }
@@ -198,9 +207,42 @@ struct WorkspaceListView: View {
         }
     }
 
-    private func dragVisualOffset(for currentIndex: Int) -> CGFloat {
-        guard measuredRowHeight > 0 else { return 0 }
-        return dragCurrentY - dragGrabOffset - CGFloat(currentIndex) * measuredRowHeight
+    private var allHeightsMeasured: Bool {
+        store.workspaces.ids.allSatisfy { rowHeights[$0] != nil }
+    }
+
+    private func dragVisualOffset(at currentIndex: Int) -> CGFloat {
+        guard allHeightsMeasured else { return 0 }
+        return dragCurrentY - dragGrabOffset - restMinY(at: currentIndex)
+    }
+
+    /// Cumulative top edge for a row at `index` in the current display order,
+    /// derived from measured per-row heights (stable per id, so no lag when the
+    /// store reorders mid-drag).
+    private func restMinY(at index: Int) -> CGFloat {
+        let ids = store.workspaces.ids
+        var y: CGFloat = 0
+        for i in 0..<min(index, ids.count) {
+            y += rowHeights[ids[i]] ?? 0
+        }
+        return y
+    }
+
+    /// Find the index whose vertical midpoint the cursor has crossed past.
+    /// Returns nil if any row's height has not yet been measured, so callers
+    /// don't reorder based on a partial layout.
+    private func targetIndex(forCursorY cursorY: CGFloat) -> Int? {
+        let ids = store.workspaces.ids
+        guard !ids.isEmpty, allHeightsMeasured else { return nil }
+        var y: CGFloat = 0
+        for (i, id) in ids.enumerated() {
+            let h = rowHeights[id] ?? 0
+            if cursorY < y + h / 2 {
+                return i
+            }
+            y += h
+        }
+        return ids.count - 1
     }
 
     /// Aggregate git status: dirty if any association is dirty, clean if all clean, unknown otherwise.
@@ -223,10 +265,9 @@ struct WorkspaceListView: View {
     }
 }
 
-private struct RowHeightKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if next > value { value = next }
+private struct RowHeightsKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [UUID: CGFloat] = [:]
+    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
