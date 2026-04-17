@@ -7,7 +7,20 @@ struct WorkspaceListView: View {
     @State private var draggedWorkspaceID: UUID?
     @State private var dragCurrentY: CGFloat = 0
     @State private var dragGrabOffset: CGFloat = 0
+    /// Current drop target under the cursor. Drives the indicator overlay.
+    /// For same-container moves we ALSO live-apply via the reducer so the
+    /// other rows shift smoothly under the drag — the indicator renders
+    /// only for cross-container moves where the row is not live-reordered.
+    @State private var currentDropTarget: DropTarget?
     @State private var rowHeights: [SidebarID: CGFloat] = [:]
+
+    /// Vertical padding inside the ScrollView's VStack. Drop zones are
+    /// computed in the same coordinate space, so they shift by this
+    /// amount from the VStack's (0,0) origin.
+    private static let contentVerticalPadding: CGFloat = 4
+    /// Approximate laid-out height of `GroupEmptyRow`; must match
+    /// `topLevelItemHeight` and the empty-row layout.
+    private static let groupEmptyRowHeight: CGFloat = 28
 
     var body: some View {
         WithPerceptionTracking {
@@ -41,6 +54,9 @@ struct WorkspaceListView: View {
                     .padding(.vertical, 4)
                     .frame(minHeight: outer.size.height, alignment: .top)
                     .animation(.easeInOut(duration: 0.1), value: store.state.renderedEntries)
+                    .overlay(alignment: .topLeading) {
+                        dropIndicatorOverlay
+                    }
                 }
                 .onPreferenceChange(RowHeightsKey.self) { heights in
                     let validIDs = validSidebarIDs
@@ -349,13 +365,6 @@ struct WorkspaceListView: View {
             let workspaceID = workspaceStore.state.id
             let flatIndex = store.workspaces.index(id: workspaceID) ?? 0
             let isDragging = draggedWorkspaceID == workspaceID
-            // Drag is restricted to top-level workspaces in Phase 2. Grouped
-            // workspaces become draggable in Phase 4 with proper drop-target
-            // resolution. The gate lives inside `.onChanged` so the gesture is
-            // always attached (conditional `.gesture` caused every row's drag
-            // to fail — likely due to the optional-Gesture overload).
-            let dragEnabled = depth == 0
-            let topLevelIndex = store.topLevelOrder.firstIndex(of: .workspace(workspaceID)) ?? 0
 
             let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
 
@@ -381,7 +390,7 @@ struct WorkspaceListView: View {
                     )
                 }
             )
-            .offset(y: isDragging ? dragVisualOffset(atTopLevelIndex: topLevelIndex) : 0)
+            .offset(y: isDragging ? dragCurrentY - dragGrabOffset - workspaceStartY(workspaceID) : 0)
             .zIndex(isDragging ? 1 : 0)
             .opacity(isDragging ? 0.8 : 1)
             .scaleEffect(isDragging ? 1.03 : 1.0)
@@ -390,25 +399,43 @@ struct WorkspaceListView: View {
             .gesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
                     .onChanged { value in
-                        guard dragEnabled, allHeightsMeasured else { return }
-                        let currentTopIdx = store.topLevelOrder
-                            .firstIndex(of: .workspace(workspaceID)) ?? 0
+                        guard allHeightsMeasured else { return }
                         if draggedWorkspaceID == nil {
+                            let startY = workspaceStartY(workspaceID)
                             draggedWorkspaceID = workspaceID
-                            dragGrabOffset = value.startLocation.y - restMinY(atTopLevelIndex: currentTopIdx)
+                            dragGrabOffset = value.startLocation.y - startY
                         }
                         dragCurrentY = value.location.y
-
-                        if let targetIdx = targetTopLevelIndex(forCursorY: value.location.y),
-                           targetIdx != currentTopIdx {
-                            store.send(.moveWorkspace(id: workspaceID, toIndex: targetIdx))
+                        let target = resolveCurrentDropTarget(
+                            cursorY: value.location.y,
+                            draggedID: workspaceID
+                        )
+                        currentDropTarget = target
+                        // Live-apply only same-container moves (top-level
+                        // reorder or within-same-group reorder). Cross-
+                        // container moves wait for release so the dragged
+                        // row doesn't teleport into a group mid-drag —
+                        // the indicator line/tint shows intent instead.
+                        if let target,
+                           isSameContainerMove(target: target, sourceID: workspaceID)
+                        {
+                            applyDropTarget(target, workspaceID: workspaceID)
                         }
                     }
                     .onEnded { _ in
+                        let target = currentDropTarget
+                        let sourceID = workspaceID
+                        let isCrossContainer = target.map {
+                            !isSameContainerMove(target: $0, sourceID: sourceID)
+                        } ?? false
                         withAnimation(.easeInOut(duration: 0.15)) {
                             draggedWorkspaceID = nil
                             dragCurrentY = 0
                             dragGrabOffset = 0
+                            currentDropTarget = nil
+                        }
+                        if let target, isCrossContainer {
+                            applyDropTarget(target, workspaceID: sourceID)
                         }
                     }
             )
@@ -466,7 +493,7 @@ struct WorkspaceListView: View {
             let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
             if children.isEmpty {
                 // GroupEmptyRow is not measured; its approximate laid-out height.
-                h += 28
+                h += Self.groupEmptyRowHeight
             } else {
                 for childID in children {
                     h += rowHeights[.workspace(childID)] ?? 0
@@ -476,35 +503,196 @@ struct WorkspaceListView: View {
         }
     }
 
-    private func dragVisualOffset(atTopLevelIndex currentIndex: Int) -> CGFloat {
-        guard allHeightsMeasured else { return 0 }
-        return dragCurrentY - dragGrabOffset - restMinY(atTopLevelIndex: currentIndex)
-    }
-
-    /// Cumulative top edge for the top-level entry at `index`.
-    private func restMinY(atTopLevelIndex index: Int) -> CGFloat {
-        let items = store.topLevelOrder
-        var y: CGFloat = 0
-        for i in 0 ..< min(index, items.count) {
-            y += topLevelItemHeight(items[i])
+    /// Y of the resting top edge of the given workspace row in the drag
+    /// coordinate space. Walks `topLevelOrder` and descends into expanded
+    /// groups as needed. Returns `contentVerticalPadding` offset + cumulative
+    /// row heights.
+    private func workspaceStartY(_ id: UUID) -> CGFloat {
+        var y: CGFloat = Self.contentVerticalPadding
+        for entry in store.topLevelOrder {
+            switch entry {
+            case .workspace(let wid):
+                if wid == id { return y }
+                y += rowHeights[.workspace(wid)] ?? 0
+            case .group(let gid):
+                y += rowHeights[.group(gid)] ?? 0
+                guard let group = store.groups[id: gid], !group.isCollapsed else { continue }
+                let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
+                if children.isEmpty {
+                    y += Self.groupEmptyRowHeight
+                } else {
+                    for childID in children {
+                        if childID == id { return y }
+                        y += rowHeights[.workspace(childID)] ?? 0
+                    }
+                }
+            }
         }
         return y
     }
 
-    /// Find the top-level slot whose vertical midpoint the cursor has crossed.
-    /// Returns nil while any required row height is still unmeasured.
-    private func targetTopLevelIndex(forCursorY cursorY: CGFloat) -> Int? {
-        let items = store.topLevelOrder
-        guard !items.isEmpty, allHeightsMeasured else { return nil }
-        var y: CGFloat = 0
-        for (i, item) in items.enumerated() {
-            let h = topLevelItemHeight(item)
-            if cursorY < y + h / 2 {
-                return i
+    /// Resolve the DropTarget under the cursor during an active drag.
+    private func resolveCurrentDropTarget(cursorY: CGFloat, draggedID: UUID) -> DropTarget? {
+        let zones = dropZones(
+            topLevelOrder: store.topLevelOrder,
+            groups: store.groups,
+            workspaces: store.workspaces,
+            rowHeights: rowHeights,
+            draggedID: draggedID,
+            startY: Self.contentVerticalPadding,
+            emptyPlaceholderHeight: Self.groupEmptyRowHeight
+        )
+        return resolveDropTarget(zones: zones, cursorY: cursorY)
+    }
+
+    /// Overlay rendered inside the VStack's coordinate space during a
+    /// drag. Shows a 2pt accent line for between-rows drops and a
+    /// subtle tint on the group header for onto-group drops.
+    ///
+    /// Same-container moves are live-reordered via the reducer, so the
+    /// neighbouring rows animate into place; the indicator would be
+    /// redundant and is suppressed. Cross-container moves (e.g.
+    /// dragging a top-level workspace into a group) are previewed, so
+    /// the indicator shows the intended landing spot.
+    @ViewBuilder
+    private var dropIndicatorOverlay: some View {
+        if let draggedID = draggedWorkspaceID,
+           let target = currentDropTarget,
+           !isSameContainerMove(target: target, sourceID: draggedID)
+        {
+            let zones = dropZones(
+                topLevelOrder: store.topLevelOrder,
+                groups: store.groups,
+                workspaces: store.workspaces,
+                rowHeights: rowHeights,
+                draggedID: draggedID,
+                startY: Self.contentVerticalPadding,
+                emptyPlaceholderHeight: Self.groupEmptyRowHeight
+            )
+
+            switch target {
+            case .topLevel, .intoGroup:
+                if let y = dropIndicatorLineY(for: target, zones: zones) {
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(height: 2)
+                        .padding(.horizontal, 8)
+                        .offset(y: y - 1)
+                        .allowsHitTesting(false)
+                }
+            case .ontoGroupHeader(let gid):
+                if let (yTop, yBottom) = groupHeaderYRange(groupID: gid, zones: zones) {
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.18))
+                        .frame(height: yBottom - yTop)
+                        .offset(y: yTop)
+                        .allowsHitTesting(false)
+                }
             }
-            y += h
         }
-        return items.count - 1
+    }
+
+    /// Y coordinate (in drag coordinate space) where the between-rows
+    /// drop line should render. Nil for `.ontoGroupHeader` targets,
+    /// which render as a tint instead.
+    private func dropIndicatorLineY(for target: DropTarget, zones: [DropZone]) -> CGFloat? {
+        switch target {
+        case .topLevel(let index):
+            // Find the zone whose post-remove top-level index equals `index`
+            // (drop appears at its top edge).
+            for zone in zones {
+                switch zone.kind {
+                case .topLevelWorkspace(_, let postIdx) where postIdx == index:
+                    return zone.yTop
+                case .groupHeader(_, let postIdx) where postIdx == index:
+                    return zone.yTop
+                default:
+                    continue
+                }
+            }
+            // `index` past the last entry — drop at end; use bottom of the
+            // last top-level zone.
+            var lastY: CGFloat?
+            for zone in zones {
+                switch zone.kind {
+                case .topLevelWorkspace, .groupHeader:
+                    lastY = zone.yBottom
+                default:
+                    continue
+                }
+            }
+            return lastY
+
+        case .intoGroup(let gid, let index):
+            var lastChildBottom: CGFloat?
+            for zone in zones {
+                switch zone.kind {
+                case .groupChild(let zGid, _, let childIdx) where zGid == gid:
+                    if childIdx == index { return zone.yTop }
+                    lastChildBottom = zone.yBottom
+                case .groupEmpty(let zGid) where zGid == gid:
+                    return zone.yTop
+                default:
+                    continue
+                }
+            }
+            return lastChildBottom
+
+        case .ontoGroupHeader:
+            return nil
+        }
+    }
+
+    private func groupHeaderYRange(groupID: UUID, zones: [DropZone]) -> (CGFloat, CGFloat)? {
+        for zone in zones {
+            if case .groupHeader(let g, _) = zone.kind, g == groupID {
+                return (zone.yTop, zone.yBottom)
+            }
+        }
+        return nil
+    }
+
+    /// True when applying `target` keeps the workspace in its current
+    /// container (top-level, or the same group). Same-container moves
+    /// get live-applied during drag so neighbouring rows animate; cross-
+    /// container moves are deferred until release.
+    private func isSameContainerMove(target: DropTarget, sourceID: UUID) -> Bool {
+        let sourceGroupID = store.state.groupID(forWorkspace: sourceID)
+        switch target {
+        case .topLevel:
+            return sourceGroupID == nil
+        case .intoGroup(let gid, _):
+            return sourceGroupID == gid
+        case .ontoGroupHeader:
+            return false
+        }
+    }
+
+    /// Apply a resolved DropTarget via the appropriate reducer action.
+    /// Uses `.moveWorkspace` for same-top-level reorders (preserves the
+    /// `state.workspaces` visual-order mirror that row badges rely on);
+    /// falls through to `.moveWorkspaceToGroup` for every case that
+    /// touches a group.
+    private func applyDropTarget(_ target: DropTarget, workspaceID: UUID) {
+        let sourceGroupID = store.state.groupID(forWorkspace: workspaceID)
+        switch target {
+        case .topLevel(let index):
+            if sourceGroupID == nil {
+                store.send(.moveWorkspace(id: workspaceID, toIndex: index))
+            } else {
+                store.send(.moveWorkspaceToGroup(
+                    workspaceID: workspaceID, groupID: nil, index: index
+                ))
+            }
+        case .intoGroup(let groupID, let index):
+            store.send(.moveWorkspaceToGroup(
+                workspaceID: workspaceID, groupID: groupID, index: index
+            ))
+        case .ontoGroupHeader(let groupID):
+            store.send(.moveWorkspaceToGroup(
+                workspaceID: workspaceID, groupID: groupID, index: nil
+            ))
+        }
     }
 
     /// Aggregate git status: dirty if any association is dirty, clean if all clean, unknown otherwise.
