@@ -265,8 +265,12 @@ struct WorkspaceDropTargetTests {
         #expect(afterC == .topLevel(index: 3))
     }
 
-    /// Cursor above the first row or well below the last → nil.
-    @Test func cursorOutsideZonesYieldsNil() {
+    /// Cursor above the first zone (inside the source's own gap) → nil,
+    /// so the same-container live-reorder doesn't flicker back to start.
+    /// Cursor below the last zone → drop at end, so users can drop
+    /// AFTER the final top-level entry (especially a group, which
+    /// otherwise has no row below it to target).
+    @Test func cursorBelowZonesFallsThroughToEnd() {
         let a = Self.makeWorkspace(id: Self.wsA)
         let b = Self.makeWorkspace(id: Self.wsB)
         let topLevelOrder: [SidebarID] = [.workspace(Self.wsA), .workspace(Self.wsB)]
@@ -280,8 +284,40 @@ struct WorkspaceDropTargetTests {
             draggedID: Self.wsA,
             startY: Self.startY
         )
+        // Above (in the source's vacated slot) stays nil.
         #expect(resolveDropTarget(zones: zones, cursorY: 0) == nil)
-        #expect(resolveDropTarget(zones: zones, cursorY: 500) == nil)
+        // Well below the last zone resolves to topLevel(end) so drop-at-
+        // end works when the final entry is a group.
+        #expect(resolveDropTarget(zones: zones, cursorY: 500) == .topLevel(index: 1))
+    }
+
+    /// The motivating bug: workspace cannot be dropped below the final
+    /// group in the sidebar. Cursor anywhere below the group's bottom
+    /// edge should resolve to drop-at-end.
+    @Test func cursorBelowTrailingGroupDropsAtTopLevelEnd() {
+        let a = Self.makeWorkspace(id: Self.wsA)
+        let group = WorkspaceGroup(
+            id: Self.groupG,
+            name: "G",
+            isCollapsed: true,
+            childOrder: []
+        )
+        // Layout: [A, G] — G is the last entry.
+        let topLevelOrder: [SidebarID] = [.workspace(Self.wsA), .group(Self.groupG)]
+        let rowHeights = heights(for: [.workspace(Self.wsA), .group(Self.groupG)])
+
+        let zones = dropZones(
+            topLevelOrder: topLevelOrder,
+            groups: [group],
+            workspaces: [a],
+            rowHeights: rowHeights,
+            draggedID: Self.wsA,
+            startY: Self.startY
+        )
+        // A is source. Zones: G header at y 24..44 (post-idx 0).
+        // Cursor at 200 (well below G's bottom): drop at end.
+        // Post-remove topLevelOrder is [G] (1 entry), so drop-at-end = index 1.
+        #expect(resolveDropTarget(zones: zones, cursorY: 200) == .topLevel(index: 1))
     }
 
     // MARK: - Spring-load
@@ -323,6 +359,132 @@ struct WorkspaceDropTargetTests {
         // No groupChild zones because the group is collapsed.
         let hasChildZones = zones.contains { if case .groupChild = $0.kind { true } else { false } }
         #expect(hasChildZones == false)
+    }
+
+    // MARK: - topLevelDropZones (group drag)
+
+    /// A top-level span covers the *full extent* of each non-source entry.
+    /// For an expanded group that means header + children's heights.
+    @Test func topLevelSpansCoverFullGroupBlock() {
+        let a = Self.makeWorkspace(id: Self.wsA)
+        let b = Self.makeWorkspace(id: Self.wsB)
+        let c = Self.makeWorkspace(id: Self.wsC)
+        let groupG = WorkspaceGroup(
+            id: Self.groupG,
+            name: "G",
+            isCollapsed: false,
+            childOrder: [Self.wsB, Self.wsC]
+        )
+        let groupH = WorkspaceGroup(
+            id: Self.groupH,
+            name: "H",
+            isCollapsed: true,
+            childOrder: []
+        )
+        let topLevelOrder: [SidebarID] = [
+            .workspace(Self.wsA),
+            .group(Self.groupG),
+            .group(Self.groupH)
+        ]
+        let rowHeights = heights(for: [
+            .workspace(Self.wsA),
+            .group(Self.groupG),
+            .workspace(Self.wsB),
+            .workspace(Self.wsC),
+            .group(Self.groupH)
+        ])
+
+        // Drag group H (empty, collapsed). H is skipped; spans are A
+        // (workspace) and G (expanded block: header + 2 children).
+        let spans = topLevelDropZones(
+            topLevelOrder: topLevelOrder,
+            groups: [groupG, groupH],
+            workspaces: [a, b, c],
+            rowHeights: rowHeights,
+            draggedGroupID: Self.groupH,
+            startY: Self.startY
+        )
+        #expect(spans.count == 2)
+        // A span: y 4..24 (row height 20).
+        #expect(spans[0].yTop == 4)
+        #expect(spans[0].yBottom == 24)
+        #expect(spans[0].postRemoveTopIndex == 0)
+        // G block: header (24..44) + B (44..64) + C (64..84) = y 24..84.
+        #expect(spans[1].yTop == 24)
+        #expect(spans[1].yBottom == 84)
+        #expect(spans[1].postRemoveTopIndex == 1)
+    }
+
+    /// The source group is visually collapsed during its own drag, so its
+    /// block shrinks to just the header regardless of `isCollapsed`.
+    @Test func topLevelSpansSkipSourceGroupBlockHeight() {
+        let a = Self.makeWorkspace(id: Self.wsA)
+        let b = Self.makeWorkspace(id: Self.wsB)
+        let groupG = WorkspaceGroup(
+            id: Self.groupG,
+            name: "G",
+            isCollapsed: false,
+            childOrder: [Self.wsB]
+        )
+        let topLevelOrder: [SidebarID] = [
+            .group(Self.groupG),
+            .workspace(Self.wsA)
+        ]
+        let rowHeights = heights(for: [
+            .group(Self.groupG),
+            .workspace(Self.wsB),
+            .workspace(Self.wsA)
+        ])
+
+        let spans = topLevelDropZones(
+            topLevelOrder: topLevelOrder,
+            groups: [groupG],
+            workspaces: [a, b],
+            rowHeights: rowHeights,
+            draggedGroupID: Self.groupG,
+            startY: Self.startY
+        )
+        // G is source: skipped, but advances yTop by just the header (20),
+        // not by header + child. So A's span starts at y = 4 + 20 = 24.
+        #expect(spans.count == 1)
+        #expect(spans[0].yTop == 24)
+        #expect(spans[0].yBottom == 44)
+        #expect(spans[0].postRemoveTopIndex == 0)
+    }
+
+    /// Resolver returns topLevel index for group drags; ignores group/child
+    /// zones entirely.
+    @Test func resolveTopLevelDropTargetHalves() {
+        let a = Self.makeWorkspace(id: Self.wsA)
+        let b = Self.makeWorkspace(id: Self.wsB)
+        let groupG = WorkspaceGroup(id: Self.groupG, name: "G", isCollapsed: true, childOrder: [])
+        let topLevelOrder: [SidebarID] = [
+            .workspace(Self.wsA),
+            .workspace(Self.wsB),
+            .group(Self.groupG)
+        ]
+        let rowHeights = heights(for: [
+            .workspace(Self.wsA),
+            .workspace(Self.wsB),
+            .group(Self.groupG)
+        ])
+
+        let spans = topLevelDropZones(
+            topLevelOrder: topLevelOrder,
+            groups: [groupG],
+            workspaces: [a, b],
+            rowHeights: rowHeights,
+            draggedGroupID: Self.groupG,
+            startY: Self.startY
+        )
+        // A 4..24 (idx 0), B 24..44 (idx 1), G skipped.
+        // Cursor at 10 = top half of A → topLevel(0).
+        #expect(resolveTopLevelDropTarget(spans: spans, cursorY: 10) == .topLevel(index: 0))
+        // Cursor at 40 = bottom half of B → topLevel(2).
+        #expect(resolveTopLevelDropTarget(spans: spans, cursorY: 40) == .topLevel(index: 2))
+        // Cursor well below all spans → drop at end so group drags can
+        // land after the final top-level entry.
+        #expect(resolveTopLevelDropTarget(spans: spans, cursorY: 200) == .topLevel(index: 2))
     }
 
     /// When `springLoadedGroupID` matches a collapsed group, the walker

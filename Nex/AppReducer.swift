@@ -164,6 +164,7 @@ struct AppReducer {
         case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil)
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
+        case moveGroup(id: UUID, toIndex: Int)
         case setActiveWorkspace(UUID)
         case switchToWorkspaceByIndex(Int)
         case switchToNextWorkspace
@@ -461,6 +462,21 @@ struct AppReducer {
                     state.workspaces.insert(workspace, at: flatTarget)
                 }
 
+                return .send(.persistState)
+
+            case .moveGroup(let id, let toIndex):
+                // Reorders `.group(id)` within `topLevelOrder`. Groups only
+                // ever live at the top level (no nesting), so this action
+                // doesn't touch `state.workspaces` or `childOrder`. Index
+                // follows the post-remove convention that matches
+                // `.moveWorkspace`.
+                guard let fromTop = state.topLevelOrder.firstIndex(of: .group(id)),
+                      fromTop != toIndex,
+                      toIndex >= 0,
+                      toIndex < state.topLevelOrder.count
+                else { return .none }
+                let entry = state.topLevelOrder.remove(at: fromTop)
+                state.topLevelOrder.insert(entry, at: min(toIndex, state.topLevelOrder.endIndex))
                 return .send(.persistState)
 
             case .setActiveWorkspace(let id):

@@ -526,4 +526,54 @@ struct WorkspaceGroupCRUDTests {
             #expect(state.renamingGroupID == nil)
         }
     }
+
+    // MARK: - moveGroup
+
+    /// `moveGroup` reorders `.group(id)` inside `topLevelOrder`; doesn't
+    /// touch `state.workspaces` or `childOrder`.
+    @Test func moveGroupReordersTopLevelEntries() async {
+        let wsA = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let groupA = WorkspaceGroup(id: Self.groupA, name: "G1", childOrder: [])
+        let groupB = WorkspaceGroup(id: Self.groupB, name: "G2", childOrder: [])
+        let store = makeStore(
+            workspaces: [wsA],
+            groups: [groupA, groupB],
+            topLevelOrder: [
+                .workspace(Self.wsID1),
+                .group(Self.groupA),
+                .group(Self.groupB)
+            ]
+        )
+
+        // Move groupA from index 1 → index 2 (post-remove). Result: [ws, G2, G1].
+        await store.send(.moveGroup(id: Self.groupA, toIndex: 2)) { state in
+            #expect(state.topLevelOrder == [
+                .workspace(Self.wsID1),
+                .group(Self.groupB),
+                .group(Self.groupA)
+            ])
+        }
+    }
+
+    @Test func moveGroupSameIndexIsNoOp() async {
+        let groupA = WorkspaceGroup(id: Self.groupA, name: "G", childOrder: [])
+        let store = makeStore(
+            groups: [groupA],
+            topLevelOrder: [.group(Self.groupA)]
+        )
+
+        // No state change expected when fromIdx == toIndex.
+        await store.send(.moveGroup(id: Self.groupA, toIndex: 0))
+    }
+
+    @Test func moveGroupIgnoresOutOfBoundsIndex() async {
+        let groupA = WorkspaceGroup(id: Self.groupA, name: "G", childOrder: [])
+        let store = makeStore(
+            groups: [groupA],
+            topLevelOrder: [.group(Self.groupA)]
+        )
+
+        // toIndex == topLevelOrder.count (1) is out of bounds per guard.
+        await store.send(.moveGroup(id: Self.groupA, toIndex: 1))
+    }
 }

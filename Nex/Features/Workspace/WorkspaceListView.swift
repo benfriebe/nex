@@ -5,6 +5,10 @@ import SwiftUI
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @State private var draggedWorkspaceID: UUID?
+    /// Group currently being dragged (drag on a group header). Mutually
+    /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
+    /// `dragGrabOffset`.
+    @State private var draggedGroupID: UUID?
     @State private var dragCurrentY: CGFloat = 0
     @State private var dragGrabOffset: CGFloat = 0
     /// Current drop target under the cursor. Drives the indicator overlay.
@@ -167,37 +171,7 @@ struct WorkspaceListView: View {
             }
         case .groupHeader(let groupID):
             if let group = store.groups[id: groupID] {
-                let count = group.childOrder.compactMap { store.workspaces[id: $0] }.count
-                GroupHeaderRow(
-                    name: group.name,
-                    color: group.color,
-                    isCollapsed: group.isCollapsed,
-                    workspaceCount: count,
-                    isRenaming: store.renamingGroupID == groupID,
-                    onToggleCollapse: {
-                        // If a different group is being renamed, clicking any
-                        // row should commit its name via focus loss.
-                        if let rid = store.renamingGroupID, rid != groupID {
-                            NSApp.keyWindow?.makeFirstResponder(nil)
-                        }
-                        store.send(.toggleGroupCollapse(groupID))
-                    },
-                    onCommitRename: { newName in
-                        store.send(.renameGroup(id: groupID, name: newName))
-                    },
-                    onCancelRename: { store.send(.setRenamingGroupID(nil)) }
-                )
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: RowHeightsKey.self,
-                            value: [.group(groupID): geo.size.height]
-                        )
-                    }
-                )
-                .contextMenu {
-                    groupContextMenu(groupID: groupID, group: group)
-                }
+                groupHeaderEntry(groupID: groupID, group: group)
             }
         case .groupEmpty(let groupID):
             GroupEmptyRow()
@@ -208,6 +182,87 @@ struct WorkspaceListView: View {
                     }
                 )
                 .id("empty-\(groupID.uuidString)")
+        }
+    }
+
+    /// Group header with live drag + visual treatment. The DragGesture is
+    /// only attached when the group is NOT being renamed — otherwise a
+    /// click-drag inside the inline rename TextField would start a group
+    /// reorder instead of selecting text / moving the caret.
+    @ViewBuilder
+    private func groupHeaderEntry(groupID: UUID, group: WorkspaceGroup) -> some View {
+        let count = group.childOrder.compactMap { store.workspaces[id: $0] }.count
+        let isRenamingThis = store.renamingGroupID == groupID
+        let isDraggingThisGroup = draggedGroupID == groupID
+        let row = GroupHeaderRow(
+            name: group.name,
+            color: group.color,
+            isCollapsed: group.isCollapsed,
+            workspaceCount: count,
+            isRenaming: isRenamingThis,
+            onToggleCollapse: {
+                // If a different group is being renamed, clicking any row
+                // should commit its name via focus loss.
+                if let rid = store.renamingGroupID, rid != groupID {
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+                store.send(.toggleGroupCollapse(groupID))
+            },
+            onCommitRename: { newName in
+                store.send(.renameGroup(id: groupID, name: newName))
+            },
+            onCancelRename: { store.send(.setRenamingGroupID(nil)) }
+        )
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: RowHeightsKey.self,
+                    value: [.group(groupID): geo.size.height]
+                )
+            }
+        )
+        .offset(y: isDraggingThisGroup ? dragCurrentY - dragGrabOffset - groupStartY(groupID) : 0)
+        .zIndex(isDraggingThisGroup ? 1 : 0)
+        .opacity(isDraggingThisGroup ? 0.8 : 1)
+        .scaleEffect(isDraggingThisGroup ? 1.03 : 1.0)
+        .shadow(color: isDraggingThisGroup ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
+        .animation(isDraggingThisGroup ? .none : .easeInOut(duration: 0.15), value: store.topLevelOrder)
+
+        if isRenamingThis {
+            row.contextMenu {
+                groupContextMenu(groupID: groupID, group: group)
+            }
+        } else {
+            row
+                .gesture(
+                    DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
+                        .onChanged { value in
+                            guard allHeightsMeasured else { return }
+                            if draggedGroupID == nil {
+                                let startY = groupStartY(groupID)
+                                draggedGroupID = groupID
+                                dragGrabOffset = value.startLocation.y - startY
+                            }
+                            dragCurrentY = value.location.y
+                            let target = resolveCurrentTopLevelDropTarget(
+                                cursorY: value.location.y,
+                                draggedGroupID: groupID
+                            )
+                            if case .topLevel(let idx) = target {
+                                store.send(.moveGroup(id: groupID, toIndex: idx))
+                            }
+                        }
+                        .onEnded { _ in
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                draggedGroupID = nil
+                                dragCurrentY = 0
+                                dragGrabOffset = 0
+                            }
+                        }
+                )
+                .contextMenu {
+                    groupContextMenu(groupID: groupID, group: group)
+                }
         }
     }
 
@@ -488,9 +543,13 @@ struct WorkspaceListView: View {
     }
 
     /// Treats a group as expanded if its persistent state says so OR
-    /// the drag has spring-loaded it.
+    /// the drag has spring-loaded it. The source of a group drag is
+    /// rendered as collapsed for the duration of the drag so the drag
+    /// "unit" is just the header and neighbouring rows can slide up
+    /// into the vacated space.
     private func isEffectivelyExpanded(_ group: WorkspaceGroup) -> Bool {
-        !group.isCollapsed || springLoadedGroupID == group.id
+        if draggedGroupID == group.id { return false }
+        return !group.isCollapsed || springLoadedGroupID == group.id
     }
 
     /// Rendered sidebar entries as the view should draw them right now.
@@ -590,6 +649,46 @@ struct WorkspaceListView: View {
             }
         }
         return y
+    }
+
+    /// Y of the group header's resting top edge in drag coordinate space.
+    private func groupStartY(_ groupID: UUID) -> CGFloat {
+        var y: CGFloat = Self.contentVerticalPadding
+        for entry in store.topLevelOrder {
+            switch entry {
+            case .workspace(let wid):
+                y += rowHeights[.workspace(wid)] ?? 0
+            case .group(let gid):
+                if gid == groupID { return y }
+                y += rowHeights[.group(gid)] ?? 0
+                guard let group = store.groups[id: gid], isEffectivelyExpanded(group) else { continue }
+                let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
+                if children.isEmpty {
+                    y += Self.groupEmptyRowHeight
+                } else {
+                    for childID in children {
+                        y += rowHeights[.workspace(childID)] ?? 0
+                    }
+                }
+            }
+        }
+        return y
+    }
+
+    /// Resolve the DropTarget for an active group drag (only top-level
+    /// positions are valid — groups never nest inside other groups).
+    private func resolveCurrentTopLevelDropTarget(cursorY: CGFloat, draggedGroupID: UUID) -> DropTarget? {
+        let spans = topLevelDropZones(
+            topLevelOrder: store.topLevelOrder,
+            groups: store.groups,
+            workspaces: store.workspaces,
+            rowHeights: rowHeights,
+            draggedGroupID: draggedGroupID,
+            springLoadedGroupID: springLoadedGroupID,
+            startY: Self.contentVerticalPadding,
+            emptyPlaceholderHeight: Self.groupEmptyRowHeight
+        )
+        return resolveTopLevelDropTarget(spans: spans, cursorY: cursorY)
     }
 
     /// Resolve the DropTarget under the cursor during an active drag.
