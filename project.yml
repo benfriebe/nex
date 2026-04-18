@@ -43,6 +43,9 @@ targets:
   Nex:
     type: application
     platform: macOS
+    scheme:
+      testTargets:
+        - NexTests
     sources:
       - path: Nex
         excludes:

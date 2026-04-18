@@ -55,7 +55,7 @@ struct WorkspaceDropTargetTests {
             groups: [],
             workspaces: workspaces,
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // Source A is skipped; zones = [B at post-index 0, C at post-index 1].
@@ -77,7 +77,7 @@ struct WorkspaceDropTargetTests {
             groups: [],
             workspaces: [a, b, c],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // Cursor at 40 = B's bottom half → drop after B → post-remove index 1.
@@ -97,7 +97,7 @@ struct WorkspaceDropTargetTests {
             groups: [],
             workspaces: [a, b],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // A was at y 4..24. With A as source, that slot has no zone.
@@ -131,7 +131,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a, b],
             rowHeights: rowHeights,
-            draggedID: Self.wsB,
+            draggedIDs: [Self.wsB],
             startY: Self.startY
         )
         // Source B is skipped (at end). Post-remove indices: A=0, G=1.
@@ -152,7 +152,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // Bottom half (cursor at 40): onto group.
@@ -172,7 +172,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY,
             emptyPlaceholderHeight: 28
         )
@@ -207,7 +207,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a, b, c],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // Layout with A as source:
@@ -222,7 +222,11 @@ struct WorkspaceDropTargetTests {
         #expect(bottomHalf == .intoGroup(groupID: Self.groupG, index: 1))
     }
 
-    /// Source in group, dragging to top level.
+    /// Source in group, dragging to top level. Because B is G's only
+    /// child and is the dragged workspace, the walker emits a phantom
+    /// "empty" zone below B's slot so the view's "dummy placeholder
+    /// shifts aside" rendering matches. Subsequent zones sit below
+    /// that phantom.
     @Test func dragFromGroupToTopLevel() {
         let a = Self.makeWorkspace(id: Self.wsA)
         let b = Self.makeWorkspace(id: Self.wsB)
@@ -251,17 +255,24 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a, b, c],
             rowHeights: rowHeights,
-            draggedID: Self.wsB,
+            draggedIDs: [Self.wsB],
             startY: Self.startY
         )
-        // Ys: A 4..24 (top-idx 0), header 24..44 (top-idx 1), B 44..64 skipped,
-        // C 64..84 (top-idx 2).
+        // Ys: A 4..24 (top-idx 0), header 24..44 (top-idx 1),
+        // B 44..64 skipped, phantom placeholder 64..92 (28pt default),
+        // C 92..112 (top-idx 2).
         // Cursor over top half of A (10) → drop before A → topLevel(0).
         let beforeA = resolveDropTarget(zones: zones, cursorY: 10)
         #expect(beforeA == .topLevel(index: 0))
 
-        // Cursor over bottom half of C (80) → drop after C → topLevel(3).
-        let afterC = resolveDropTarget(zones: zones, cursorY: 80)
+        // Cursor inside the phantom placeholder zone (80) → the
+        // walker resolves it as `.intoGroup(G, 0)`, i.e. B can drop
+        // back where it came from.
+        let onPhantom = resolveDropTarget(zones: zones, cursorY: 80)
+        #expect(onPhantom == .intoGroup(groupID: Self.groupG, index: 0))
+
+        // Cursor over bottom half of C (108) → drop after C → topLevel(3).
+        let afterC = resolveDropTarget(zones: zones, cursorY: 108)
         #expect(afterC == .topLevel(index: 3))
     }
 
@@ -281,7 +292,7 @@ struct WorkspaceDropTargetTests {
             groups: [],
             workspaces: [a, b],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // Above (in the source's vacated slot) stays nil.
@@ -311,7 +322,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // A is source. Zones: G header at y 24..44 (post-idx 0).
@@ -353,7 +364,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a, b, c, d],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             startY: Self.startY
         )
         // No groupChild zones because the group is collapsed.
@@ -415,8 +426,10 @@ struct WorkspaceDropTargetTests {
         #expect(spans[1].postRemoveTopIndex == 1)
     }
 
-    /// The source group is visually collapsed during its own drag, so its
-    /// block shrinks to just the header regardless of `isCollapsed`.
+    /// The source group renders as collapsed for the duration of its
+    /// own drag (plan 4d), so its block shrinks to just the header
+    /// regardless of persisted `isCollapsed`. yTop advances only by
+    /// the header height; the children slots collapse out of layout.
     @Test func topLevelSpansSkipSourceGroupBlockHeight() {
         let a = Self.makeWorkspace(id: Self.wsA)
         let b = Self.makeWorkspace(id: Self.wsB)
@@ -444,8 +457,9 @@ struct WorkspaceDropTargetTests {
             draggedGroupID: Self.groupG,
             startY: Self.startY
         )
-        // G is source: skipped, but advances yTop by just the header (20),
-        // not by header + child. So A's span starts at y = 4 + 20 = 24.
+        // G is source: skipped from spans, yTop advances only by the
+        // header (20) because the dragged group is rendered as
+        // collapsed. A's span therefore starts at y = 4 + 20 = 24.
         #expect(spans.count == 1)
         #expect(spans[0].yTop == 24)
         #expect(spans[0].yBottom == 44)
@@ -519,7 +533,7 @@ struct WorkspaceDropTargetTests {
             groups: [group],
             workspaces: [a, b, c, d],
             rowHeights: rowHeights,
-            draggedID: Self.wsA,
+            draggedIDs: [Self.wsA],
             springLoadedGroupID: Self.groupG,
             startY: Self.startY
         )

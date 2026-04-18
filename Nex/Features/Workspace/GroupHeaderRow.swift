@@ -99,12 +99,34 @@ struct GroupHeaderRow: View {
 /// container into a drop target.
 struct GroupEmptyRow: View {
     var body: some View {
-        Text("No workspaces")
-            .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 6)
-            .padding(.leading, 28)
-            .padding(.trailing, 8)
+        HStack(spacing: 8) {
+            // `WorkspaceRowView` at depth 1 inserts a 16pt leading
+            // spacer before its color bar — match it here so the
+            // "No workspaces" text aligns with nested workspaces' names.
+            Spacer().frame(width: 16)
+            // Match `WorkspaceRowView`'s color bar slot (4×24).
+            Color.clear.frame(width: 4, height: 24)
+            // Mirror `WorkspaceRowView`'s 2-line VStack (13pt + 10pt)
+            // so the placeholder's laid-out height equals a workspace
+            // row. Font sizes drive the VStack's intrinsic height and
+            // therefore the whole row's height — the color bar alone
+            // isn't the tallest child. Without this, live-applying a
+            // drag into this empty group jumps the layout by the
+            // difference between the placeholder and a real row.
+            VStack(alignment: .leading, spacing: 1) {
+                Text("No workspaces")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+                Text(" ")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        // 16pt on each side = the 8pt outer padding the workspace row
+        // gets from `WorkspaceListView` plus the 8pt inner padding
+        // `WorkspaceRowView` applies to itself.
+        .padding(.horizontal, 16)
     }
 }

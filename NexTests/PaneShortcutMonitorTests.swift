@@ -46,6 +46,9 @@ struct PaneShortcutMonitorTests {
         appState.workspaces = workspaces
         appState.activeWorkspaceID = activeWorkspaceID
         appState.keybindings = keybindings
+        // Mirror the reducer's load-time backfill — navigation actions
+        // read `visibleWorkspaceOrder`, which is empty without this.
+        appState.topLevelOrder = workspaces.map { .workspace($0.id) }
 
         let store = Store(initialState: appState) {
             AppReducer()

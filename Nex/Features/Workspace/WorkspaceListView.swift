@@ -17,6 +17,12 @@ struct WorkspaceListView: View {
     /// only for cross-container moves where the row is not live-reordered.
     @State private var currentDropTarget: DropTarget?
     @State private var rowHeights: [SidebarID: CGFloat] = [:]
+    /// Measured height of the `GroupEmptyRow` placeholder. Kept in
+    /// sync via `EmptyRowHeightKey` so drag math uses the real laid-
+    /// out value (falls back to `groupEmptyRowHeight` until the first
+    /// emission arrives). Prevents layout jumps when dragging into or
+    /// past an empty group.
+    @State private var measuredEmptyRowHeight: CGFloat?
 
     /// The collapsed group the spring-load timer is currently scheduled
     /// for (or has fired for). Reset when the cursor leaves the group
@@ -29,17 +35,57 @@ struct WorkspaceListView: View {
     /// timer once the cursor has hovered long enough.
     @State private var springLoadedGroupID: UUID?
 
+    /// Ordered list of workspaces being moved together as a unit, when
+    /// the user grabs a row that's part of a multi-selection. Empty for
+    /// single-workspace drags. Multi-drags live-apply only the grabbed
+    /// row during the drag (1-row cursor-tracking gap) and consolidate
+    /// the full selection atomically on release.
+    @State private var multiDragIDs: [UUID] = []
+    /// Non-grabbed members of `multiDragIDs` — collapsed to 0 height
+    /// and removed from layout for the duration of the drag. Makes it
+    /// obvious that the whole selection is moving rather than just the
+    /// grabbed row, and keeps the list from looking like it's leaving
+    /// the other selected rows behind in their original slots.
+    @State private var hiddenMultiDragIDs: Set<UUID> = []
+
+    /// Underlying `NSScrollView` hosting the sidebar content. Captured
+    /// via `ScrollViewFinder` once the view is in a window. Provides
+    /// the authoritative scroll offset + viewport height and is driven
+    /// directly during auto-scroll for pixel-perfect control.
+    @State private var hostScrollView: NSScrollView?
+    /// Active auto-scroll loop during a drag near the viewport edges.
+    @State private var autoScrollTask: Task<Void, Never>?
+    /// Cursor Y in the scroll viewport (viewport-relative), captured on
+    /// every `onChanged`. During auto-scroll the OS won't fire drag
+    /// events (the mouse hasn't moved in screen space), so each tick
+    /// recomputes `dragCurrentY = dragViewportY + scrollOffset` to keep
+    /// the dragged row and drop indicator current as content scrolls
+    /// underneath the stationary cursor.
+    @State private var dragViewportY: CGFloat = 0
+
     /// Vertical padding inside the ScrollView's VStack. Drop zones are
     /// computed in the same coordinate space, so they shift by this
     /// amount from the VStack's (0,0) origin.
     private static let contentVerticalPadding: CGFloat = 4
-    /// Approximate laid-out height of `GroupEmptyRow`; must match
-    /// `topLevelItemHeight` and the empty-row layout.
-    private static let groupEmptyRowHeight: CGFloat = 28
+    /// Approximate laid-out height of `GroupEmptyRow`; kept in sync
+    /// with that view so drop-zone math matches the visual layout.
+    /// Matches `WorkspaceRowView`'s minimum height (24pt color bar +
+    /// 8pt×2 vertical padding) — without this equivalence, live-
+    /// applying a drag into an empty group would jump the layout.
+    private static let groupEmptyRowHeight: CGFloat = 40
     /// How long the cursor must hover over a collapsed group header
     /// before the group auto-expands for the remainder of the drag.
     /// Matches the default `group-spring-delay` in the Phase 4 plan.
     private static let springLoadDelayMillis: Int = 650
+    /// Distance from the viewport top/bottom edge at which auto-scroll
+    /// engages during a drag.
+    private static let autoScrollEdgeThreshold: CGFloat = 40
+    /// Point delta applied per auto-scroll tick. 3pt / 15ms ≈ 200pt/s.
+    /// Small step + short interval keeps the scroll feeling smooth
+    /// (~66fps) while matching the Phase 4 target speed.
+    private static let autoScrollStep: CGFloat = 3
+    /// Auto-scroll tick interval (milliseconds).
+    private static let autoScrollIntervalMillis: Int = 15
 
     var body: some View {
         WithPerceptionTracking {
@@ -47,6 +93,14 @@ struct WorkspaceListView: View {
                 ScrollView {
                     let entries = currentRenderedEntries
                     VStack(spacing: 0) {
+                        // Captures the underlying NSScrollView so auto-scroll
+                        // can drive pixel-perfect scrolling and query
+                        // documentVisibleRect for viewport detection.
+                        ScrollViewFinder { sv in
+                            if hostScrollView !== sv { hostScrollView = sv }
+                        }
+                        .frame(height: 0)
+
                         ForEach(entries) { entry in
                             entryView(for: entry)
                         }
@@ -73,7 +127,10 @@ struct WorkspaceListView: View {
                     .coordinateSpace(name: "workspaceList")
                     .padding(.vertical, 4)
                     .frame(minHeight: outer.size.height, alignment: .top)
-                    .animation(.easeInOut(duration: 0.1), value: entries)
+                    .animation(
+                        .spring(response: 0.35, dampingFraction: 0.8),
+                        value: store.state.visibleWorkspaceOrder
+                    )
                     .overlay(alignment: .topLeading) {
                         dropIndicatorOverlay
                     }
@@ -85,6 +142,9 @@ struct WorkspaceListView: View {
                         merged[id] = h
                     }
                     rowHeights = merged
+                }
+                .onPreferenceChange(EmptyRowHeightKey.self) { h in
+                    if h > 0 { measuredEmptyRowHeight = h }
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -176,12 +236,21 @@ struct WorkspaceListView: View {
         case .groupEmpty(let groupID):
             GroupEmptyRow()
                 .background(
-                    GeometryReader { _ in
-                        // Empty rows don't participate in drag; no preference needed
-                        Color.clear
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: EmptyRowHeightKey.self,
+                            value: geo.size.height
+                        )
                     }
                 )
                 .id("empty-\(groupID.uuidString)")
+                // Animate the placeholder's reorder (idle → phantom
+                // position below the dragged row, and back) in step
+                // with the surrounding workspace rows.
+                .animation(
+                    .spring(response: 0.35, dampingFraction: 0.8),
+                    value: sidebarLayoutKey
+                )
         }
     }
 
@@ -226,7 +295,7 @@ struct WorkspaceListView: View {
         .opacity(isDraggingThisGroup ? 0.8 : 1)
         .scaleEffect(isDraggingThisGroup ? 1.03 : 1.0)
         .shadow(color: isDraggingThisGroup ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
-        .animation(isDraggingThisGroup ? .none : .easeInOut(duration: 0.15), value: store.topLevelOrder)
+        .animation(isDraggingThisGroup ? .none : .spring(response: 0.35, dampingFraction: 0.8), value: store.topLevelOrder)
 
         if isRenamingThis {
             row.contextMenu {
@@ -238,24 +307,41 @@ struct WorkspaceListView: View {
                     DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
                         .onChanged { value in
                             guard allHeightsMeasured else { return }
-                            if draggedGroupID == nil {
-                                let startY = groupStartY(groupID)
-                                draggedGroupID = groupID
-                                dragGrabOffset = value.startLocation.y - startY
+                            // Cursor-tracking state updates must NOT animate
+                            // (VStack has an unconditional `.animation` so
+                            // every state change would otherwise spring).
+                            var liveTxn = Transaction()
+                            liveTxn.disablesAnimations = true
+                            withTransaction(liveTxn) {
+                                if draggedGroupID == nil {
+                                    let startY = groupStartY(groupID)
+                                    draggedGroupID = groupID
+                                    dragGrabOffset = value.startLocation.y - startY
+                                }
+                                dragCurrentY = value.location.y
+                                dragViewportY = value.location.y - (hostScrollView?.documentVisibleRect.origin.y ?? 0)
                             }
-                            dragCurrentY = value.location.y
+                            updateAutoScroll(cursorContentY: value.location.y)
                             let target = resolveCurrentTopLevelDropTarget(
                                 cursorY: value.location.y,
                                 draggedGroupID: groupID
                             )
                             if case .topLevel(let idx) = target {
+                                // Views self-animate via their own
+                                // `.animation(value:)` modifiers keyed
+                                // on sidebarLayoutKey / topLevelOrder;
+                                // wrapping in withAnimation here would
+                                // fight the grabbed group header's
+                                // `.animation(.none)` override.
                                 store.send(.moveGroup(id: groupID, toIndex: idx))
                             }
                         }
                         .onEnded { _ in
-                            withAnimation(.easeInOut(duration: 0.15)) {
+                            cancelAutoScroll()
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                 draggedGroupID = nil
                                 dragCurrentY = 0
+                                dragViewportY = 0
                                 dragGrabOffset = 0
                             }
                         }
@@ -434,10 +520,24 @@ struct WorkspaceListView: View {
     ) -> some View {
         WithPerceptionTracking {
             let workspaceID = workspaceStore.state.id
-            let flatIndex = store.workspaces.index(id: workspaceID) ?? 0
+            // Use the visible sidebar order so the ⌘N badge matches
+            // the navigation action that activates the workspace. A
+            // bulk top-level drag dispatches `.moveWorkspacesToGroup`
+            // which doesn't mirror into `state.workspaces`, so the
+            // old insertion-order index would go stale immediately
+            // after a multi-select drag.
+            let flatIndex = store.state.visibleWorkspaceOrder.firstIndex(of: workspaceID) ?? 0
             let isDragging = draggedWorkspaceID == workspaceID
 
             let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
+            // Show the dragged row nested when the current target is a
+            // preview-only group drop (empty group `.intoGroup` or any
+            // `.ontoGroupHeader`) so the visual matches where the
+            // workspace will actually land on release. For live-applied
+            // targets the state already reflects the new container, so
+            // `depth` is authoritative.
+            let previewNestedInGroup = isDragging && dragPreviewGroupID != nil
+            let effectiveDepth = previewNestedInGroup ? max(depth, 1) : depth
 
             WorkspaceRowView(
                 name: workspaceStore.name,
@@ -450,7 +550,10 @@ struct WorkspaceListView: View {
                 waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
                 hasRunningPanes: workspaceStore.panes.contains { $0.status == .running },
                 isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
-                leadingInset: depth > 0 ? 16 : 0
+                // Use a single interpolated value so the depth change
+                // slides smoothly. 24pt matches the old layout's
+                // 16pt Spacer + 8pt HStack spacing.
+                leadingInset: effectiveDepth > 0 ? 24 : 0
             )
             .padding(.horizontal, 8)
             .background(
@@ -461,25 +564,88 @@ struct WorkspaceListView: View {
                     )
                 }
             )
-            .offset(y: isDragging ? dragCurrentY - dragGrabOffset - workspaceStartY(workspaceID) : 0)
+            .overlay(alignment: .trailing) {
+                if isDragging, multiDragIDs.count > 1 {
+                    Text("+\(multiDragIDs.count - 1)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor))
+                        .padding(.trailing, 12)
+                        .allowsHitTesting(false)
+                }
+            }
             .zIndex(isDragging ? 1 : 0)
             .opacity(isDragging ? 0.8 : 1)
             .scaleEffect(isDragging ? 1.03 : 1.0)
             .shadow(color: isDragging ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
-            .animation(isDragging ? .none : .easeInOut(duration: 0.15), value: store.topLevelOrder)
+            // Animate reorders for non-grabbed rows. The grabbed row
+            // gets `.none` so its leadingInset and styling changes
+            // don't spring against cursor tracking. `sidebarLayoutKey`
+            // covers topLevelOrder + every group's childOrder.
+            .animation(
+                isDragging ? .none : .spring(response: 0.35, dampingFraction: 0.8),
+                value: sidebarLayoutKey
+            )
+            // Depth (leadingInset) animates for everyone, including
+            // the grabbed row — horizontal inset doesn't compete with
+            // cursor tracking since `.offset` is applied after this
+            // modifier and is therefore excluded from the animation.
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: effectiveDepth)
+            // Cursor-tracking offset is applied AFTER the animation
+            // modifiers so neither `sidebarLayoutKey` nor
+            // `effectiveDepth` transitions cover it. If an animation
+            // modifier covered this offset, its value change (the
+            // diff in `workspaceStartY` across containers) would
+            // spring-interpolate while the VStack's layout position
+            // snaps — the grabbed row would bounce by ~half the
+            // container-jump height at the animation midpoint. Keep
+            // this last so the offset snaps straight to the new
+            // cursor-tracking value every frame.
+            .offset(y: isDragging ? dragCurrentY - dragGrabOffset - workspaceStartY(workspaceID) : 0)
             .gesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
                     .onChanged { value in
                         guard allHeightsMeasured else { return }
-                        if draggedWorkspaceID == nil {
-                            let startY = workspaceStartY(workspaceID)
-                            draggedWorkspaceID = workspaceID
-                            dragGrabOffset = value.startLocation.y - startY
+                        // Cursor-tracking state updates must not animate
+                        // (the VStack has an unconditional spring that
+                        // would otherwise apply to the dragged row's
+                        // offset and make it lag the cursor).
+                        var liveTxn = Transaction()
+                        liveTxn.disablesAnimations = true
+                        withTransaction(liveTxn) {
+                            if draggedWorkspaceID == nil {
+                                let startY = workspaceStartY(workspaceID)
+                                draggedWorkspaceID = workspaceID
+                                dragGrabOffset = value.startLocation.y - startY
+                                // If the grabbed row is part of a multi-
+                                // selection (>1 items), capture the ordered
+                                // list so the drop applies to all of them.
+                                let sel = store.selectedWorkspaceIDs
+                                if sel.count > 1, sel.contains(workspaceID) {
+                                    let ordered = workspaceIDs(sortedBySidebar: sel)
+                                    multiDragIDs = ordered
+                                    hiddenMultiDragIDs = Set(ordered).subtracting([workspaceID])
+                                } else {
+                                    multiDragIDs = []
+                                    hiddenMultiDragIDs = []
+                                }
+                            }
+                            dragCurrentY = value.location.y
+                            dragViewportY = value.location.y - (hostScrollView?.documentVisibleRect.origin.y ?? 0)
                         }
-                        dragCurrentY = value.location.y
+                        updateAutoScroll(cursorContentY: value.location.y)
+                        // Visually treat every drag (single or multi) as a
+                        // one-row move centred on the grabbed workspace.
+                        // This keeps the in-list gap to a single row so
+                        // it's obvious where the grabbed row is landing —
+                        // a bulk N-row gap would hide the target. The
+                        // full selection is consolidated atomically on
+                        // release.
                         let target = resolveCurrentDropTarget(
                             cursorY: value.location.y,
-                            draggedID: workspaceID
+                            draggedIDs: [workspaceID]
                         )
                         currentDropTarget = target
 
@@ -492,31 +658,69 @@ struct WorkspaceListView: View {
                             cancelSpringLoad()
                         }
 
-                        // Live-apply only same-container moves (top-level
-                        // reorder or within-same-group reorder). Cross-
-                        // container moves wait for release so the dragged
-                        // row doesn't teleport into a group mid-drag —
-                        // the indicator line/tint shows intent instead.
-                        if let target,
-                           isSameContainerMove(target: target, sourceID: workspaceID) {
+                        // Live-apply every target that points at a
+                        // specific slot (same- or cross-container) so
+                        // neighbouring rows shift as the cursor moves.
+                        // `.ontoGroupHeader` stays preview-only. Views
+                        // self-animate via their `.animation(value:
+                        // sidebarLayoutKey)` modifiers; the grabbed
+                        // row overrides that to `.none` so its
+                        // `.offset` (cursor tracking) isn't spring-
+                        // interpolated against the VStack's reflow.
+                        if let target, shouldLiveApplyDropTarget(target) {
                             applyDropTarget(target, workspaceID: workspaceID)
                         }
                     }
                     .onEnded { _ in
-                        let target = currentDropTarget
+                        let singleTarget = currentDropTarget
                         let sourceID = workspaceID
-                        let isCrossContainer = target.map {
-                            !isSameContainerMove(target: $0, sourceID: sourceID)
+                        let bulkIDs = multiDragIDs
+                        // Only targets that aren't already live-applied
+                        // need committing on release (currently just
+                        // `.ontoGroupHeader`).
+                        let singleNeedsRelease = singleTarget.map {
+                            !shouldLiveApplyDropTarget($0)
                         } ?? false
+                        // On release of a multi-drag, consolidate the full
+                        // selection atomically. Prefer the post-bulk-remove
+                        // walker result at the current cursor; fall back
+                        // to the grabbed row's current position when the
+                        // cursor sits inside a vacated slot (common after
+                        // the single live-apply).
+                        var bulkTarget: DropTarget?
+                        if !bulkIDs.isEmpty {
+                            bulkTarget = resolveCurrentDropTarget(
+                                cursorY: dragCurrentY,
+                                draggedIDs: Set(bulkIDs)
+                            )
+                            if bulkTarget == nil {
+                                bulkTarget = bulkTargetAtGrabbedPosition(
+                                    grabbedID: sourceID,
+                                    bulkIDs: Set(bulkIDs)
+                                )
+                            }
+                        }
                         cancelSpringLoad()
-                        withAnimation(.easeInOut(duration: 0.15)) {
+                        cancelAutoScroll()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                             draggedWorkspaceID = nil
                             dragCurrentY = 0
+                            dragViewportY = 0
                             dragGrabOffset = 0
                             currentDropTarget = nil
-                        }
-                        if let target, isCrossContainer {
-                            applyDropTarget(target, workspaceID: sourceID)
+                            multiDragIDs = []
+                            hiddenMultiDragIDs = []
+                            // Commit the drop inside the animation
+                            // transaction so the placeholder fade,
+                            // row reorder, and leadingInset change
+                            // all spring together.
+                            if !bulkIDs.isEmpty {
+                                if let bulkTarget {
+                                    applyBulkDropTarget(bulkTarget, workspaceIDs: bulkIDs)
+                                }
+                            } else if singleNeedsRelease, let singleTarget {
+                                applyDropTarget(singleTarget, workspaceID: sourceID)
+                            }
                         }
                     }
             )
@@ -543,12 +747,12 @@ struct WorkspaceListView: View {
     }
 
     /// Treats a group as expanded if its persistent state says so OR
-    /// the drag has spring-loaded it. The source of a group drag is
-    /// rendered as collapsed for the duration of the drag so the drag
-    /// "unit" is just the header and neighbouring rows can slide up
-    /// into the vacated space.
+    /// the drag has spring-loaded it. The group currently being
+    /// dragged by its header is forced collapsed for the duration of
+    /// the drag so it moves as a single-row block (plan 4d). Persisted
+    /// `isCollapsed` is not touched — it restores naturally on release.
     private func isEffectivelyExpanded(_ group: WorkspaceGroup) -> Bool {
-        if draggedGroupID == group.id { return false }
+        if group.id == draggedGroupID { return false }
         return !group.isCollapsed || springLoadedGroupID == group.id
     }
 
@@ -556,29 +760,86 @@ struct WorkspaceListView: View {
     /// Mirrors `AppReducer.State.renderedEntries` but respects the
     /// transient spring-load expansion so children appear under a
     /// hover-expanded collapsed group without persisting the change.
+    /// During a multi-drag, non-grabbed selected workspaces are
+    /// filtered out so the list collapses around the grabbed row
+    /// instead of leaving the other selected rows visible in place.
     private var currentRenderedEntries: [RenderedEntry] {
         var entries: [RenderedEntry] = []
         for item in store.topLevelOrder {
             switch item {
             case .workspace(let wsID):
                 guard store.workspaces[id: wsID] != nil else { continue }
+                if hiddenMultiDragIDs.contains(wsID) { continue }
                 entries.append(.workspaceRow(workspaceID: wsID, depth: 0))
             case .group(let gID):
                 guard let group = store.groups[id: gID] else { continue }
                 entries.append(.groupHeader(groupID: gID))
                 if isEffectivelyExpanded(group) {
-                    let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
+                    let children = group.childOrder.filter {
+                        store.workspaces[id: $0] != nil && !hiddenMultiDragIDs.contains($0)
+                    }
                     if children.isEmpty {
                         entries.append(.groupEmpty(groupID: gID))
                     } else {
                         for childID in children {
                             entries.append(.workspaceRow(workspaceID: childID, depth: 1))
                         }
+                        // When a drag has live-applied its only member
+                        // into this group, keep the placeholder visible
+                        // below the dragged row. The placeholder shifts
+                        // down like a dummy workspace getting pushed
+                        // aside, and the group's total height stays
+                        // constant through drag enter/leave so the list
+                        // doesn't jump as the cursor sweeps over empty
+                        // groups.
+                        let nonDragged = children.filter { $0 != draggedWorkspaceID }
+                        if nonDragged.isEmpty, draggedWorkspaceID != nil {
+                            entries.append(.groupEmpty(groupID: gID))
+                        }
                     }
                 }
             }
         }
         return entries
+    }
+
+    /// Height used for empty-group placeholders in drag math. Prefers
+    /// the runtime-measured value (exact match with what's on screen)
+    /// and falls back to the constant until the first layout pass.
+    private var effectiveEmptyRowHeight: CGFloat {
+        measuredEmptyRowHeight ?? Self.groupEmptyRowHeight
+    }
+
+    /// Flat list of every sidebar entry — top-level items interleaved
+    /// with each group's children. Changes whenever `topLevelOrder`
+    /// OR any group's `childOrder` mutates, so using it as an
+    /// `.animation(value:)` key reliably picks up every drag-induced
+    /// layout change (including cross-container moves that leave the
+    /// read-only `visibleWorkspaceOrder` unchanged because a workspace
+    /// stays at the same flat index).
+    private var sidebarLayoutKey: [SidebarID] {
+        var result: [SidebarID] = []
+        for item in store.topLevelOrder {
+            result.append(item)
+            if case .group(let gid) = item, let group = store.groups[id: gid] {
+                for child in group.childOrder {
+                    result.append(.workspace(child))
+                }
+            }
+        }
+        return result
+    }
+
+    /// `rowHeights` with hidden multi-drag rows forced to 0 so every
+    /// drag-math calculation (zones, cursor Y → target, grabbed row's
+    /// resting Y) matches the collapsed on-screen layout.
+    private var effectiveRowHeights: [SidebarID: CGFloat] {
+        guard !hiddenMultiDragIDs.isEmpty else { return rowHeights }
+        var h = rowHeights
+        for id in hiddenMultiDragIDs {
+            h[.workspace(id)] = 0
+        }
+        return h
     }
 
     private var allHeightsMeasured: Bool {
@@ -601,22 +862,39 @@ struct WorkspaceListView: View {
         return true
     }
 
+    /// True when a group's only visible children are currently being
+    /// dragged. Drives the phantom "No workspaces" placeholder shown
+    /// below the dragged row so the group's slot stays reserved while
+    /// the cursor hovers — prevents mid-drag list-height jumps when a
+    /// workspace moves into an otherwise-empty group via live-apply.
+    private func hasPhantomPlaceholder(_ group: WorkspaceGroup) -> Bool {
+        guard draggedWorkspaceID != nil else { return false }
+        let visibleChildren = group.childOrder.filter {
+            store.workspaces[id: $0] != nil && !hiddenMultiDragIDs.contains($0)
+        }
+        guard !visibleChildren.isEmpty else { return false }
+        return visibleChildren.allSatisfy { $0 == draggedWorkspaceID }
+    }
+
     /// Total vertical space consumed by one top-level entry, including any
     /// expanded child workspaces or the empty-group placeholder.
     private func topLevelItemHeight(_ item: SidebarID) -> CGFloat {
+        let heights = effectiveRowHeights
         switch item {
         case .workspace(let id):
-            return rowHeights[.workspace(id)] ?? 0
+            return heights[.workspace(id)] ?? 0
         case .group(let gid):
-            var h = rowHeights[.group(gid)] ?? 0
+            var h = heights[.group(gid)] ?? 0
             guard let group = store.groups[id: gid], isEffectivelyExpanded(group) else { return h }
             let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
             if children.isEmpty {
-                // GroupEmptyRow is not measured; its approximate laid-out height.
-                h += Self.groupEmptyRowHeight
+                h += effectiveEmptyRowHeight
             } else {
                 for childID in children {
-                    h += rowHeights[.workspace(childID)] ?? 0
+                    h += heights[.workspace(childID)] ?? 0
+                }
+                if hasPhantomPlaceholder(group) {
+                    h += effectiveEmptyRowHeight
                 }
             }
             return h
@@ -628,22 +906,26 @@ struct WorkspaceListView: View {
     /// groups as needed. Returns `contentVerticalPadding` offset + cumulative
     /// row heights.
     private func workspaceStartY(_ id: UUID) -> CGFloat {
+        let heights = effectiveRowHeights
         var y: CGFloat = Self.contentVerticalPadding
         for entry in store.topLevelOrder {
             switch entry {
             case .workspace(let wid):
                 if wid == id { return y }
-                y += rowHeights[.workspace(wid)] ?? 0
+                y += heights[.workspace(wid)] ?? 0
             case .group(let gid):
-                y += rowHeights[.group(gid)] ?? 0
+                y += heights[.group(gid)] ?? 0
                 guard let group = store.groups[id: gid], isEffectivelyExpanded(group) else { continue }
                 let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
                 if children.isEmpty {
-                    y += Self.groupEmptyRowHeight
+                    y += effectiveEmptyRowHeight
                 } else {
                     for childID in children {
                         if childID == id { return y }
-                        y += rowHeights[.workspace(childID)] ?? 0
+                        y += heights[.workspace(childID)] ?? 0
+                    }
+                    if hasPhantomPlaceholder(group) {
+                        y += effectiveEmptyRowHeight
                     }
                 }
             }
@@ -653,21 +935,25 @@ struct WorkspaceListView: View {
 
     /// Y of the group header's resting top edge in drag coordinate space.
     private func groupStartY(_ groupID: UUID) -> CGFloat {
+        let heights = effectiveRowHeights
         var y: CGFloat = Self.contentVerticalPadding
         for entry in store.topLevelOrder {
             switch entry {
             case .workspace(let wid):
-                y += rowHeights[.workspace(wid)] ?? 0
+                y += heights[.workspace(wid)] ?? 0
             case .group(let gid):
                 if gid == groupID { return y }
-                y += rowHeights[.group(gid)] ?? 0
+                y += heights[.group(gid)] ?? 0
                 guard let group = store.groups[id: gid], isEffectivelyExpanded(group) else { continue }
                 let children = group.childOrder.filter { store.workspaces[id: $0] != nil }
                 if children.isEmpty {
-                    y += Self.groupEmptyRowHeight
+                    y += effectiveEmptyRowHeight
                 } else {
                     for childID in children {
-                        y += rowHeights[.workspace(childID)] ?? 0
+                        y += heights[.workspace(childID)] ?? 0
+                    }
+                    if hasPhantomPlaceholder(group) {
+                        y += effectiveEmptyRowHeight
                     }
                 }
             }
@@ -682,53 +968,55 @@ struct WorkspaceListView: View {
             topLevelOrder: store.topLevelOrder,
             groups: store.groups,
             workspaces: store.workspaces,
-            rowHeights: rowHeights,
+            rowHeights: effectiveRowHeights,
             draggedGroupID: draggedGroupID,
             springLoadedGroupID: springLoadedGroupID,
             startY: Self.contentVerticalPadding,
-            emptyPlaceholderHeight: Self.groupEmptyRowHeight
+            emptyPlaceholderHeight: effectiveEmptyRowHeight
         )
         return resolveTopLevelDropTarget(spans: spans, cursorY: cursorY)
     }
 
     /// Resolve the DropTarget under the cursor during an active drag.
-    private func resolveCurrentDropTarget(cursorY: CGFloat, draggedID: UUID) -> DropTarget? {
+    /// During the drag we walk with `draggedIDs = [grabbedID]` so the
+    /// indicator + live-apply track a single-row gap. On release we
+    /// re-walk with the full selection skipped to get the post-bulk-
+    /// remove index for the atomic consolidate-on-drop reducer.
+    private func resolveCurrentDropTarget(cursorY: CGFloat, draggedIDs: Set<UUID>) -> DropTarget? {
         let zones = dropZones(
             topLevelOrder: store.topLevelOrder,
             groups: store.groups,
             workspaces: store.workspaces,
-            rowHeights: rowHeights,
-            draggedID: draggedID,
+            rowHeights: effectiveRowHeights,
+            draggedIDs: draggedIDs,
             springLoadedGroupID: springLoadedGroupID,
             startY: Self.contentVerticalPadding,
-            emptyPlaceholderHeight: Self.groupEmptyRowHeight
+            emptyPlaceholderHeight: effectiveEmptyRowHeight
         )
         return resolveDropTarget(zones: zones, cursorY: cursorY)
     }
 
     /// Overlay rendered inside the VStack's coordinate space during a
-    /// drag. Shows a 2pt accent line for between-rows drops and a
-    /// subtle tint on the group header for onto-group drops.
-    ///
-    /// Same-container moves are live-reordered via the reducer, so the
-    /// neighbouring rows animate into place; the indicator would be
-    /// redundant and is suppressed. Cross-container moves (e.g.
-    /// dragging a top-level workspace into a group) are previewed, so
-    /// the indicator shows the intended landing spot.
+    /// drag. All targets that point at a specific slot are live-
+    /// reordered via the reducer, so the row movement itself is the
+    /// indicator. Only `.ontoGroupHeader` (which means "append to this
+    /// group") is preview-only and renders a subtle header tint.
     @ViewBuilder
     private var dropIndicatorOverlay: some View {
         if let draggedID = draggedWorkspaceID,
            let target = currentDropTarget,
-           !isSameContainerMove(target: target, sourceID: draggedID) {
+           !shouldLiveApplyDropTarget(target) {
+            // Match the drag-time walker: single-row semantics so the
+            // indicator shows exactly where the grabbed row will land.
             let zones = dropZones(
                 topLevelOrder: store.topLevelOrder,
                 groups: store.groups,
                 workspaces: store.workspaces,
-                rowHeights: rowHeights,
-                draggedID: draggedID,
+                rowHeights: effectiveRowHeights,
+                draggedIDs: [draggedID],
                 springLoadedGroupID: springLoadedGroupID,
                 startY: Self.contentVerticalPadding,
-                emptyPlaceholderHeight: Self.groupEmptyRowHeight
+                emptyPlaceholderHeight: effectiveEmptyRowHeight
             )
 
             switch target {
@@ -855,19 +1143,203 @@ struct WorkspaceListView: View {
         springLoadedGroupID = nil
     }
 
-    /// True when applying `target` keeps the workspace in its current
-    /// container (top-level, or the same group). Same-container moves
-    /// get live-applied during drag so neighbouring rows animate; cross-
-    /// container moves are deferred until release.
-    private func isSameContainerMove(target: DropTarget, sourceID: UUID) -> Bool {
-        let sourceGroupID = store.state.groupID(forWorkspace: sourceID)
+    // MARK: - Auto-scroll
+
+    /// Start a repeating scroll task in the given direction (-1 up, +1
+    /// down). Drives the underlying NSScrollView by `autoScrollStep`
+    /// points per tick for pixel-perfect continuous scroll. After each
+    /// scroll the drag logic is re-driven — the OS won't fire drag
+    /// events while the cursor is stationary in screen space, so we
+    /// synthesise them here so the dragged row and drop indicator stay
+    /// in sync as the content moves under the cursor.
+    private func startAutoScroll(direction: Int) {
+        guard direction != 0 else { cancelAutoScroll(); return }
+        guard autoScrollTask == nil else { return }
+        let stepSigned = direction < 0 ? -Self.autoScrollStep : Self.autoScrollStep
+        autoScrollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                guard let sv = hostScrollView else { break }
+                let visible = sv.documentVisibleRect
+                let contentHeight = sv.documentView?.bounds.height ?? 0
+                // Account for contentInsets — SwiftUI maps
+                // `.safeAreaInset` to NSScrollView.contentInsets, which
+                // shifts the scrollable range: the minimum valid origin
+                // is `-contentInsets.top` (so content can reach the
+                // clipView top, not just the inset-less area), and the
+                // max is extended by `contentInsets.bottom`.
+                let minY = -sv.contentInsets.top
+                let maxY = max(
+                    minY,
+                    contentHeight + sv.contentInsets.bottom - visible.height
+                )
+                let currentY = visible.origin.y
+                let newY = max(minY, min(maxY, currentY + stepSigned))
+                if abs(newY - currentY) < 0.5 { break }
+                // setBoundsOrigin + reflect is the non-deprecated path
+                // for precise pixel scroll on macOS.
+                sv.contentView.setBoundsOrigin(NSPoint(x: visible.origin.x, y: newY))
+                sv.reflectScrolledClipView(sv.contentView)
+                // Re-drive the drag logic at the cursor's new content
+                // position so the dragged row keeps following the cursor
+                // and the drop target re-resolves as rows slide past it.
+                pumpDragAfterScroll()
+                try? await Task.sleep(for: .milliseconds(Self.autoScrollIntervalMillis))
+            }
+        }
+    }
+
+    /// Called from the auto-scroll tick to keep drag state fresh while
+    /// the OS isn't emitting drag events (the mouse is stationary in
+    /// screen space but the content has moved underneath it).
+    private func pumpDragAfterScroll() {
+        guard let sv = hostScrollView else { return }
+        let newContentY = dragViewportY + sv.documentVisibleRect.origin.y
+        dragCurrentY = newContentY
+        if let workspaceID = draggedWorkspaceID {
+            // Treat multi-drag as a single-row drag for drag-time
+            // resolution so the cursor tracks a 1-row gap; bulk
+            // consolidation runs on release.
+            let target = resolveCurrentDropTarget(
+                cursorY: newContentY,
+                draggedIDs: [workspaceID]
+            )
+            currentDropTarget = target
+            // Mirror the normal onChanged spring-load handling: auto-
+            // scroll can slide a collapsed group under a stationary
+            // cursor (arming the timer) or away from one (cancelling).
+            if let target, let gid = collapsedGroupUnderCursor(target) {
+                scheduleSpringLoad(for: gid)
+            } else if springLoadTask != nil || springLoadedGroupID != nil {
+                cancelSpringLoad()
+            }
+            if let target, shouldLiveApplyDropTarget(target) {
+                applyDropTarget(target, workspaceID: workspaceID)
+            }
+        } else if let groupID = draggedGroupID {
+            let target = resolveCurrentTopLevelDropTarget(
+                cursorY: newContentY,
+                draggedGroupID: groupID
+            )
+            if case .topLevel(let idx) = target {
+                store.send(.moveGroup(id: groupID, toIndex: idx))
+            }
+        }
+    }
+
+    private func cancelAutoScroll() {
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+    }
+
+    /// Evaluate whether the cursor is in the top/bottom auto-scroll zone
+    /// and start or cancel the auto-scroll loop accordingly. `cursorContentY`
+    /// is in the `workspaceList` (content) coordinate space; viewport
+    /// metrics come from the underlying NSScrollView.
+    private func updateAutoScroll(cursorContentY: CGFloat) {
+        guard let sv = hostScrollView else { return }
+        let visible = sv.documentVisibleRect
+        guard visible.height > 0 else { return }
+        let viewportY = cursorContentY - visible.origin.y
+        if viewportY < Self.autoScrollEdgeThreshold {
+            startAutoScroll(direction: -1)
+        } else if viewportY > visible.height - Self.autoScrollEdgeThreshold {
+            startAutoScroll(direction: 1)
+        } else {
+            cancelAutoScroll()
+        }
+    }
+
+    /// Whether this drop target should be applied to state as the
+    /// cursor moves (so neighbouring rows shift out of the way), or
+    /// only previewed via the indicator overlay and committed on
+    /// release.
+    ///
+    /// `.topLevel` and `.intoGroup` point to a specific landing slot
+    /// — live-applying makes the drop feel responsive. Cross-container
+    /// cases are live-applied too so dragging into a group makes its
+    /// existing children move aside as the cursor passes over them.
+    ///
+    /// `.ontoGroupHeader` means "append to this group"; the cursor
+    /// often transits the header briefly on the way to a precise
+    /// child slot, so live-apply would flicker the workspace in and
+    /// out every time. Preview-only.
+    private func shouldLiveApplyDropTarget(_ target: DropTarget) -> Bool {
         switch target {
-        case .topLevel:
-            return sourceGroupID == nil
-        case .intoGroup(let gid, _):
-            return sourceGroupID == gid
+        case .topLevel, .intoGroup:
+            true
         case .ontoGroupHeader:
-            return false
+            false
+        }
+    }
+
+    /// Group the dragged workspace is previewing a drop into via a
+    /// preview-only target (`.ontoGroupHeader`) so the dragged row can
+    /// render with a nested inset while state still says it's at its
+    /// pre-drag container.
+    private var dragPreviewGroupID: UUID? {
+        if case .ontoGroupHeader(let gid) = currentDropTarget {
+            return gid
+        }
+        return nil
+    }
+
+    /// The bulk drop target that consolidates the selection at the
+    /// grabbed row's current position. Used as a fallback on release
+    /// when the cursor sits in a vacated slot (the walker skips all
+    /// selected rows, so cursor-in-gap resolves to nil). Converts the
+    /// grabbed's current container + index into a post-bulk-remove
+    /// index so the atomic reducer inserts the whole block starting
+    /// where the cursor-tracking row was left.
+    private func bulkTargetAtGrabbedPosition(grabbedID: UUID, bulkIDs: Set<UUID>) -> DropTarget? {
+        if let topIdx = store.topLevelOrder.firstIndex(of: .workspace(grabbedID)) {
+            var postRemoveIdx = 0
+            for i in 0 ..< topIdx {
+                if case .workspace(let wsID) = store.topLevelOrder[i],
+                   bulkIDs.contains(wsID) {
+                    continue
+                }
+                postRemoveIdx += 1
+            }
+            return .topLevel(index: postRemoveIdx)
+        }
+        if let gid = store.state.groupID(forWorkspace: grabbedID),
+           let group = store.groups[id: gid],
+           let childIdx = group.childOrder.firstIndex(of: grabbedID) {
+            var postRemoveIdx = 0
+            for i in 0 ..< childIdx {
+                if !bulkIDs.contains(group.childOrder[i]) {
+                    postRemoveIdx += 1
+                }
+            }
+            return .intoGroup(groupID: gid, index: postRemoveIdx)
+        }
+        return nil
+    }
+
+    /// Order an arbitrary set of workspace IDs by their current sidebar
+    /// walk order. Missing IDs are dropped.
+    private func workspaceIDs(sortedBySidebar ids: Set<UUID>) -> [UUID] {
+        guard !ids.isEmpty else { return [] }
+        return store.state.visibleWorkspaceOrder.filter { ids.contains($0) }
+    }
+
+    /// Apply a resolved DropTarget for a group of workspaces. Dispatches
+    /// the atomic `.moveWorkspacesToGroup` action which removes all
+    /// sources in one pass before inserting them in order — avoids the
+    /// index drift that sequential single-workspace moves create when
+    /// sources and target overlap.
+    ///
+    /// `target` indices are produced by the drop-zone walker with the
+    /// full set of source IDs skipped, so they are already post-bulk-
+    /// remove and feed straight into the reducer.
+    private func applyBulkDropTarget(_ target: DropTarget, workspaceIDs ids: [UUID]) {
+        switch target {
+        case .topLevel(let base):
+            store.send(.moveWorkspacesToGroup(ids: ids, groupID: nil, index: base))
+        case .intoGroup(let gid, let base):
+            store.send(.moveWorkspacesToGroup(ids: ids, groupID: gid, index: base))
+        case .ontoGroupHeader(let gid):
+            store.send(.moveWorkspacesToGroup(ids: ids, groupID: gid, index: nil))
         }
     }
 
@@ -922,5 +1394,55 @@ private struct RowHeightsKey: PreferenceKey {
     nonisolated(unsafe) static var defaultValue: [SidebarID: CGFloat] = [:]
     static func reduce(value: inout [SidebarID: CGFloat], nextValue: () -> [SidebarID: CGFloat]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+/// Measured height of `GroupEmptyRow`. All empty rows render the same
+/// size, so the reducer just keeps the largest non-zero value seen.
+/// Used instead of the hardcoded constant so drag math tracks the
+/// actual laid-out height — prevents a layout jump when a drag live-
+/// applies a workspace into an empty group (placeholder vanishes, real
+/// row takes its place at a potentially different height).
+private struct EmptyRowHeightKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Zero-height probe that walks up the AppKit hierarchy to find the
+/// NSScrollView hosting its SwiftUI parent. Reports it to the SwiftUI
+/// layer via `onFound` so auto-scroll can query viewport metrics and
+/// drive the scroll position directly (pixel-perfect, smooth). All
+/// callbacks are dispatched async — calling `onFound` synchronously
+/// from `updateNSView` would modify SwiftUI state during a view update.
+private struct ScrollViewFinder: NSViewRepresentable {
+    let onFound: (NSScrollView) -> Void
+
+    func makeNSView(context _: Context) -> NSView {
+        let view = ProbeView()
+        view.onFound = onFound
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context _: Context) {
+        guard let probe = nsView as? ProbeView else { return }
+        probe.onFound = onFound
+    }
+
+    private final class ProbeView: NSView {
+        var onFound: ((NSScrollView) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.reportIfAvailable()
+            }
+        }
+
+        func reportIfAvailable() {
+            guard let sv = enclosingScrollView else { return }
+            onFound?(sv)
+        }
     }
 }

@@ -16,10 +16,6 @@ struct WorkspaceRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if leadingInset > 0 {
-                Spacer().frame(width: leadingInset)
-            }
-
             RoundedRectangle(cornerRadius: 3)
                 .fill(color.color)
                 .frame(width: 4, height: 24)
@@ -61,6 +57,11 @@ struct WorkspaceRowView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
+        // Apply nesting inset as a leading padding so it interpolates
+        // on depth changes. A conditional `Spacer().frame(width:)`
+        // would toggle in and out of the view tree and snap via the
+        // default opacity transition instead of animating layout.
+        .padding(.leading, leadingInset)
         .background(
             ZStack {
                 if isSelected {

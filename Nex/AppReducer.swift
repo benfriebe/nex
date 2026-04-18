@@ -129,6 +129,32 @@ struct AppReducer {
             topLevelOrder = workspaces.map { .workspace($0.id) }
         }
 
+        /// All workspaces in the order the sidebar walks them — top-level
+        /// workspaces, interleaved with each group's `childOrder` (in the
+        /// order the groups appear in `topLevelOrder`). Differs from
+        /// `state.workspaces` (insertion order) once groups are used, so
+        /// any UI that talks about "the Nth workspace you see" (Cmd+N
+        /// switch, shift-range select, Cmd-next/previous) should consult
+        /// this rather than `workspaces`.
+        ///
+        /// Workspaces inside collapsed groups ARE included — the range
+        /// should still cover them when shift-selecting across a group.
+        var visibleWorkspaceOrder: [UUID] {
+            var result: [UUID] = []
+            for item in topLevelOrder {
+                switch item {
+                case .workspace(let id):
+                    if workspaces[id: id] != nil { result.append(id) }
+                case .group(let gID):
+                    guard let group = groups[id: gID] else { continue }
+                    for childID in group.childOrder where workspaces[id: childID] != nil {
+                        result.append(childID)
+                    }
+                }
+            }
+            return result
+        }
+
         /// Flatten `topLevelOrder` into a list the sidebar can render directly.
         /// Honours per-group collapse state: a collapsed group emits only its
         /// header; an expanded group emits its header followed by its children
@@ -165,6 +191,7 @@ struct AppReducer {
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
         case moveGroup(id: UUID, toIndex: Int)
+        case moveWorkspacesToGroup(ids: [UUID], groupID: UUID?, index: Int?)
         case setActiveWorkspace(UUID)
         case switchToWorkspaceByIndex(Int)
         case switchToNextWorkspace
@@ -464,6 +491,48 @@ struct AppReducer {
 
                 return .send(.persistState)
 
+            case .moveWorkspacesToGroup(let ids, let targetGroupID, let index):
+                // Atomic bulk move. Removes all `ids` from their current
+                // parents (top-level or any group), then inserts them in
+                // order at the destination. `index` uses the post-remove
+                // convention — same semantics the DropTarget walker
+                // already produces when passed the full multi-source set.
+                //
+                // Doing this in one pass avoids the drift that sequential
+                // single-workspace moves cause when sources and target
+                // overlap (e.g., reordering a subset within a single
+                // group, or moving top-level + grouped sources together).
+                if let gid = targetGroupID, state.groups[id: gid] == nil {
+                    return .none
+                }
+                let ordered = ids.filter { state.workspaces[id: $0] != nil }
+                guard !ordered.isEmpty else { return .none }
+                let moved = Set(ordered)
+
+                state.topLevelOrder.removeAll { entry in
+                    if case .workspace(let id) = entry { return moved.contains(id) }
+                    return false
+                }
+                for gid in state.groups.ids {
+                    state.groups[id: gid]?.childOrder.removeAll { moved.contains($0) }
+                }
+
+                if let gid = targetGroupID {
+                    var children = state.groups[id: gid]?.childOrder ?? []
+                    let insertAt = index.map { max(0, min($0, children.count)) } ?? children.count
+                    children.insert(contentsOf: ordered, at: insertAt)
+                    state.groups[id: gid]?.childOrder = children
+                    if state.groups[id: gid]?.isCollapsed == true {
+                        state.groups[id: gid]?.isCollapsed = false
+                    }
+                } else {
+                    let entries: [SidebarID] = ordered.map { .workspace($0) }
+                    let insertAt = index.map { max(0, min($0, state.topLevelOrder.count)) }
+                        ?? state.topLevelOrder.count
+                    state.topLevelOrder.insert(contentsOf: entries, at: insertAt)
+                }
+                return .send(.persistState)
+
             case .moveGroup(let id, let toIndex):
                 // Reorders `.group(id)` within `topLevelOrder`. Groups only
                 // ever live at the top level (no nesting), so this action
@@ -495,23 +564,31 @@ struct AppReducer {
                 )
 
             case .switchToWorkspaceByIndex(let index):
-                guard index >= 0, index < state.workspaces.count else { return .none }
-                let workspace = state.workspaces[state.workspaces.index(state.workspaces.startIndex, offsetBy: index)]
-                return .send(.setActiveWorkspace(workspace.id))
+                // Walk the visible sidebar order so Cmd+N maps to the
+                // user's visual numbering, not `state.workspaces`'
+                // insertion order (which drifts once groups or bulk
+                // top-level drags touch `topLevelOrder`).
+                let visible = state.visibleWorkspaceOrder
+                guard index >= 0, index < visible.count else { return .none }
+                return .send(.setActiveWorkspace(visible[index]))
 
             case .switchToNextWorkspace:
-                guard let current = state.activeWorkspaceID,
-                      let currentIndex = state.workspaces.index(id: current) else { return .none }
-                let nextIndex = (currentIndex + 1) % state.workspaces.count
-                let next = state.workspaces[state.workspaces.index(state.workspaces.startIndex, offsetBy: nextIndex)]
-                return .send(.setActiveWorkspace(next.id))
+                let visible = state.visibleWorkspaceOrder
+                guard !visible.isEmpty,
+                      let current = state.activeWorkspaceID,
+                      let currentIndex = visible.firstIndex(of: current)
+                else { return .none }
+                let nextIndex = (currentIndex + 1) % visible.count
+                return .send(.setActiveWorkspace(visible[nextIndex]))
 
             case .switchToPreviousWorkspace:
-                guard let current = state.activeWorkspaceID,
-                      let currentIndex = state.workspaces.index(id: current) else { return .none }
-                let prevIndex = (currentIndex - 1 + state.workspaces.count) % state.workspaces.count
-                let prev = state.workspaces[state.workspaces.index(state.workspaces.startIndex, offsetBy: prevIndex)]
-                return .send(.setActiveWorkspace(prev.id))
+                let visible = state.visibleWorkspaceOrder
+                guard !visible.isEmpty,
+                      let current = state.activeWorkspaceID,
+                      let currentIndex = visible.firstIndex(of: current)
+                else { return .none }
+                let prevIndex = (currentIndex - 1 + visible.count) % visible.count
+                return .send(.setActiveWorkspace(visible[prevIndex]))
 
             case .toggleSidebar:
                 state.isSidebarVisible.toggle()
@@ -544,16 +621,20 @@ struct AppReducer {
                 return .none
 
             case .rangeSelectWorkspace(let id):
-                guard let targetIdx = state.workspaces.index(id: id) else { return .none }
+                // Walk the visible sidebar order (top-level + each group's
+                // children) so shift-select picks the contiguous run the
+                // user actually sees. `state.workspaces` is insertion
+                // order and diverges from visible order once groups exist.
+                let visible = state.visibleWorkspaceOrder
+                guard let targetIdx = visible.firstIndex(of: id) else { return .none }
                 let anchorID = state.lastSelectionAnchor
                     ?? state.selectedWorkspaceIDs.first
                     ?? state.activeWorkspaceID
                     ?? id
-                let anchorIdx = state.workspaces.index(id: anchorID) ?? targetIdx
+                let anchorIdx = visible.firstIndex(of: anchorID) ?? targetIdx
                 let lo = min(anchorIdx, targetIdx)
                 let hi = max(anchorIdx, targetIdx)
-                let rangeIDs = state.workspaces[lo ... hi].map(\.id)
-                state.selectedWorkspaceIDs.formUnion(rangeIDs)
+                state.selectedWorkspaceIDs.formUnion(visible[lo ... hi])
                 state.lastSelectionAnchor = id
                 return .none
 

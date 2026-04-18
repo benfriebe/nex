@@ -17,6 +17,12 @@ struct AppReducerTests {
         appState.workspaces = workspaces
         appState.activeWorkspaceID = activeWorkspaceID
         appState.repoRegistry = repoRegistry
+        // Mirror the backfill the reducer applies on load: when no
+        // groups are in play, `topLevelOrder` is the workspaces list.
+        // Without this, `visibleWorkspaceOrder` (used by range-select,
+        // Cmd+N numbering, etc.) is empty in tests constructed
+        // directly from state.
+        appState.topLevelOrder = workspaces.map { .workspace($0.id) }
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -243,6 +249,47 @@ struct AppReducerTests {
         await store.receive(.setActiveWorkspace(Self.wsID2)) { state in
             #expect(state.activeWorkspaceID == Self.wsID2)
         }
+    }
+
+    /// Regression: once `state.workspaces` insertion order diverges
+    /// from the sidebar walk order (e.g. after a bulk top-level drag
+    /// that only touches `topLevelOrder`), Cmd+N and next/previous
+    /// should still activate the workspace the user sees at that
+    /// position — not the stale insertion-order entry.
+    @Test func switchActionsFollowSidebarOrderNotInsertionOrder() async {
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2")
+
+        // Insertion order is [ws1, ws2] but the sidebar shows [ws2, ws1]
+        // (topLevelOrder reversed), mirroring what a bulk drag via
+        // `.moveWorkspacesToGroup` would leave behind.
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2]
+        appState.topLevelOrder = [.workspace(Self.wsID2), .workspace(Self.wsID1)]
+        appState.activeWorkspaceID = Self.wsID2
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Cmd+1 should land on ws2 (first in the visible sidebar),
+        // not ws1 (first in insertion order).
+        await store.send(.switchToWorkspaceByIndex(0))
+        await store.receive(.setActiveWorkspace(Self.wsID2))
+
+        // Next from ws2 (visible index 0) should be ws1 (visible idx 1).
+        await store.send(.switchToNextWorkspace)
+        await store.receive(.setActiveWorkspace(Self.wsID1))
+
+        // Previous from ws1 (visible index 1) should wrap back to ws2.
+        await store.send(.switchToPreviousWorkspace)
+        await store.receive(.setActiveWorkspace(Self.wsID2))
     }
 
     // MARK: - toggleSidebar
@@ -770,6 +817,51 @@ struct AppReducerTests {
         await store.send(.rangeSelectWorkspace(wsID3)) { state in
             #expect(state.selectedWorkspaceIDs == [Self.wsID1, Self.wsID2, wsID3])
             #expect(state.lastSelectionAnchor == wsID3)
+        }
+    }
+
+    /// Regression: when workspaces are reorganised into groups, the
+    /// shift-range must still cover the visible sidebar run — not the
+    /// (now-divergent) `state.workspaces` insertion order.
+    @Test func rangeSelectSpansVisibleOrderAcrossGroups() async {
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let wsID4 = UUID(uuidString: "10000000-0000-0000-0000-000000000004")!
+        let groupID = UUID(uuidString: "10000000-0000-0000-0000-0000000000A1")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "WS3", paneID: UUID())
+        let ws4 = Self.makeWorkspace(id: wsID4, name: "WS4", paneID: UUID())
+
+        var state = AppReducer.State()
+        state.workspaces = [ws1, ws2, ws3, ws4]
+        // Visible order in sidebar: ws1, ws3, ws4, ws2 (ws3 + ws4 are
+        // inside the group; ws1 and ws2 are top-level).
+        state.groups = [WorkspaceGroup(id: groupID, name: "G", childOrder: [wsID3, wsID4])]
+        state.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .group(groupID),
+            .workspace(Self.wsID2)
+        ]
+        state.activeWorkspaceID = Self.wsID1
+
+        let store = TestStore(initialState: state) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Anchor = ws1 (active). Shift-click ws4 must cover ws1, ws3,
+        // ws4 (the three visible rows between them) — NOT ws1, ws2,
+        // ws3, ws4 as the old insertion-order logic would have picked.
+        await store.send(.rangeSelectWorkspace(wsID4)) { state in
+            #expect(state.selectedWorkspaceIDs == [Self.wsID1, wsID3, wsID4])
+            #expect(state.lastSelectionAnchor == wsID4)
         }
     }
 

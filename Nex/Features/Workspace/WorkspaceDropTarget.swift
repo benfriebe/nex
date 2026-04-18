@@ -55,7 +55,7 @@ func dropZones(
     groups: IdentifiedArrayOf<WorkspaceGroup>,
     workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
     rowHeights: [SidebarID: CGFloat],
-    draggedID: UUID,
+    draggedIDs: Set<UUID>,
     springLoadedGroupID: UUID? = nil,
     startY: CGFloat = 0,
     emptyPlaceholderHeight: CGFloat = 28
@@ -68,9 +68,10 @@ func dropZones(
         switch entry {
         case .workspace(let id):
             let h = rowHeights[.workspace(id)] ?? 0
-            if id == draggedID {
-                // Skip the source zone — but yTop still advances because
-                // the row occupies layout space (visually offset during drag).
+            if draggedIDs.contains(id) {
+                // Skip source zones — but yTop still advances because
+                // source rows still occupy layout space (the grabbed
+                // one is visually offset, the rest stay in place).
             } else {
                 zones.append(DropZone(
                     kind: .topLevelWorkspace(id: id, postRemoveTopIndex: topIdx),
@@ -106,11 +107,22 @@ func dropZones(
                     yTop += emptyPlaceholderHeight
                 } else {
                     var childIdx = 0
+                    var anyVisible = false
                     for childID in children {
                         let h = rowHeights[.workspace(childID)] ?? 0
-                        if childID == draggedID {
+                        if draggedIDs.contains(childID) {
                             // Skip source child.
                         } else {
+                            // Only positive-height rows count as
+                            // visible — hidden multi-drag members
+                            // report h = 0 through `effectiveRowHeights`,
+                            // and they should be treated the same as
+                            // dragged rows for the phantom-placeholder
+                            // check below so walker math matches the
+                            // view's rendered layout.
+                            if h > 0 {
+                                anyVisible = true
+                            }
                             zones.append(DropZone(
                                 kind: .groupChild(
                                     groupID: gid,
@@ -123,6 +135,20 @@ func dropZones(
                             childIdx += 1
                         }
                         yTop += h
+                    }
+                    // If every child of this group is currently being
+                    // dragged, the view keeps the empty placeholder
+                    // visible below the dragged row(s) so the group's
+                    // slot stays reserved through the drag. Emit a
+                    // matching zone here so walker math tracks the
+                    // visual layout exactly.
+                    if !anyVisible {
+                        zones.append(DropZone(
+                            kind: .groupEmpty(groupID: gid),
+                            yTop: yTop,
+                            yBottom: yTop + emptyPlaceholderHeight
+                        ))
+                        yTop += emptyPlaceholderHeight
                     }
                 }
             }
@@ -183,13 +209,14 @@ func topLevelDropZones(
         case .group(let gid):
             guard let group = groups[id: gid] else { continue }
             let headerH = rowHeights[.group(gid)] ?? 0
-            // The source group is visually collapsed during its own drag,
-            // so its block height is just the header. All other groups
-            // use their true extent (header + children when expanded).
             let isSource = gid == draggedGroupID
-            let effectivelyExpanded = !group.isCollapsed || springLoadedGroupID == gid
+            // The source group renders as collapsed for the duration
+            // of its own drag so it moves as a single-row block.
+            // Non-source expanded groups still cover header + children.
+            let effectivelyExpanded = !isSource
+                && (!group.isCollapsed || springLoadedGroupID == gid)
             var blockH = headerH
-            if effectivelyExpanded, !isSource {
+            if effectivelyExpanded {
                 let children = group.childOrder.filter { workspaces[id: $0] != nil }
                 if children.isEmpty {
                     blockH += emptyPlaceholderHeight
@@ -199,10 +226,7 @@ func topLevelDropZones(
                     }
                 }
             }
-            if isSource {
-                // Skip source; yTop advances by source's visual height
-                // (header only, since we visually collapse it on drag).
-            } else {
+            if !isSource {
                 spans.append(TopLevelSpan(
                     postRemoveTopIndex: topIdx,
                     yTop: yTop,
