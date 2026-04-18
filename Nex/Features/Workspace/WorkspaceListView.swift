@@ -126,6 +126,10 @@ struct WorkspaceListView: View {
                     }
                     .coordinateSpace(name: "workspaceList")
                     .padding(.vertical, 4)
+                    // Keep row content clear of the overlay scroller that
+                    // appears on the trailing edge during scrolling, so the
+                    // ⌘N badge doesn't get clipped by it.
+                    .padding(.trailing, 8)
                     .frame(minHeight: outer.size.height, alignment: .top)
                     .animation(
                         .spring(response: 0.35, dampingFraction: 0.8),
