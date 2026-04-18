@@ -129,16 +129,14 @@ struct AppReducer {
             topLevelOrder = workspaces.map { .workspace($0.id) }
         }
 
-        /// All workspaces in the order the sidebar walks them — top-level
-        /// workspaces, interleaved with each group's `childOrder` (in the
-        /// order the groups appear in `topLevelOrder`). Differs from
-        /// `state.workspaces` (insertion order) once groups are used, so
-        /// any UI that talks about "the Nth workspace you see" (Cmd+N
-        /// switch, shift-range select, Cmd-next/previous) should consult
-        /// this rather than `workspaces`.
+        /// Workspaces the user can actually see in the sidebar, in the
+        /// order they're rendered. Walks `topLevelOrder` and descends into
+        /// expanded groups only. Collapsed groups contribute nothing to
+        /// the order so Cmd+N, the row's ⌘N badge, next/previous cycling,
+        /// and shift-range select all operate on the visible rows.
         ///
-        /// Workspaces inside collapsed groups ARE included — the range
-        /// should still cover them when shift-selecting across a group.
+        /// Differs from `state.workspaces` (insertion order) once groups
+        /// exist or a bulk top-level move has touched `topLevelOrder`.
         var visibleWorkspaceOrder: [UUID] {
             var result: [UUID] = []
             for item in topLevelOrder {
@@ -146,7 +144,7 @@ struct AppReducer {
                 case .workspace(let id):
                     if workspaces[id: id] != nil { result.append(id) }
                 case .group(let gID):
-                    guard let group = groups[id: gID] else { continue }
+                    guard let group = groups[id: gID], !group.isCollapsed else { continue }
                     for childID in group.childOrder where workspaces[id: childID] != nil {
                         result.append(childID)
                     }

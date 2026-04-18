@@ -865,6 +865,79 @@ struct AppReducerTests {
         }
     }
 
+    /// Regression: Cmd+N, the row's ⌘N badge, next/previous cycling and
+    /// shift-range all read `visibleWorkspaceOrder`. Workspaces inside a
+    /// collapsed group aren't on screen, so they must not contribute to
+    /// the order — otherwise ⌘N numbering skips values, Cmd-] cycles to
+    /// invisible workspaces, and shift-range selects rows the user
+    /// cannot see.
+    @Test func visibleWorkspaceOrderExcludesCollapsedGroupChildren() {
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let wsID4 = UUID(uuidString: "10000000-0000-0000-0000-000000000004")!
+        let groupID = UUID(uuidString: "10000000-0000-0000-0000-0000000000A1")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "WS3", paneID: UUID())
+        let ws4 = Self.makeWorkspace(id: wsID4, name: "WS4", paneID: UUID())
+
+        var state = AppReducer.State()
+        state.workspaces = [ws1, ws2, ws3, ws4]
+        state.groups = [
+            WorkspaceGroup(id: groupID, name: "G", isCollapsed: true, childOrder: [wsID3, wsID4])
+        ]
+        state.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .group(groupID),
+            .workspace(Self.wsID2)
+        ]
+
+        #expect(state.visibleWorkspaceOrder == [Self.wsID1, Self.wsID2])
+
+        state.groups[id: groupID]?.isCollapsed = false
+        #expect(state.visibleWorkspaceOrder == [Self.wsID1, wsID3, wsID4, Self.wsID2])
+    }
+
+    /// Cmd+N must map to the N-th *visible* workspace. With a collapsed
+    /// group between ws1 and ws2, ⌘2 should activate ws2 — not ws3 (the
+    /// first child of the collapsed group).
+    @Test func switchToWorkspaceByIndexSkipsCollapsedGroupChildren() async {
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let groupID = UUID(uuidString: "10000000-0000-0000-0000-0000000000A1")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "WS3", paneID: UUID())
+
+        var state = AppReducer.State()
+        state.workspaces = [ws1, ws2, ws3]
+        state.groups = [
+            WorkspaceGroup(id: groupID, name: "G", isCollapsed: true, childOrder: [wsID3])
+        ]
+        state.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .group(groupID),
+            .workspace(Self.wsID2)
+        ]
+        state.activeWorkspaceID = Self.wsID1
+
+        let store = TestStore(initialState: state) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Index 1 is ws2 (visible), not ws3 (hidden inside collapsed group).
+        await store.send(.switchToWorkspaceByIndex(1))
+        await store.receive(\.setActiveWorkspace) { state in
+            state.activeWorkspaceID = Self.wsID2
+        }
+    }
+
     @Test func selectAllWorkspacesFillsSelection() async {
         let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
