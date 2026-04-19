@@ -117,6 +117,30 @@ struct AppReducer {
             groups.first(where: { $0.childOrder.contains(workspaceID) })?.id
         }
 
+        /// Resolve a name-or-UUID string to a `WorkspaceGroup`. Used by
+        /// the CLI / socket surface to accept human-friendly names.
+        /// Tries UUID parse first so typing a UUID always wins over a
+        /// legacy name match. Falls back to a case-sensitive exact
+        /// name match; ambiguous names (>1 group with the same name)
+        /// return `nil` so callers fail fast instead of silently
+        /// mutating the wrong group.
+        func resolveGroup(_ nameOrID: String) -> WorkspaceGroup? {
+            if let uuid = UUID(uuidString: nameOrID), let group = groups[id: uuid] {
+                return group
+            }
+            let matches = groups.filter { $0.name == nameOrID }
+            return matches.count == 1 ? matches.first : nil
+        }
+
+        /// Same contract as `resolveGroup(_:)` but for workspaces.
+        func resolveWorkspace(_ nameOrID: String) -> WorkspaceFeature.State? {
+            if let uuid = UUID(uuidString: nameOrID), let ws = workspaces[id: uuid] {
+                return ws
+            }
+            let matches = workspaces.filter { $0.name == nameOrID }
+            return matches.count == 1 ? matches.first : nil
+        }
+
         func workspaces(inGroup groupID: UUID) -> [WorkspaceFeature.State] {
             guard let group = groups[id: groupID] else { return [] }
             return group.childOrder.compactMap { workspaces[id: $0] }
@@ -360,6 +384,149 @@ struct AppReducer {
             await send(.autoUnlinkUnusedRepos(workspaceID: workspaceID))
         }
         .cancellable(id: AutoUnlinkDebounceID.workspace(workspaceID), cancelInFlight: true)
+    }
+
+    // MARK: - Socket command helpers
+
+    /// Dispatch `workspace-create` from the CLI. If a `group` is
+    /// supplied, the workspace is created first (which synchronously
+    /// mutates state) then the new workspace is moved into the group
+    /// — creating the group if it doesn't already exist. Resolving
+    /// the group name AFTER the workspace is appended means a
+    /// pre-existing group is picked up by `resolveGroup`, and a
+    /// missing one spawns a new bare group that we can target by id.
+    private func handleSocketWorkspaceCreate(
+        _ state: inout State,
+        name: String?,
+        path: String?,
+        color: WorkspaceColor?,
+        group: String?
+    ) -> Effect<Action> {
+        let createEffect: Effect<Action> = .send(.createWorkspace(
+            name: name ?? "Workspace",
+            color: color,
+            workingDirectory: path
+        ))
+        // A missing `group` OR a group that's all whitespace falls
+        // back to the top-level create path. Whitespace-only names
+        // wouldn't survive the existing `createGroup` trim check
+        // anyway, so treat them as "no group specified."
+        let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedGroup, !trimmedGroup.isEmpty else { return createEffect }
+
+        // Resolve BEFORE any state mutation so an ambiguous-name
+        // match can cleanly abort the whole message. `resolveGroup`
+        // returns nil for both "missing" and "ambiguous" — we
+        // disambiguate by checking for ANY match on that name
+        // before deciding to create a new group.
+        let existingGroup = state.resolveGroup(trimmedGroup)
+        if existingGroup == nil,
+           state.groups.contains(where: { $0.name == trimmedGroup }) {
+            // Multiple groups share this name — don't silently
+            // create a third. The user needs to disambiguate (e.g.
+            // by passing a UUID) or rename one of the existing
+            // groups first.
+            return .none
+        }
+
+        // `createWorkspace` uses `@Dependency(\.uuid)` so we
+        // pre-compute the id here to keep the move-into-group
+        // dispatch precise. Then we seed state directly so the
+        // follow-up move lands deterministically even when the
+        // reducer batches effects.
+        let newWorkspaceID = uuid()
+        let workspace = WorkspaceFeature.State(
+            id: newWorkspaceID,
+            name: name ?? "Workspace",
+            color: color ?? state.workspaces.nextRandomColor()
+        )
+        var seeded = workspace
+        if let path {
+            seeded.panes[seeded.panes.startIndex].workingDirectory = path
+        }
+        state.workspaces.append(seeded)
+        state.topLevelOrder.append(.workspace(newWorkspaceID))
+        state.activeWorkspaceID = newWorkspaceID
+
+        // Resolve or create the group.
+        let targetGroupID: UUID
+        if let existing = existingGroup {
+            targetGroupID = existing.id
+        } else {
+            let newGroup = WorkspaceGroup(id: uuid(), name: trimmedGroup)
+            state.groups.append(newGroup)
+            state.topLevelOrder.append(.group(newGroup.id))
+            targetGroupID = newGroup.id
+        }
+
+        // Create the initial surface for the workspace, then move it
+        // under the resolved group, then persist. Mirrors the
+        // effects `createWorkspace` would run in the non-group path.
+        let paneID = seeded.panes.first!.id
+        let cwd = seeded.panes.first!.workingDirectory
+        let opacity = ghosttyConfig.backgroundOpacity
+        // `moveWorkspaceToGroup` persists, so an explicit persist
+        // here would race it. Only the surface-creation side-effect
+        // needs to fire alongside.
+        return .merge(
+            .run { _ in
+                await surfaceManager.createSurface(
+                    paneID: paneID,
+                    workingDirectory: cwd,
+                    backgroundOpacity: opacity
+                )
+            },
+            .send(.moveWorkspaceToGroup(
+                workspaceID: newWorkspaceID,
+                groupID: targetGroupID,
+                index: nil
+            ))
+        )
+    }
+
+    /// Dispatch `workspace-move`. `group == nil` targets the top
+    /// level; `group` non-nil resolves an existing group (creating
+    /// one is deliberately not supported here — use
+    /// `workspace-create --group` for that).
+    private func handleSocketWorkspaceMove(
+        _ state: inout State,
+        nameOrID: String,
+        group: String?,
+        index: Int?
+    ) -> Effect<Action> {
+        guard let workspace = state.resolveWorkspace(nameOrID) else { return .none }
+        let targetGroupID: UUID?
+        if let group {
+            guard let resolved = state.resolveGroup(group) else { return .none }
+            targetGroupID = resolved.id
+        } else {
+            targetGroupID = nil
+        }
+        return .send(.moveWorkspaceToGroup(
+            workspaceID: workspace.id,
+            groupID: targetGroupID,
+            index: index
+        ))
+    }
+
+    /// Dispatch `group-create`. Trims + rejects whitespace-only
+    /// names to match the existing `.createGroup` reducer handler
+    /// — a blank group name would render as empty header chrome
+    /// and isn't reachable by `resolveGroup` once more than one
+    /// exists. Icon is intentionally not exposed via this path:
+    /// setting an icon is a UI-only affordance (context menu).
+    private func handleSocketGroupCreate(
+        _ state: inout State,
+        name: String,
+        color: WorkspaceColor?
+    ) -> Effect<Action> {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .none }
+        let newID = uuid()
+        let createdGroup = WorkspaceGroup(id: newID, name: trimmed, color: color)
+        state.groups.append(createdGroup)
+        state.topLevelOrder.append(.group(newID))
+        return .send(.persistState)
     }
 
     var body: some ReducerOf<Self> {
@@ -1608,12 +1775,33 @@ struct AppReducer {
 
                 // MARK: Workspace commands
 
-                case .workspaceCreate(let name, let path, let color):
-                    return .send(.createWorkspace(
-                        name: name ?? "Workspace",
+                case .workspaceCreate(let name, let path, let color, let group):
+                    return handleSocketWorkspaceCreate(
+                        &state,
+                        name: name,
+                        path: path,
                         color: color,
-                        workingDirectory: path
-                    ))
+                        group: group
+                    )
+
+                case .workspaceMove(let nameOrID, let group, let index):
+                    return handleSocketWorkspaceMove(
+                        &state,
+                        nameOrID: nameOrID,
+                        group: group,
+                        index: index
+                    )
+
+                case .groupCreate(let name, let color):
+                    return handleSocketGroupCreate(&state, name: name, color: color)
+
+                case .groupRename(let nameOrID, let newName):
+                    guard let group = state.resolveGroup(nameOrID) else { return .none }
+                    return .send(.renameGroup(id: group.id, name: newName))
+
+                case .groupDelete(let nameOrID, let cascade):
+                    guard let group = state.resolveGroup(nameOrID) else { return .none }
+                    return .send(.deleteGroup(id: group.id, cascade: cascade))
 
                 // MARK: File commands
 

@@ -12,7 +12,11 @@
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex pane move [left|right|up|down]
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
-//   nex workspace create [--name "..."] [--path /dir] [--color blue]
+//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
+//   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+//   nex group create <name> [--color blue]
+//   nex group rename <name-or-id> <new-name>
+//   nex group delete <name-or-id> [--cascade]
 //   nex layout cycle
 //   nex layout select <name>
 //   nex open <filepath>
@@ -76,7 +80,11 @@ func printUsage() {
       nex pane send --to <name-or-uuid> <command...>
       nex pane move [left|right|up|down]
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
-      nex workspace create [--name "..."] [--path /dir] [--color blue]
+      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
+      nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+      nex group create <name> [--color blue]
+      nex group rename <name-or-id> <new-name>
+      nex group delete <name-or-id> [--cascade]
       nex layout cycle
       nex layout select <name>
       nex open <filepath>
@@ -94,6 +102,15 @@ func parseFlag(_ name: String, from args: inout ArraySlice<String>) -> String? {
     return value
 }
 
+/// Pop a boolean flag (presence means true). Unlike `parseFlag`, no
+/// trailing value is consumed. Used for toggles like `--cascade`,
+/// `--top-level`, `--reset`.
+func popSwitch(_ name: String, from args: inout ArraySlice<String>) -> Bool {
+    guard let idx = args.firstIndex(of: name) else { return false }
+    args.remove(at: idx)
+    return true
+}
+
 func requirePaneID() -> String {
     guard let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] else {
         // Not running inside a Nex pane — silent exit
@@ -103,6 +120,15 @@ func requirePaneID() -> String {
 }
 
 func sendJSON(_ payload: [String: String]) {
+    sendJSONAny(payload as [String: Any])
+}
+
+/// Accepts mixed-type payloads (e.g. `cascade: true`, `index: 3`) so
+/// new group / workspace-move commands can encode JSON bools and
+/// numbers instead of stringified ones. The server's `WireMessage`
+/// decoder requires native JSON types for `cascade: Bool?` and
+/// `index: Int?`.
+func sendJSONAny(_ payload: [String: Any]) {
     switch transport {
     case .unix(let path):
         sendViaUnix(path: path, payload: payload)
@@ -111,7 +137,7 @@ func sendJSON(_ payload: [String: String]) {
     }
 }
 
-func sendViaUnix(path: String, payload: [String: String]) {
+func sendViaUnix(path: String, payload: [String: Any]) {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -151,7 +177,7 @@ func sendViaUnix(path: String, payload: [String: String]) {
     close(fd)
 }
 
-func sendViaTCP(host: String, port: UInt16, payload: [String: String]) {
+func sendViaTCP(host: String, port: UInt16, payload: [String: Any]) {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -375,28 +401,118 @@ func handlePane(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace create [--name \"...\"] [--path /dir] [--color blue]\n", stderr)
+        fputs("Usage: nex workspace create|move [...]\n", stderr)
         exit(1)
     }
 
-    guard action == "create" else {
+    switch action {
+    case "create":
+        let name = parseFlag("--name", from: &args)
+        let path = parseFlag("--path", from: &args)
+        let color = parseFlag("--color", from: &args)
+        let group = parseFlag("--group", from: &args)
+
+        var payload = [
+            "command": "workspace-create"
+        ]
+        if let name { payload["name"] = name }
+        if let path { payload["path"] = path }
+        if let color { payload["color"] = color }
+        if let group { payload["group"] = group }
+
+        sendJSON(payload)
+
+    case "move":
+        guard let nameOrID = args.popFirst() else {
+            fputs("Usage: nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]\n", stderr)
+            exit(1)
+        }
+        let group = parseFlag("--group", from: &args)
+        let topLevel = popSwitch("--top-level", from: &args)
+        let indexRaw = parseFlag("--index", from: &args)
+
+        if group == nil, !topLevel {
+            fputs("workspace move requires --group <name> or --top-level\n", stderr)
+            exit(1)
+        }
+        if group != nil, topLevel {
+            fputs("workspace move can't take both --group and --top-level\n", stderr)
+            exit(1)
+        }
+
+        var payload: [String: Any] = [
+            "command": "workspace-move",
+            "name": nameOrID
+        ]
+        if let group { payload["group"] = group }
+        // `--top-level` means omit `group` entirely so the server
+        // resolves nil → detach from current parent.
+        if let indexRaw {
+            guard let index = Int(indexRaw) else {
+                fputs("--index must be an integer\n", stderr)
+                exit(1)
+            }
+            payload["index"] = index
+        }
+
+        sendJSONAny(payload)
+
+    default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: create\n", stderr)
+        fputs("Valid actions: create, move\n", stderr)
+        exit(1)
+    }
+}
+
+func handleGroup(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        fputs("Usage: nex group create|rename|delete [...]\n", stderr)
         exit(1)
     }
 
-    let name = parseFlag("--name", from: &args)
-    let path = parseFlag("--path", from: &args)
-    let color = parseFlag("--color", from: &args)
+    switch action {
+    case "create":
+        guard let name = args.popFirst() else {
+            fputs("Usage: nex group create <name> [--color blue]\n", stderr)
+            exit(1)
+        }
+        let color = parseFlag("--color", from: &args)
 
-    var payload = [
-        "command": "workspace-create"
-    ]
-    if let name { payload["name"] = name }
-    if let path { payload["path"] = path }
-    if let color { payload["color"] = color }
+        var payload: [String: String] = [
+            "command": "group-create",
+            "name": name
+        ]
+        if let color { payload["color"] = color }
+        sendJSON(payload)
 
-    sendJSON(payload)
+    case "rename":
+        guard let nameOrID = args.popFirst(), let newName = args.popFirst() else {
+            fputs("Usage: nex group rename <name-or-id> <new-name>\n", stderr)
+            exit(1)
+        }
+        sendJSON([
+            "command": "group-rename",
+            "name": nameOrID,
+            "new_name": newName
+        ])
+
+    case "delete":
+        guard let nameOrID = args.popFirst() else {
+            fputs("Usage: nex group delete <name-or-id> [--cascade]\n", stderr)
+            exit(1)
+        }
+        let cascade = popSwitch("--cascade", from: &args)
+        sendJSONAny([
+            "command": "group-delete",
+            "name": nameOrID,
+            "cascade": cascade
+        ])
+
+    default:
+        fputs("Unknown group action: \(action)\n", stderr)
+        fputs("Valid actions: create, rename, delete\n", stderr)
+        exit(1)
+    }
 }
 
 func handleLayout(_ args: inout ArraySlice<String>) {
@@ -467,6 +583,8 @@ case "pane":
     handlePane(&args)
 case "workspace":
     handleWorkspace(&args)
+case "group":
+    handleGroup(&args)
 case "layout":
     handleLayout(&args)
 case "open":

@@ -180,7 +180,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .workspaceCreate(name: "Test", path: "/tmp", color: .green))
+        #expect(result?.0 == .workspaceCreate(name: "Test", path: "/tmp", color: .green, group: nil))
     }
 
     @Test func parseWorkspaceCreateMinimal() {
@@ -189,7 +189,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .workspaceCreate(name: nil, path: nil, color: nil))
+        #expect(result?.0 == .workspaceCreate(name: nil, path: nil, color: nil, group: nil))
     }
 
     @Test func parseWorkspaceCreateNoPaneIDRequired() {
@@ -199,7 +199,121 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .workspaceCreate(name: "New", path: nil, color: nil))
+        #expect(result?.0 == .workspaceCreate(name: "New", path: nil, color: nil, group: nil))
+    }
+
+    @Test func parseWorkspaceCreateWithGroup() {
+        let data = jsonData("""
+        {"command":"workspace-create","name":"New","group":"Monitors"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .workspaceCreate(
+            name: "New",
+            path: nil,
+            color: nil,
+            group: "Monitors"
+        ))
+    }
+
+    @Test func parseWorkspaceMoveIntoGroup() {
+        let data = jsonData("""
+        {"command":"workspace-move","name":"Alpha","group":"Monitors","index":2}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .workspaceMove(
+            nameOrID: "Alpha",
+            group: "Monitors",
+            index: 2
+        ))
+    }
+
+    @Test func parseWorkspaceMoveToTopLevel() {
+        // Missing `group` = top-level (detach from current parent).
+        let data = jsonData("""
+        {"command":"workspace-move","name":"Alpha"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .workspaceMove(
+            nameOrID: "Alpha",
+            group: nil,
+            index: nil
+        ))
+    }
+
+    @Test func parseWorkspaceMoveEmptyGroupNormalisesToNil() {
+        // Empty-string `group` is normalised to nil so a cleared
+        // field doesn't accidentally resolve to a group named "".
+        let data = jsonData("""
+        {"command":"workspace-move","name":"Alpha","group":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .workspaceMove(nameOrID: "Alpha", group: nil, index: nil))
+    }
+
+    @Test func parseWorkspaceMoveMissingNameRejected() {
+        let data = jsonData("""
+        {"command":"workspace-move","group":"Monitors"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    // MARK: - parseWireMessage — Group commands
+
+    @Test func parseGroupCreateMinimal() {
+        let data = jsonData("""
+        {"command":"group-create","name":"Monitors"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupCreate(name: "Monitors", color: nil))
+    }
+
+    @Test func parseGroupCreateWithColor() {
+        let data = jsonData("""
+        {"command":"group-create","name":"Monitors","color":"blue"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupCreate(name: "Monitors", color: .blue))
+    }
+
+    @Test func parseGroupCreateMissingNameRejected() {
+        let data = jsonData("""
+        {"command":"group-create"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    @Test func parseGroupRename() {
+        let data = jsonData("""
+        {"command":"group-rename","name":"Old","new_name":"New"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupRename(nameOrID: "Old", newName: "New"))
+    }
+
+    @Test func parseGroupRenameMissingNewNameRejected() {
+        let data = jsonData("""
+        {"command":"group-rename","name":"Old"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    @Test func parseGroupDeleteDefaultsToPromoteChildren() {
+        let data = jsonData("""
+        {"command":"group-delete","name":"Monitors"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupDelete(nameOrID: "Monitors", cascade: false))
+    }
+
+    @Test func parseGroupDeleteWithCascade() {
+        let data = jsonData("""
+        {"command":"group-delete","name":"Monitors","cascade":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupDelete(nameOrID: "Monitors", cascade: true))
     }
 
     // MARK: - parseWireMessage — File commands
@@ -337,7 +451,7 @@ struct SocketParsingTests {
         #expect(results.count == 3)
         #expect(results[0] == .agentStarted(paneID: Self.paneUUID))
         #expect(results[1] == .paneSplit(paneID: Self.paneUUID, direction: .horizontal, path: nil, name: nil, target: nil))
-        #expect(results[2] == .workspaceCreate(name: "New", path: nil, color: nil))
+        #expect(results[2] == .workspaceCreate(name: "New", path: nil, color: nil, group: nil))
     }
 
     // MARK: - Pane move commands

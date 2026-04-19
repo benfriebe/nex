@@ -18,7 +18,13 @@ enum SocketMessage: Equatable {
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
-    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?)
+    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
+    case workspaceMove(nameOrID: String, group: String?, index: Int?)
+    /// Group commands. Icon-setting is deliberately UI-only: the
+    /// curated palette + emoji picker lives in the context menu.
+    case groupCreate(name: String, color: WorkspaceColor?)
+    case groupRename(nameOrID: String, newName: String)
+    case groupDelete(nameOrID: String, cascade: Bool)
     /// File commands
     case openFile(path: String, paneID: UUID?)
     /// Layout commands
@@ -276,6 +282,11 @@ final class SocketServer: Sendable {
         var color: String?
         var target: String?
         var text: String?
+        // Group/workspace-management fields
+        var newName: String?
+        var cascade: Bool?
+        var index: Int?
+        var group: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -283,6 +294,8 @@ final class SocketServer: Sendable {
             case message, title, body
             case sessionID = "session_id"
             case direction, path, name, color, target, text
+            case newName = "new_name"
+            case cascade, index, group
         }
     }
 
@@ -291,10 +304,43 @@ final class SocketServer: Sendable {
     static func parseWireMessage(_ data: Data) -> (SocketMessage, WireMessage)? {
         guard let wire = try? JSONDecoder().decode(WireMessage.self, from: data) else { return nil }
 
-        // workspace-create and open don't require pane_id
+        // workspace-create, workspace-move, group-*, open don't
+        // require pane_id.
         if wire.command == "workspace-create" {
             let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
-            return (.workspaceCreate(name: wire.name, path: wire.path, color: color), wire)
+            return (.workspaceCreate(
+                name: wire.name,
+                path: wire.path,
+                color: color,
+                group: wire.group
+            ), wire)
+        }
+
+        if wire.command == "workspace-move" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            // `group` nil = top-level; empty-string is normalised to
+            // nil so callers that serialise a cleared field don't
+            // accidentally target a group with an empty name.
+            let group = (wire.group?.isEmpty == true) ? nil : wire.group
+            return (.workspaceMove(nameOrID: nameOrID, group: group, index: wire.index), wire)
+        }
+
+        if wire.command == "group-create" {
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
+            return (.groupCreate(name: name, color: color), wire)
+        }
+
+        if wire.command == "group-rename" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty,
+                  let newName = wire.newName, !newName.isEmpty
+            else { return nil }
+            return (.groupRename(nameOrID: nameOrID, newName: newName), wire)
+        }
+
+        if wire.command == "group-delete" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.groupDelete(nameOrID: nameOrID, cascade: wire.cascade ?? false), wire)
         }
 
         if wire.command == "open" {

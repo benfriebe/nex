@@ -73,14 +73,20 @@ make check
 - DB location: `~/Library/Application Support/Nex/nex.db`
 
 ### Agent monitoring & CLI
-- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `workspace-create`, `layout-cycle`, `layout-select`.
+- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `pane-move`, `pane-move-to-workspace`, `workspace-create`, `workspace-move`, `group-create`, `group-rename`, `group-delete`, `layout-cycle`, `layout-select`, `open`. Group icon management is deliberately UI-only (context menu); there is no `group-set-icon` wire command.
 - **TCP transport**: enabled via `tcp-port = <port>` in `~/.config/nex/config`. Binds to `127.0.0.1` only (no auth needed — SSH tunnels handle remote security). Use cases: dev containers connect via `host.docker.internal:<port>`, remote agents connect via SSH reverse tunnel (`ssh -R <port>:localhost:<port> remote`).
-- `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace commands).
+- `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace + group commands).
+- **Name-or-ID resolution** (`State.resolveGroup` / `State.resolveWorkspace`): commands like `workspace-move`, `group-rename`, `group-delete` accept either a UUID string or a case-sensitive name. UUID wins when it matches; names must be unique to resolve (ambiguous → no-op).
 - `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`. Subcommand structure:
   - `nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]`
-  - `nex pane split|create|close|name|send [options]`
-  - `nex workspace create [--name ...] [--path ...] [--color ...]`
+  - `nex pane split|create|close|name|send|move|move-to-workspace [options]`
+  - `nex workspace create [--name ...] [--path ...] [--color ...] [--group <name>]`
+  - `nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]`
+  - `nex group create <name> [--color blue]`
+  - `nex group rename <name-or-id> <new-name>`
+  - `nex group delete <name-or-id> [--cascade]` — without `--cascade`, children promote to top level
   - `nex layout cycle|select <name>`
+  - `nex open <filepath>`
 - **CLI transport selection**: `NEX_SOCKET` env var selects transport. Absent = Unix socket (`/tmp/nex.sock`). `tcp:<host>:<port>` = TCP (e.g., `NEX_SOCKET=tcp:host.docker.internal:19400`).
 - `StatusBarController` — menu bar icon + popover showing running/waiting agents across workspaces.
 - `NotificationService` — desktop notifications with "Open"/"Dismiss" actions.
