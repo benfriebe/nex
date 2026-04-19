@@ -75,7 +75,7 @@ struct GroupHeaderRow: View {
             if !isRenaming {
                 Text("\(workspaceCount)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(
@@ -83,7 +83,14 @@ struct GroupHeaderRow: View {
                     )
             }
         }
-        .padding(.vertical, 6)
+        // Match a workspace row's laid-out height: a workspace row's
+        // inner HStack is driven by the 13pt name + 10pt subtitle
+        // VStack at ~29pt, plus 8pt vertical padding on each side
+        // ≈ 45pt total. Driving the header to the same content height
+        // here + the same 8pt vertical padding aligns the group's
+        // count badge vertically with the workspace rows' ⌘N badges.
+        .frame(minHeight: 29)
+        .padding(.vertical, 8)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .onTapGesture {

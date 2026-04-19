@@ -57,7 +57,7 @@ struct WorkspaceRowView: View {
             if index < 9 {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 8)
