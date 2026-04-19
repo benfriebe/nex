@@ -154,6 +154,23 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v10_workspace_group_icon") { db in
+            // Guarded like v4–v8: a pre-release DB may already have the
+            // column from running an earlier build, even though the
+            // migration record wasn't written. Re-running
+            // `ALTER TABLE ... ADD COLUMN` on an existing column
+            // throws and would wedge startup.
+            let columns = try db.columns(in: "workspace_group").map(\.name)
+            if !columns.contains("icon") {
+                try db.alter(table: "workspace_group") { t in
+                    // Prefix-qualified string produced by `GroupIcon.storageString`
+                    // (e.g., `"system:star.fill"`, `"emoji:📁"`). Nullable — nil
+                    // renders the default colour-tinted folder glyph.
+                    t.add(column: "icon", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -229,4 +246,5 @@ struct WorkspaceGroupRecord: Codable, FetchableRecord, PersistableRecord {
     var childOrderJSON: String
     var createdAt: Double
     var sortOrder: Int
+    var icon: String?
 }

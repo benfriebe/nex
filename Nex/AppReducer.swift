@@ -16,6 +16,7 @@ struct AppReducer {
         var renamingGroupID: UUID?
         var groupDeleteConfirmation: GroupDeleteConfirmation?
         var groupBulkCreatePrompt: GroupBulkCreatePrompt?
+        var groupCustomEmojiPrompt: GroupCustomEmojiPrompt?
         var selectedWorkspaceIDs: Set<UUID> = []
         var lastSelectionAnchor: UUID?
         var bulkDeleteConfirmationIDs: [UUID]?
@@ -221,6 +222,10 @@ struct AppReducer {
         case createGroup(name: String, color: WorkspaceColor? = nil, insertAfter: SidebarID? = nil, initialWorkspaceIDs: [UUID] = [], autoRename: Bool = false)
         case renameGroup(id: UUID, name: String)
         case setGroupColor(id: UUID, color: WorkspaceColor?)
+        case setGroupIcon(id: UUID, icon: GroupIcon?)
+        case requestGroupCustomEmoji(UUID)
+        case cancelGroupCustomEmoji
+        case confirmGroupCustomEmoji(String)
         case deleteGroup(id: UUID, cascade: Bool)
         case moveWorkspaceToGroup(workspaceID: UUID, groupID: UUID?, index: Int? = nil)
         case beginRenameGroup(UUID)
@@ -771,6 +776,41 @@ struct AppReducer {
             case .setGroupColor(let id, let color):
                 guard state.groups[id: id] != nil else { return .none }
                 state.groups[id: id]?.color = color
+                return .send(.persistState)
+
+            case .setGroupIcon(let id, let icon):
+                guard state.groups[id: id] != nil else { return .none }
+                state.groups[id: id]?.icon = icon
+                return .send(.persistState)
+
+            case .requestGroupCustomEmoji(let id):
+                guard let group = state.groups[id: id] else { return .none }
+                state.groupCustomEmojiPrompt = GroupCustomEmojiPrompt(
+                    groupID: id,
+                    groupName: group.name
+                )
+                return .none
+
+            case .cancelGroupCustomEmoji:
+                state.groupCustomEmojiPrompt = nil
+                return .none
+
+            case .confirmGroupCustomEmoji(let emoji):
+                // Enforce the "1 emoji grapheme" rule server-side so a
+                // stray plain character can't slip past the sheet's
+                // input filter. A non-emoji payload clears the prompt
+                // without changing the icon.
+                let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let prompt = state.groupCustomEmojiPrompt,
+                      let firstGrapheme = trimmed.first,
+                      firstGrapheme.isGraphemeEmoji
+                else {
+                    state.groupCustomEmojiPrompt = nil
+                    return .none
+                }
+                state.groupCustomEmojiPrompt = nil
+                guard state.groups[id: prompt.groupID] != nil else { return .none }
+                state.groups[id: prompt.groupID]?.icon = .emoji(String(firstGrapheme))
                 return .send(.persistState)
 
             case .deleteGroup(let id, let cascade):

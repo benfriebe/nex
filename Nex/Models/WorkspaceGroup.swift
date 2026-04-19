@@ -7,6 +7,9 @@ struct WorkspaceGroup: Equatable, Identifiable, Codable {
     var isCollapsed: Bool
     var childOrder: [UUID]
     var createdAt: Date
+    /// Optional icon override for the group header. `nil` falls back
+    /// to the colour-tinted folder glyph.
+    var icon: GroupIcon?
 
     init(
         id: UUID = UUID(),
@@ -14,7 +17,8 @@ struct WorkspaceGroup: Equatable, Identifiable, Codable {
         color: WorkspaceColor? = nil,
         isCollapsed: Bool = false,
         childOrder: [UUID] = [],
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        icon: GroupIcon? = nil
     ) {
         self.id = id
         self.name = name
@@ -22,6 +26,7 @@ struct WorkspaceGroup: Equatable, Identifiable, Codable {
         self.isCollapsed = isCollapsed
         self.childOrder = childOrder
         self.createdAt = createdAt
+        self.icon = icon
     }
 }
 
@@ -37,4 +42,12 @@ struct GroupDeleteConfirmation: Equatable {
 /// selection to use when the user confirms.
 struct GroupBulkCreatePrompt: Equatable {
     let workspaceIDs: [UUID]
+}
+
+/// Pending "Custom Emoji…" sheet for a group. Stores the target group
+/// so the confirm action can write the chosen emoji back without
+/// relying on external focus state.
+struct GroupCustomEmojiPrompt: Equatable {
+    let groupID: UUID
+    let groupName: String
 }

@@ -5,6 +5,7 @@ import SwiftUI
 struct GroupHeaderRow: View {
     let name: String
     let color: WorkspaceColor?
+    let icon: GroupIcon?
     let isCollapsed: Bool
     let workspaceCount: Int
     let isRenaming: Bool
@@ -17,23 +18,21 @@ struct GroupHeaderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Folder icon carries the group colour. Filled when coloured
-            // so the hue reads clearly; outlined + secondary when the
-            // user hasn't set a colour. Collapse state reads from
-            // whether the group's children render below, so no chevron
-            // is needed.
+            // Icon carries the group identity. The chosen glyph sits
+            // in a 4pt-wide slot that matches the colour pill on
+            // workspace rows, so a group header and a root workspace
+            // share the same leading-column anchor. The glyph is
+            // wider than 4pt; it overflows the slot and centres on
+            // the 18pt-from-entry-edge column — visually aligned with
+            // the pill.
             //
-            // The icon sits in a 4pt-wide slot that matches the colour
-            // pill on workspace rows, so a group header and a root
-            // workspace share the same leading-column anchor. The
-            // glyph is wider than 4pt; it overflows the slot and
-            // centres on the 18pt-from-entry-edge column — visually
-            // aligned with the pill.
+            // When no `icon` is set the default filled/outlined folder
+            // glyph tints with the group's colour. Custom SF Symbols
+            // pick up the same tint. Emoji glyphs carry their own
+            // palette and render untinted.
             ZStack {
                 Color.clear.frame(width: 4, height: 24)
-                Image(systemName: color == nil ? "folder" : "folder.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(color?.color ?? Color.secondary)
+                iconGlyph
             }
 
             if isRenaming {
@@ -109,6 +108,34 @@ struct GroupHeaderRow: View {
             } else {
                 onToggleCollapse()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var iconGlyph: some View {
+        switch icon {
+        case .none:
+            // Default: colour-tinted folder (filled when a colour is
+            // set, outlined otherwise).
+            Image(systemName: color == nil ? "folder" : "folder.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(color?.color ?? Color.secondary)
+        case .systemName(let name):
+            // Custom SF Symbol. Inherit the group's colour tint so it
+            // reads the same as the default folder would. Folder is
+            // special-cased to upgrade to `folder.fill` when a colour
+            // is set, so picking "Folder" from the Symbol menu and
+            // using "Reset to Folder" render the same glyph on a
+            // coloured group.
+            let effective = (name == "folder" && color != nil) ? "folder.fill" : name
+            Image(systemName: effective)
+                .font(.system(size: 11))
+                .foregroundStyle(color?.color ?? Color.secondary)
+        case .emoji(let grapheme):
+            // Emoji glyphs render with their native palette — SwiftUI
+            // can't recolour them cleanly, so we skip the tint.
+            Text(grapheme)
+                .font(.system(size: 11))
         }
     }
 }

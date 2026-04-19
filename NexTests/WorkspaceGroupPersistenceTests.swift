@@ -71,6 +71,54 @@ struct WorkspaceGroupPersistenceTests {
         #expect(result.groups.isEmpty)
     }
 
+    @Test func iconRoundTripsBothVariants() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let ws1 = WorkspaceFeature.State(name: "Ws1", color: .blue)
+        let groupSystemID = UUID()
+        let groupEmojiID = UUID()
+        let groupFolderID = UUID()
+        let systemGroup = WorkspaceGroup(
+            id: groupSystemID,
+            name: "System",
+            childOrder: [],
+            icon: .systemName("star.fill")
+        )
+        let emojiGroup = WorkspaceGroup(
+            id: groupEmojiID,
+            name: "Emoji",
+            childOrder: [],
+            icon: .emoji("🔥")
+        )
+        // Unset icon should round-trip as nil.
+        let folderGroup = WorkspaceGroup(
+            id: groupFolderID,
+            name: "Folder",
+            childOrder: [],
+            icon: nil
+        )
+
+        let state = AppReducer.State(
+            workspaces: [ws1],
+            groups: [systemGroup, emojiGroup, folderGroup],
+            topLevelOrder: [
+                .workspace(ws1.id),
+                .group(groupSystemID),
+                .group(groupEmojiID),
+                .group(groupFolderID)
+            ],
+            activeWorkspaceID: ws1.id
+        )
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        #expect(result.groups[id: groupSystemID]?.icon == .systemName("star.fill"))
+        #expect(result.groups[id: groupEmojiID]?.icon == .emoji("🔥"))
+        #expect(result.groups[id: groupFolderID]?.icon == nil)
+    }
+
     @Test func savingClearsRemovedGroups() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)

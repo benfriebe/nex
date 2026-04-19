@@ -154,6 +154,21 @@ struct DatabaseMigrationTests {
         }
     }
 
+    @Test func v10AddsIconColumnToWorkspaceGroup() throws {
+        let db = try DatabaseService(inMemory: true)
+
+        try db.writer.read { db in
+            let columns = try db.columns(in: "workspace_group")
+            let names = Set(columns.map(\.name))
+            #expect(names.contains("icon"))
+            // Column is nullable — the v10 migration shouldn't force
+            // existing rows to carry an icon value.
+            if let iconColumn = columns.first(where: { $0.name == "icon" }) {
+                #expect(iconColumn.isNotNull == false)
+            }
+        }
+    }
+
     @Test func workspaceGroupRecordInsertAndFetch() throws {
         let db = try DatabaseService(inMemory: true)
 
@@ -165,7 +180,8 @@ struct DatabaseMigrationTests {
                 isCollapsed: true,
                 childOrderJSON: "[\"abc\"]",
                 createdAt: 1000,
-                sortOrder: 0
+                sortOrder: 0,
+                icon: "system:star.fill"
             )
             try record.insert(db)
         }
@@ -179,6 +195,7 @@ struct DatabaseMigrationTests {
         #expect(fetched?.color == "gray")
         #expect(fetched?.isCollapsed == true)
         #expect(fetched?.childOrderJSON == "[\"abc\"]")
+        #expect(fetched?.icon == "system:star.fill")
     }
 
     @Test func cascadeDeleteRepoRemovesAssociations() throws {

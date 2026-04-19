@@ -199,13 +199,15 @@ actor PersistenceService {
                         .flatMap { try? JSONDecoder().decode([UUID].self, from: $0) }
                         ?? []
                     let color = gr.color.flatMap { WorkspaceColor(rawValue: $0) }
+                    let icon = gr.icon.flatMap { GroupIcon(storageString: $0) }
                     let group = WorkspaceGroup(
                         id: groupID,
                         name: gr.name,
                         color: color,
                         isCollapsed: gr.isCollapsed,
                         childOrder: childOrder,
-                        createdAt: Date(timeIntervalSince1970: gr.createdAt)
+                        createdAt: Date(timeIntervalSince1970: gr.createdAt),
+                        icon: icon
                     )
                     groups.append(group)
                 }
@@ -323,7 +325,8 @@ struct PersistenceSnapshot {
                 isCollapsed: group.isCollapsed,
                 childOrderJSON: childJSON,
                 createdAt: group.createdAt.timeIntervalSince1970,
-                sortOrder: index
+                sortOrder: index,
+                icon: group.icon?.storageString
             )
         }
 

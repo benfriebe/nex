@@ -245,6 +245,20 @@ struct WorkspaceListView: View {
                     )
                 }
             }
+            .sheet(isPresented: Binding(
+                get: { store.groupCustomEmojiPrompt != nil },
+                set: { if !$0 { store.send(.cancelGroupCustomEmoji) } }
+            )) {
+                if let prompt = store.groupCustomEmojiPrompt {
+                    GroupCustomEmojiSheet(
+                        groupName: prompt.groupName,
+                        onConfirm: { emoji in
+                            store.send(.confirmGroupCustomEmoji(emoji))
+                        },
+                        onCancel: { store.send(.cancelGroupCustomEmoji) }
+                    )
+                }
+            }
         }
     }
 
@@ -326,6 +340,7 @@ struct WorkspaceListView: View {
         let row = GroupHeaderRow(
             name: group.name,
             color: group.color,
+            icon: group.icon,
             isCollapsed: group.isCollapsed,
             workspaceCount: count,
             isRenaming: isRenamingThis,
@@ -565,12 +580,69 @@ struct WorkspaceListView: View {
                 }
             }
         }
+        changeIconMenu(groupID: groupID)
         Button(group.isCollapsed ? "Expand" : "Collapse") {
             store.send(.toggleGroupCollapse(groupID))
         }
         Divider()
         Button("Delete Group...", role: .destructive) {
             store.send(.requestGroupDelete(groupID))
+        }
+    }
+
+    /// Curated SF Symbol palette. Names paired with friendly labels
+    /// because raw symbol names (e.g., `testtube.2`) aren't readable
+    /// in a menu. Folder is first so the user can explicitly set it
+    /// alongside the other options; `Reset to Folder` below clears
+    /// the custom icon back to the default which renders the same
+    /// glyph.
+    private static let groupIconSymbolPalette: [(systemName: String, label: String)] = [
+        ("folder", "Folder"),
+        ("tray", "Tray"),
+        ("archivebox", "Archive"),
+        ("star", "Star"),
+        ("flag", "Flag"),
+        ("pin", "Pin"),
+        ("bookmark", "Bookmark"),
+        ("hammer", "Build"),
+        ("testtube.2", "Tests"),
+        ("terminal", "Terminal"),
+        ("shippingbox", "Package"),
+        ("book", "Docs"),
+        ("sparkles", "AI")
+    ]
+
+    /// Curated emoji palette matching the plan-doc list.
+    private static let groupIconEmojiPalette: [String] = [
+        "📁", "📂", "⭐", "🔥", "💼", "🎯",
+        "🧪", "🐛", "📝", "🚀", "☁️", "🎨"
+    ]
+
+    private func changeIconMenu(groupID: UUID) -> some View {
+        Menu("Change Icon") {
+            Menu("Symbol") {
+                ForEach(Self.groupIconSymbolPalette, id: \.systemName) { entry in
+                    Button {
+                        store.send(.setGroupIcon(id: groupID, icon: .systemName(entry.systemName)))
+                    } label: {
+                        Label(entry.label, systemImage: entry.systemName)
+                    }
+                }
+            }
+            Menu("Emoji") {
+                ForEach(Self.groupIconEmojiPalette, id: \.self) { emoji in
+                    Button(emoji) {
+                        store.send(.setGroupIcon(id: groupID, icon: .emoji(emoji)))
+                    }
+                }
+            }
+            Button("Custom Emoji...") {
+                store.send(.requestGroupCustomEmoji(groupID))
+            }
+            Divider()
+            Button("Reset to Folder") {
+                store.send(.setGroupIcon(id: groupID, icon: nil))
+            }
         }
     }
 

@@ -182,6 +182,80 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
+    // MARK: - setGroupIcon + custom emoji prompt
+
+    @Test func setGroupIconAssignsAndClears() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "G", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.setGroupIcon(id: Self.groupA, icon: .systemName("star.fill"))) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == .systemName("star.fill"))
+        }
+        await store.send(.setGroupIcon(id: Self.groupA, icon: .emoji("🔥"))) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == .emoji("🔥"))
+        }
+        await store.send(.setGroupIcon(id: Self.groupA, icon: nil)) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == nil)
+        }
+    }
+
+    @Test func setGroupIconIgnoresUnknownGroup() async {
+        let store = makeStore()
+        let unknown = UUID(uuidString: "90000000-0000-0000-0000-000000000099")!
+        await store.send(.setGroupIcon(id: unknown, icon: .emoji("⭐")))
+    }
+
+    @Test func customEmojiPromptOpensAndClears() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.requestGroupCustomEmoji(Self.groupA)) { state in
+            #expect(state.groupCustomEmojiPrompt?.groupID == Self.groupA)
+            #expect(state.groupCustomEmojiPrompt?.groupName == "Work")
+        }
+        await store.send(.cancelGroupCustomEmoji) { state in
+            #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
+    @Test func confirmGroupCustomEmojiAppliesFirstGrapheme() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.requestGroupCustomEmoji(Self.groupA))
+        // "🔥💰" is two grapheme clusters; the reducer keeps only the first.
+        await store.send(.confirmGroupCustomEmoji("🔥💰")) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == .emoji("🔥"))
+            #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
+    @Test func confirmGroupCustomEmojiWithWhitespaceClearsPromptAndLeavesIconNil() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.requestGroupCustomEmoji(Self.groupA))
+        // Whitespace-only payload is rejected; group icon stays nil
+        // and the prompt clears.
+        await store.send(.confirmGroupCustomEmoji("   ")) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == nil)
+            #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
+    @Test func confirmGroupCustomEmojiRejectsNonEmoji() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.requestGroupCustomEmoji(Self.groupA))
+        // A plain letter passes the "non-empty grapheme" gate but
+        // fails the emoji check; icon stays nil, prompt still clears.
+        await store.send(.confirmGroupCustomEmoji("a")) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == nil)
+            #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
     // MARK: - deleteGroup (cascade = false)
 
     @Test func deleteGroupPromotesChildrenToTopLevel() async {
