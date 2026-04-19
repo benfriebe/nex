@@ -334,7 +334,14 @@ struct WorkspaceListView: View {
     /// reorder instead of selecting text / moving the caret.
     @ViewBuilder
     private func groupHeaderEntry(groupID: UUID, group: WorkspaceGroup) -> some View {
-        let count = group.childOrder.compactMap { store.workspaces[id: $0] }.count
+        let children = group.childOrder.compactMap { store.workspaces[id: $0] }
+        let count = children.count
+        let hasWaitingPanes = children.contains { ws in
+            ws.panes.contains { $0.status == .waitingForInput }
+        }
+        let hasRunningPanes = children.contains { ws in
+            ws.panes.contains { $0.status == .running }
+        }
         let isRenamingThis = store.renamingGroupID == groupID
         let isDraggingThisGroup = draggedGroupID == groupID
         let row = GroupHeaderRow(
@@ -344,6 +351,8 @@ struct WorkspaceListView: View {
             isCollapsed: group.isCollapsed,
             workspaceCount: count,
             isRenaming: isRenamingThis,
+            hasWaitingPanes: hasWaitingPanes,
+            hasRunningPanes: hasRunningPanes,
             onToggleCollapse: {
                 // If a different group is being renamed, clicking any row
                 // should commit its name via focus loss.

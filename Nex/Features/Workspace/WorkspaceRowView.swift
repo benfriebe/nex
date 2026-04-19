@@ -1,5 +1,24 @@
 import SwiftUI
 
+/// Pulsing status dot used by workspace rows and group headers to signal
+/// agent activity in the sidebar.
+struct AgentStatusDot: View {
+    let color: Color
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 10, height: 10)
+            .opacity(isPulsing ? 0.3 : 1.0)
+            .animation(
+                .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                value: isPulsing
+            )
+            .onAppear { isPulsing = true }
+    }
+}
+
 /// Single row in the workspace sidebar list.
 struct WorkspaceRowView: View {
     let name: String
@@ -49,9 +68,9 @@ struct WorkspaceRowView: View {
             Spacer()
 
             if waitingPaneCount > 0 {
-                PulsingDot(color: .blue)
+                AgentStatusDot(color: .blue)
             } else if hasRunningPanes {
-                PulsingDot(color: .green)
+                AgentStatusDot(color: .green)
             }
 
             if index < 9 {
@@ -86,23 +105,6 @@ struct WorkspaceRowView: View {
         // spanning the full width.
         .padding(.leading, leadingInset)
         .contentShape(Rectangle())
-    }
-
-    private struct PulsingDot: View {
-        let color: Color
-        @State private var isPulsing = false
-
-        var body: some View {
-            Circle()
-                .fill(color)
-                .frame(width: 10, height: 10)
-                .opacity(isPulsing ? 0.3 : 1.0)
-                .animation(
-                    .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                    value: isPulsing
-                )
-                .onAppear { isPulsing = true }
-        }
     }
 
     @ViewBuilder

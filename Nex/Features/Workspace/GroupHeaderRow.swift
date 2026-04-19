@@ -9,6 +9,8 @@ struct GroupHeaderRow: View {
     let isCollapsed: Bool
     let workspaceCount: Int
     let isRenaming: Bool
+    var hasWaitingPanes: Bool = false
+    var hasRunningPanes: Bool = false
     let onToggleCollapse: () -> Void
     let onCommitRename: (String) -> Void
     let onCancelRename: () -> Void
@@ -75,6 +77,12 @@ struct GroupHeaderRow: View {
             Spacer(minLength: 4)
 
             if !isRenaming {
+                if hasWaitingPanes {
+                    AgentStatusDot(color: .blue)
+                } else if hasRunningPanes {
+                    AgentStatusDot(color: .green)
+                }
+
                 Text("\(workspaceCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
