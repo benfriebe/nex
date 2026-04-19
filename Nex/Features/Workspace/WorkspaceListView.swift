@@ -204,16 +204,23 @@ struct WorkspaceListView: View {
                 titleVisibility: .visible
             ) {
                 if let confirmation = store.groupDeleteConfirmation {
-                    Button("Move Workspaces to Top Level", role: .destructive) {
-                        store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
+                    if confirmation.workspaceCount == 0 {
+                        // Empty group: no workspaces to move or cascade.
+                        // A single "Delete Group" is the only meaningful action.
+                        Button("Delete Group", role: .destructive) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
+                        }
+                    } else {
+                        Button("Move Workspaces to Top Level", role: .destructive) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
+                        }
+                        Button(
+                            "Delete Group and \(confirmation.workspaceCount) Workspace\(confirmation.workspaceCount == 1 ? "" : "s")",
+                            role: .destructive
+                        ) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: true))
+                        }
                     }
-                    Button(
-                        "Delete Group and \(confirmation.workspaceCount) Workspace\(confirmation.workspaceCount == 1 ? "" : "s")",
-                        role: .destructive
-                    ) {
-                        store.send(.deleteGroup(id: confirmation.groupID, cascade: true))
-                    }
-                    .disabled(confirmation.workspaceCount == 0)
                     Button("Cancel", role: .cancel) { store.send(.cancelGroupDelete) }
                 }
             } message: {
