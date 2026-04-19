@@ -62,11 +62,6 @@ struct WorkspaceRowView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
-        // Apply nesting inset as a leading padding so it interpolates
-        // on depth changes. A conditional `Spacer().frame(width:)`
-        // would toggle in and out of the view tree and snap via the
-        // default opacity transition instead of animating layout.
-        .padding(.leading, leadingInset)
         .background(
             ZStack {
                 if isSelected {
@@ -77,9 +72,19 @@ struct WorkspaceRowView: View {
                 }
                 if isActive {
                     RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.1))
+                    // Accent outline makes the active workspace more
+                    // prominent than the bare white fill could on its
+                    // own, especially against a busy sidebar.
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.accentColor, lineWidth: 1.5)
                 }
             }
         )
+        // Nesting inset is applied AFTER the background so the fill +
+        // outline stay within the row's content area. A nested row
+        // gets its outline indented from the sidebar edge instead of
+        // spanning the full width.
+        .padding(.leading, leadingInset)
         .contentShape(Rectangle())
     }
 

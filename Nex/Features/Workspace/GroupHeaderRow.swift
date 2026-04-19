@@ -16,22 +16,25 @@ struct GroupHeaderRow: View {
     @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 10, alignment: .center)
-                .contentShape(Rectangle())
-                .onTapGesture { onToggleCollapse() }
-
+        HStack(spacing: 8) {
             // Folder icon carries the group colour. Filled when coloured
             // so the hue reads clearly; outlined + secondary when the
-            // user hasn't set a colour, matching the muted appearance of
-            // the rest of the header chrome.
-            Image(systemName: color == nil ? "folder" : "folder.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(color?.color ?? Color.secondary)
-                .frame(width: 14, alignment: .center)
+            // user hasn't set a colour. Collapse state reads from
+            // whether the group's children render below, so no chevron
+            // is needed.
+            //
+            // The icon sits in a 4pt-wide slot that matches the colour
+            // pill on workspace rows, so a group header and a root
+            // workspace share the same leading-column anchor. The
+            // glyph is wider than 4pt; it overflows the slot and
+            // centres on the 18pt-from-entry-edge column — visually
+            // aligned with the pill.
+            ZStack {
+                Color.clear.frame(width: 4, height: 24)
+                Image(systemName: color == nil ? "folder" : "folder.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(color?.color ?? Color.secondary)
+            }
 
             if isRenaming {
                 TextField("Group name", text: $renameText)
@@ -91,7 +94,12 @@ struct GroupHeaderRow: View {
         // count badge vertically with the workspace rows' ⌘N badges.
         .frame(minHeight: 29)
         .padding(.vertical, 8)
-        .padding(.horizontal, 8)
+        // 16pt total horizontal padding matches the workspace row's
+        // layered padding (8pt internal inside `WorkspaceRowView` + 8pt
+        // external in `WorkspaceListView`'s `workspaceRow`). That puts
+        // the 4pt folder slot at 16pt from the entry leading edge —
+        // centred at 18pt, exactly under the workspace row's pill.
+        .padding(.horizontal, 16)
         .contentShape(Rectangle())
         .onTapGesture {
             if isRenaming {

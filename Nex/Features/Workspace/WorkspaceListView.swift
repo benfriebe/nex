@@ -251,11 +251,12 @@ struct WorkspaceListView: View {
     // MARK: - Entry rendering
 
     /// Horizontal position of the group guide line from the row's
-    /// leading edge. Picked to sit inside the child's indent area and
-    /// align with the folder icon in the header above (header's
-    /// 8pt outer padding + 10pt chevron + 6pt spacing + centre of the
-    /// 14pt folder glyph = ~31pt).
-    private static let groupGuideLeadingInset: CGFloat = 31
+    /// leading edge. Set to 18pt — aligned with the 4pt leading
+    /// slot that carries the group header's folder icon and each
+    /// root workspace's colour pill (slot spans 16–20pt; the guide
+    /// sits against its leading side). The guide emanates down from
+    /// the folder icon through the indent column of each child row.
+    private static let groupGuideLeadingInset: CGFloat = 18
 
     /// Colour of the vertical guide line drawn behind child entries of
     /// an expanded group. Falls back to `.secondary` when the group
