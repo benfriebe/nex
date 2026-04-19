@@ -24,11 +24,14 @@ struct GroupHeaderRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleCollapse() }
 
-            if let color {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(color.color)
-                    .frame(width: 3, height: 14)
-            }
+            // Folder icon carries the group colour. Filled when coloured
+            // so the hue reads clearly; outlined + secondary when the
+            // user hasn't set a colour, matching the muted appearance of
+            // the rest of the header chrome.
+            Image(systemName: color == nil ? "folder" : "folder.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(color?.color ?? Color.secondary)
+                .frame(width: 14, alignment: .center)
 
             if isRenaming {
                 TextField("Group name", text: $renameText)
@@ -95,38 +98,23 @@ struct GroupHeaderRow: View {
     }
 }
 
-/// Placeholder shown inside an expanded but empty group. Phase 4 will turn the
-/// container into a drop target.
+/// Placeholder shown inside an expanded but empty group. Drag math
+/// uses the runtime-measured height (`effectiveEmptyRowHeight`), so the
+/// placeholder no longer has to mimic a workspace row's laid-out height.
 struct GroupEmptyRow: View {
     var body: some View {
         HStack(spacing: 8) {
-            // `WorkspaceRowView` at depth 1 inserts a 16pt leading
-            // spacer before its color bar — match it here so the
-            // "No workspaces" text aligns with nested workspaces' names.
+            // Match the 16pt leading spacer + 4pt colour-bar slot used
+            // by nested workspace rows so "No workspaces" aligns with
+            // the column of workspace names above.
             Spacer().frame(width: 16)
-            // Match `WorkspaceRowView`'s color bar slot (4×24).
-            Color.clear.frame(width: 4, height: 24)
-            // Mirror `WorkspaceRowView`'s 2-line VStack (13pt + 10pt)
-            // so the placeholder's laid-out height equals a workspace
-            // row. Font sizes drive the VStack's intrinsic height and
-            // therefore the whole row's height — the color bar alone
-            // isn't the tallest child. Without this, live-applying a
-            // drag into this empty group jumps the layout by the
-            // difference between the placeholder and a real row.
-            VStack(alignment: .leading, spacing: 1) {
-                Text("No workspaces")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                Text(" ")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
+            Color.clear.frame(width: 4, height: 16)
+            Text("No workspaces")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 8)
-        // 16pt on each side = the 8pt outer padding the workspace row
-        // gets from `WorkspaceListView` plus the 8pt inner padding
-        // `WorkspaceRowView` applies to itself.
+        .padding(.vertical, 6)
         .padding(.horizontal, 16)
     }
 }

@@ -103,6 +103,21 @@ struct WorkspaceListView: View {
 
                         ForEach(entries) { entry in
                             entryView(for: entry)
+                                .overlay(alignment: .leading) {
+                                    if let color = groupChildGuideColor(for: entry) {
+                                        // Thin vertical guide running the
+                                        // length of the group's children.
+                                        // Per-row overlays chain together
+                                        // across the spacing-0 VStack into
+                                        // one continuous line, aligned with
+                                        // the folder icon in the header.
+                                        Rectangle()
+                                            .fill(color)
+                                            .frame(width: 1.5)
+                                            .padding(.leading, Self.groupGuideLeadingInset)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
                         }
                         // Trailing flexible spacer that fills remaining
                         // viewport height. Absorbs right-clicks ("New Group"
@@ -132,8 +147,13 @@ struct WorkspaceListView: View {
                     .padding(.trailing, 8)
                     .frame(minHeight: outer.size.height, alignment: .top)
                     .animation(
+                        // Keyed on the rendered entry list (not just the
+                        // visible workspace order) so collapsing an
+                        // *empty* group animates too — the placeholder
+                        // insert/remove isn't reflected in the workspace
+                        // order, but it is in the entries.
                         .spring(response: 0.35, dampingFraction: 0.8),
-                        value: store.state.visibleWorkspaceOrder
+                        value: entries
                     )
                     .overlay(alignment: .topLeading) {
                         dropIndicatorOverlay
@@ -222,6 +242,34 @@ struct WorkspaceListView: View {
     }
 
     // MARK: - Entry rendering
+
+    /// Horizontal position of the group guide line from the row's
+    /// leading edge. Picked to sit inside the child's indent area and
+    /// align with the folder icon in the header above (header's
+    /// 8pt outer padding + 10pt chevron + 6pt spacing + centre of the
+    /// 14pt folder glyph = ~31pt).
+    private static let groupGuideLeadingInset: CGFloat = 31
+
+    /// Colour of the vertical guide line drawn behind child entries of
+    /// an expanded group. Falls back to `.secondary` when the group
+    /// has no colour, matching the outlined folder icon rendered in the
+    /// header for uncoloured groups. `nil` for the group header itself
+    /// and top-level workspaces.
+    private func groupChildGuideColor(for entry: RenderedEntry) -> Color? {
+        switch entry {
+        case .groupHeader:
+            return nil
+        case .workspaceRow(let workspaceID, _):
+            guard let gid = store.state.groupID(forWorkspace: workspaceID),
+                  let group = store.groups[id: gid],
+                  !group.isCollapsed
+            else { return nil }
+            return group.color?.color ?? Color.secondary
+        case .groupEmpty(let groupID):
+            guard let group = store.groups[id: groupID] else { return nil }
+            return group.color?.color ?? Color.secondary
+        }
+    }
 
     @ViewBuilder
     private func entryView(for entry: RenderedEntry) -> some View {
