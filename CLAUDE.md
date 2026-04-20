@@ -17,13 +17,14 @@ xcodegen generate --spec project.yml
 # Build (also serves as typecheck — there is no separate typecheck step)
 xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation build
 
-# Run all tests
-xcodebuild -scheme NexTests -destination 'platform=macOS' -skipMacroValidation test
+# Run all tests (the `Nex` scheme's testTargets wiring routes the run
+# into the `NexTests` target — there is no standalone `NexTests` scheme)
+xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation test
 
 # Run a single test class or method
-xcodebuild -scheme NexTests -destination 'platform=macOS' -skipMacroValidation \
+xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation \
   -only-testing:NexTests/PaneLayoutTests test
-xcodebuild -scheme NexTests -destination 'platform=macOS' -skipMacroValidation \
+xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation \
   -only-testing:NexTests/PaneLayoutTests/testSplitHorizontal test
 
 # Lint & format
