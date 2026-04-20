@@ -101,6 +101,7 @@ targets:
           codesign --force --sign "Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)" --timestamp "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Helpers/nex"
           mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts"
           cp "${SRCROOT}/scripts/install-hooks.sh" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
+          cp "${SRCROOT}/scripts/merge_hooks.py" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/merge_hooks.py"
           chmod +x "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
           codesign --force --sign "Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)" --timestamp "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/scripts/install-hooks.sh"
           mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/skills/nex-agentic"
