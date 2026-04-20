@@ -48,6 +48,62 @@ nex pane name <label>
 
 # Send text to another pane (typed into its PTY + Enter)
 nex pane send --to <label-or-uuid> <command...>
+
+# List panes (only command that returns data — use for reconciliation)
+nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
+```
+
+### `pane list` — reconcile with live state
+
+`pane list` is the only Nex command that returns data. Use it whenever a
+coordinator needs to know what panes actually exist right now — panes can
+be closed by the user, crash, or be moved between workspaces, and
+`pane send` silently no-ops against a missing target. Always check the
+list before assuming a worker is still alive.
+
+```bash
+# Human-readable (default)
+nex pane list
+
+# JSON for scripts — stable shape, exit code encodes success
+nex pane list --json
+
+# Only panes in the current pane's workspace (requires NEX_PANE_ID)
+nex pane list --current
+
+# Only panes in a named workspace
+nex pane list --workspace nex
+```
+
+Each JSON entry includes: `id`, `label`, `type` (`shell`/`markdown`/
+`scratchpad`), `title`, `workspace_id`, `workspace_name`,
+`working_directory`, `git_branch`, `status` (`idle`/`running`/
+`waitingForInput`), `claude_session_id`, `is_focused`,
+`is_active_workspace`, `created_at`, `last_activity_at`.
+
+Exit codes: `0` on success (including empty list), `1` on usage error,
+transport failure, or `ok: false` from the server. Empty output with
+exit `1` and `"upgrade required"` on stderr means the running Nex is
+older than v0.20 and doesn't support `pane list`.
+
+Common recipes:
+
+```bash
+# All labels of your workers
+nex pane list --json | jq -r '.[].label | select(startswith("worker-"))'
+
+# Which workers are still alive?
+alive=$(nex pane list --json | jq -r '.[].label')
+for w in worker-1 worker-2 worker-3; do
+  echo "$alive" | grep -qx "$w" && echo "$w: alive" || echo "$w: gone"
+done
+
+# Agent status across a fan-out
+nex pane list --json | jq -r '.[] | select(.label | startswith("worker-"))
+  | "\(.label)\t\(.status)"'
+
+# Find a specific pane's UUID before a `pane send`
+uuid=$(nex pane list --json | jq -r '.[] | select(.label == "build") | .id')
 ```
 
 ### Event Commands (Agent Lifecycle)
@@ -142,8 +198,25 @@ nex pane send --to worker-3 claude -p "Read .nex-tasks/worker-3.md and complete 
 #### Step 5: Poll for results
 
 ```bash
-# Wait for result files to appear
-while [ ! -f .nex-results/worker-1.md ] || [ ! -f .nex-results/worker-2.md ] || [ ! -f .nex-results/worker-3.md ]; do
+# Wait for result files to appear. Between polls, use `pane list` to
+# detect workers that died (user-closed, crashed) so the loop exits
+# instead of hanging forever.
+WORKERS=(worker-1 worker-2 worker-3)
+while true; do
+  all_done=true
+  for w in "${WORKERS[@]}"; do
+    [ -f ".nex-results/$w.md" ] || { all_done=false; break; }
+  done
+  $all_done && break
+
+  # Abort if any worker pane has vanished.
+  alive=$(nex pane list --json | jq -r '.[].label')
+  for w in "${WORKERS[@]}"; do
+    if ! echo "$alive" | grep -qx "$w" && [ ! -f ".nex-results/$w.md" ]; then
+      echo "worker $w disappeared before producing output" >&2
+      exit 1
+    fi
+  done
   sleep 5
 done
 ```
@@ -306,15 +379,21 @@ for worker in "${WORKERS[@]}"; do
   sleep 1
 done
 
-# Wait for all results
+# Wait for all results. Reconcile against live pane state so a worker
+# that died (user-closed, crashed) stops the loop instead of hanging.
 echo "Waiting for workers to complete..."
-all_done=false
-while [ "$all_done" = false ]; do
+while true; do
   all_done=true
   for worker in "${WORKERS[@]}"; do
-    if [ ! -f "$RESULT_DIR/$worker.md" ]; then
-      all_done=false
-      break
+    [ -f "$RESULT_DIR/$worker.md" ] || { all_done=false; break; }
+  done
+  $all_done && break
+
+  alive=$(nex pane list --json | jq -r '.[].label')
+  for worker in "${WORKERS[@]}"; do
+    if ! echo "$alive" | grep -qx "$worker" && [ ! -f "$RESULT_DIR/$worker.md" ]; then
+      echo "worker $worker disappeared before producing output" >&2
+      exit 1
     fi
   done
   sleep 5
@@ -328,6 +407,10 @@ echo "All workers complete. Results in $RESULT_DIR/"
 - If a worker fails, its result file won't appear. The coordinator should
   implement a timeout (e.g., 5 minutes) and report which workers didn't
   complete.
+- **Use `nex pane list` to detect dead workers** before timeout. If a
+  worker's label no longer appears in the list, the pane was closed
+  externally and its result file will never arrive — bail out instead of
+  polling forever.
 - Workers can signal errors via `nex event error --message "description"`.
 - Workers can send desktop notifications via
   `nex event notification --title "Done" --body "Task complete"`.
