@@ -9,10 +9,11 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     private var markedText: NSMutableAttributedString = .init()
     let paneID: UUID
 
-    // Keyboard interpretation state — populated by NSTextInputClient during interpretKeyEvents
-    private var interpretedText: String?
-    private var isComposing: Bool = false
-    private var isInKeyDown: Bool = false
+    /// Keyboard interpretation state, populated by NSTextInputClient during interpretKeyEvents.
+    /// A non-nil accumulator means we're inside a keyDown. `insertText` may be called more than
+    /// once per keyDown (e.g. US International dead-key failure: `'` + `s` fires twice), so we
+    /// accumulate and emit one key event per string. Mirrors Ghostty upstream's approach.
+    private var keyTextAccumulator: [String]?
 
     /// Resize debounce — coalesces rapid setFrameSize calls (from splits, maximize,
     /// drag resize) into a single set_size so the shell only gets one SIGWINCH.
@@ -237,26 +238,32 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Step 1: Interpret the key event to get the text it produces.
-        // This calls our NSTextInputClient methods (insertText/setMarkedText)
-        // which store the result in interpretedText/isComposing.
-        interpretedText = nil
-        isComposing = false
-        isInKeyDown = true
+        let markedTextBefore = hasMarkedText()
+
+        keyTextAccumulator = []
+        defer { keyTextAccumulator = nil }
         interpretKeyEvents([event])
-        isInKeyDown = false
 
-        // Step 2: Build a key event with the interpreted text attached.
-        var key = Self.keyEvent(from: event, action: GHOSTTY_ACTION_PRESS)
-        key.composing = isComposing
+        let accumulated = keyTextAccumulator ?? []
 
-        // Step 3: Send the key event to ghostty with the text.
-        if let text = interpretedText {
-            text.withCString { ptr in
-                key.text = ptr
-                _ = ghosttySurface?.sendKey(key)
+        if !accumulated.isEmpty {
+            // Composition committed one or more strings. Emit one key event per string
+            // with composing=false. This handles US International dead-key failure,
+            // where AppKit fires insertText twice (e.g. "'" then "s") in a single keyDown.
+            for text in accumulated {
+                var key = Self.keyEvent(from: event, action: GHOSTTY_ACTION_PRESS)
+                key.composing = false
+                text.withCString { ptr in
+                    key.text = ptr
+                    _ = ghosttySurface?.sendKey(key)
+                }
             }
         } else {
+            // No committed text. Either a pure preedit update, a bare key (arrow, enter),
+            // or a composing keypress. `composing` is true if we're still in preedit now,
+            // or if marked text existed before and was cleared by this event.
+            var key = Self.keyEvent(from: event, action: GHOSTTY_ACTION_PRESS)
+            key.composing = hasMarkedText() || markedTextBefore
             _ = ghosttySurface?.sendKey(key)
         }
     }
@@ -386,12 +393,12 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
         unmarkText()
 
-        if isInKeyDown {
-            // During keyDown: store text for the key event, don't send separately
-            interpretedText = str
-            isComposing = false
+        if keyTextAccumulator != nil {
+            // Inside a keyDown: accumulate for the post-interpret loop.
+            // AppKit may call insertText multiple times per keyDown.
+            keyTextAccumulator?.append(str)
         } else {
-            // Outside keyDown (e.g., dictation, paste via services menu): send directly
+            // Outside keyDown (dictation, services menu paste, drag-drop): send directly.
             ghosttySurface?.sendText(str)
         }
     }
@@ -408,17 +415,22 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             return
         }
 
-        if isInKeyDown {
-            interpretedText = str
-            isComposing = true
-        } else {
+        // Outside keyDown (e.g. IME layout switch mid-compose), push preedit so the
+        // terminal can render it. Inside keyDown the preedit state is conveyed by
+        // the key event's composing flag.
+        if keyTextAccumulator == nil {
             ghosttySurface?.sendPreedit(str)
         }
     }
 
     func unmarkText() {
+        let hadMarked = markedText.length > 0
         markedText = NSMutableAttributedString()
-        isComposing = false
+        // Only push the clear to ghostty when outside keyDown. Inside keyDown, the next
+        // key event's composing flag (and preedit updates) already convey the state.
+        if hadMarked, keyTextAccumulator == nil {
+            ghosttySurface?.sendPreedit("")
+        }
     }
 
     func selectedRange() -> NSRange {
