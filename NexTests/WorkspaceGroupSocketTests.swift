@@ -99,7 +99,7 @@ struct WorkspaceGroupSocketTests {
         await store.send(.socketMessage(.groupCreate(
             name: "Monitors",
             color: .blue
-        ))) { state in
+        ), reply: nil)) { state in
             #expect(state.groups.count == 1)
             let group = state.groups.first
             #expect(group?.name == "Monitors")
@@ -118,7 +118,7 @@ struct WorkspaceGroupSocketTests {
         let group = WorkspaceGroup(id: Self.groupAID, name: "Old", childOrder: [])
         let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupAID)])
 
-        await store.send(.socketMessage(.groupRename(nameOrID: "Old", newName: "New")))
+        await store.send(.socketMessage(.groupRename(nameOrID: "Old", newName: "New"), reply: nil))
         await store.receive(\.renameGroup) { state in
             #expect(state.groups[id: Self.groupAID]?.name == "New")
         }
@@ -126,7 +126,7 @@ struct WorkspaceGroupSocketTests {
 
     @Test func socketGroupRenameUnknownIsNoOp() async {
         let store = makeStore()
-        await store.send(.socketMessage(.groupRename(nameOrID: "Missing", newName: "Ignored")))
+        await store.send(.socketMessage(.groupRename(nameOrID: "Missing", newName: "Ignored"), reply: nil))
     }
 
     @Test func socketGroupDeletePromoteChildren() async {
@@ -145,7 +145,7 @@ struct WorkspaceGroupSocketTests {
             activeWorkspaceID: Self.ws1ID
         )
 
-        await store.send(.socketMessage(.groupDelete(nameOrID: "G", cascade: false)))
+        await store.send(.socketMessage(.groupDelete(nameOrID: "G", cascade: false), reply: nil))
         await store.receive(\.deleteGroup) { state in
             // Children promoted; group removed. Dialog is never
             // shown — the CLI path skips the confirmation.
@@ -171,7 +171,7 @@ struct WorkspaceGroupSocketTests {
             activeWorkspaceID: Self.ws1ID
         )
 
-        await store.send(.socketMessage(.groupDelete(nameOrID: "G", cascade: true)))
+        await store.send(.socketMessage(.groupDelete(nameOrID: "G", cascade: true), reply: nil))
         await store.receive(\.deleteGroup) { state in
             #expect(state.groups[id: Self.groupAID] == nil)
             #expect(state.workspaces[id: Self.ws1ID] == nil)
@@ -190,7 +190,7 @@ struct WorkspaceGroupSocketTests {
             path: "/tmp",
             color: .blue,
             group: "Monitors"
-        )))
+        ), reply: nil))
         // The socket handler seeds state inline, then dispatches
         // `.moveWorkspaceToGroup` which is the action we receive.
         await store.receive(\.moveWorkspaceToGroup) { state in
@@ -208,7 +208,7 @@ struct WorkspaceGroupSocketTests {
             path: nil,
             color: nil,
             group: "Fresh"
-        )))
+        ), reply: nil))
         await store.receive(\.moveWorkspaceToGroup) { state in
             #expect(state.workspaces.count == 1)
             #expect(state.groups.count == 1)
@@ -227,7 +227,7 @@ struct WorkspaceGroupSocketTests {
             path: nil,
             color: nil,
             group: nil
-        )))
+        ), reply: nil))
         // With no group, the handler just dispatches the existing
         // `createWorkspace` action — no move-to-group follow-up.
         await store.receive(\.createWorkspace) { state in
@@ -251,7 +251,7 @@ struct WorkspaceGroupSocketTests {
             nameOrID: "Alpha",
             group: "Monitors",
             index: nil
-        )))
+        ), reply: nil))
         await store.receive(\.moveWorkspaceToGroup) { state in
             #expect(state.groups[id: Self.groupAID]?.childOrder == [Self.ws1ID])
         }
@@ -274,7 +274,7 @@ struct WorkspaceGroupSocketTests {
             nameOrID: "Alpha",
             group: nil,
             index: nil
-        )))
+        ), reply: nil))
         await store.receive(\.moveWorkspaceToGroup) { state in
             #expect(state.groups[id: Self.groupAID]?.childOrder.isEmpty == true)
             #expect(state.topLevelOrder.contains(.workspace(Self.ws1ID)))
@@ -292,7 +292,7 @@ struct WorkspaceGroupSocketTests {
             nameOrID: "Missing",
             group: "Monitors",
             index: nil
-        )))
+        ), reply: nil))
         // No follow-up action expected — store stays idle.
     }
 
@@ -307,7 +307,7 @@ struct WorkspaceGroupSocketTests {
             nameOrID: "Alpha",
             group: "Missing",
             index: nil
-        )))
+        ), reply: nil))
     }
 
     // MARK: - Findings fixes
@@ -328,7 +328,7 @@ struct WorkspaceGroupSocketTests {
             path: nil,
             color: nil,
             group: "Dupes"
-        )))
+        ), reply: nil))
         // No effects expected. Workspace count stays zero, group
         // count stays at two.
         #expect(store.state.workspaces.isEmpty)
@@ -345,7 +345,7 @@ struct WorkspaceGroupSocketTests {
             path: nil,
             color: nil,
             group: "   "
-        )))
+        ), reply: nil))
         await store.receive(\.createWorkspace) { state in
             #expect(state.workspaces.count == 1)
             #expect(state.groups.isEmpty)
@@ -357,7 +357,7 @@ struct WorkspaceGroupSocketTests {
         await store.send(.socketMessage(.groupCreate(
             name: "   ",
             color: nil
-        )))
+        ), reply: nil))
         // No group appended, no persist.
         #expect(store.state.groups.isEmpty)
     }
@@ -367,7 +367,7 @@ struct WorkspaceGroupSocketTests {
         await store.send(.socketMessage(.groupCreate(
             name: "  Monitors  ",
             color: nil
-        ))) { state in
+        ), reply: nil)) { state in
             #expect(state.groups.first?.name == "Monitors")
         }
     }

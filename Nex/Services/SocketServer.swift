@@ -30,7 +30,16 @@ enum SocketMessage: Equatable {
     /// Layout commands
     case layoutCycle(paneID: UUID)
     case layoutSelect(paneID: UUID, name: String)
+    /// Request/response — first command that returns data.
+    /// `scope` may be `"current"` (require `paneID`) or `"all"` (default).
+    case paneList(paneID: UUID?, workspace: String?, scope: String?)
 }
+
+/// Commands that expect a single-line JSON reply followed by EOF. For any
+/// command outside this allowlist the server does not allocate a
+/// `ReplyHandle` and the wire behaviour is byte-identical to the
+/// pre-request/response protocol.
+private let replyCommandAllowlist: Set<String> = ["pane-list"]
 
 /// Unix domain socket server that listens for structured JSON messages
 /// from the `nex` CLI tool. Agent hooks (Claude Code, Codex)
@@ -55,9 +64,53 @@ final class SocketServer: Sendable {
     private nonisolated(unsafe) var tcpFD: Int32 = -1
     private nonisolated(unsafe) var tcpAcceptSource: DispatchSourceRead?
     private nonisolated(unsafe) var clientSources: [Int32: DispatchSourceRead] = [:]
+    /// Reply-handle id → client FD. Populated only for commands in
+    /// `replyCommandAllowlist`; other commands never allocate an entry.
+    private nonisolated(unsafe) var replyFDs: [UInt64: Int32] = [:]
+    private nonisolated(unsafe) var nextReplyID: UInt64 = 1
 
-    /// Called on the main queue when a valid message arrives.
-    nonisolated(unsafe) var onMessage: (@Sendable (SocketMessage) -> Void)?
+    /// Called on the main queue when a valid message arrives. The second
+    /// argument is non-nil only for request-style commands (see
+    /// `replyCommandAllowlist`); all existing fire-and-forget commands
+    /// receive `nil` and the server behaves identically to before.
+    nonisolated(unsafe) var onMessage: (@Sendable (SocketMessage, ReplyHandle?) -> Void)?
+
+    /// Opaque handle the reducer uses to write a single JSON response
+    /// line and close the client connection. Safe to drop on the floor —
+    /// the existing EOF path still closes orphaned FDs when the CLI
+    /// disconnects.
+    ///
+    /// Closure-based so tests can supply capture stubs without a live
+    /// `SocketServer`. Marked `@unchecked Sendable` because it only
+    /// needs to cross actors via the `socketServer.onMessage`
+    /// indirection, and both the server-backed and test-backed
+    /// implementations confine their state appropriately.
+    struct ReplyHandle: @unchecked Sendable, Equatable {
+        let id: UInt64
+        private let sendImpl: ([String: Any]) -> Void
+        private let closeImpl: () -> Void
+
+        init(id: UInt64, send: @escaping ([String: Any]) -> Void, close: @escaping () -> Void) {
+            self.id = id
+            sendImpl = send
+            closeImpl = close
+        }
+
+        func send(_ json: [String: Any]) {
+            sendImpl(json)
+        }
+
+        func close() {
+            closeImpl()
+        }
+
+        /// Identity compare on id only — the closures aren't comparable
+        /// but two handles from the same server slot always share an id.
+        /// Keeps the enclosing TCA Action Equatable-synthesized.
+        static func == (lhs: ReplyHandle, rhs: ReplyHandle) -> Bool {
+            lhs.id == rhs.id
+        }
+    }
 
     func start() {
         let alreadyRunning = lock.withLock {
@@ -225,6 +278,17 @@ final class SocketServer: Sendable {
         }
         guard clientFD >= 0 else { return }
 
+        // Suppress SIGPIPE on this FD so a `reply(id:json:)` write to a
+        // client that vanished between parse and reducer (e.g. the
+        // user ^C'd `nex pane list`) fails with EPIPE instead of
+        // terminating the whole app. macOS has no MSG_NOSIGNAL flag;
+        // SO_NOSIGPIPE on the socket is the equivalent.
+        var noSigPipe: Int32 = 1
+        setsockopt(
+            clientFD, SOL_SOCKET, SO_NOSIGPIPE,
+            &noSigPipe, socklen_t(MemoryLayout<Int32>.size)
+        )
+
         let clientSource = DispatchSource.makeReadSource(fileDescriptor: clientFD, queue: .global(qos: .utility))
         clientSource.setEventHandler { [weak self] in
             self?.readFromClient(fd: clientFD)
@@ -234,6 +298,11 @@ final class SocketServer: Sendable {
             guard let self else { return }
             lock.lock()
             clientSources.removeValue(forKey: clientFD)
+            // Drop any outstanding reply handles pointing at this FD.
+            // The handle's `send()` / `close()` become no-ops.
+            for (id, fd) in replyFDs where fd == clientFD {
+                replyFDs.removeValue(forKey: id)
+            }
             lock.unlock()
         }
         lock.withLock { clientSources[clientFD] = clientSource }
@@ -252,19 +321,81 @@ final class SocketServer: Sendable {
         }
 
         let data = Data(buffer[..<bytesRead])
-        processData(data)
+        processData(data, clientFD: fd)
     }
 
-    private func processData(_ data: Data) {
-        let messages = Self.parseMessages(data)
-        guard !messages.isEmpty else { return }
+    private func processData(_ data: Data, clientFD: Int32) {
+        let parsed = Self.parseMessagesWithCommands(data)
+        guard !parsed.isEmpty else { return }
 
         let callback = lock.withLock { onMessage }
-        DispatchQueue.main.async {
-            for message in messages {
-                callback?(message)
+        // Allocate reply handles on the read queue (before main async) so
+        // the id → FD mapping is guaranteed visible when the reducer
+        // runs. Non-reply commands carry a nil handle.
+        var dispatch: [(SocketMessage, ReplyHandle?)] = []
+        dispatch.reserveCapacity(parsed.count)
+        for (message, command) in parsed {
+            if replyCommandAllowlist.contains(command) {
+                let handle = allocateReplyHandle(for: clientFD)
+                dispatch.append((message, handle))
+            } else {
+                dispatch.append((message, nil))
             }
         }
+
+        DispatchQueue.main.async {
+            for (message, handle) in dispatch {
+                callback?(message, handle)
+            }
+        }
+    }
+
+    private func allocateReplyHandle(for clientFD: Int32) -> ReplyHandle {
+        let id: UInt64 = lock.withLock {
+            let next = nextReplyID
+            nextReplyID &+= 1
+            replyFDs[next] = clientFD
+            return next
+        }
+        return ReplyHandle(
+            id: id,
+            send: { [weak self] json in self?.reply(id: id, json: json) },
+            close: { [weak self] in self?.closeReply(id: id) }
+        )
+    }
+
+    /// Write a single JSON line to the reply-handle's FD. Silently
+    /// no-ops if the handle is stale (client disconnected, server
+    /// stopped). Called from the reducer on the main actor.
+    fileprivate func reply(id: UInt64, json: [String: Any]) {
+        let fd = lock.withLock { replyFDs[id] ?? -1 }
+        guard fd >= 0 else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: json),
+              var text = String(data: data, encoding: .utf8) else { return }
+        text += "\n"
+        text.withCString { ptr in
+            let len = strlen(ptr)
+            var remaining = len
+            var p = ptr
+            while remaining > 0 {
+                let n = send(fd, p, remaining, 0)
+                if n <= 0 { return }
+                remaining -= n
+                p = p.advanced(by: n)
+            }
+        }
+    }
+
+    /// Close the reply channel by cancelling the client's dispatch
+    /// source (which closes the FD). The cancel handler also removes
+    /// any lingering entries from `replyFDs`.
+    fileprivate func closeReply(id: UInt64) {
+        let (source, fd): (DispatchSourceRead?, Int32) = lock.withLock {
+            guard let fd = replyFDs.removeValue(forKey: id) else { return (nil, -1) }
+            return (clientSources[fd], fd)
+        }
+        guard fd >= 0 else { return }
+        source?.cancel()
     }
 
     // MARK: - Static Parsing (testable)
@@ -287,6 +418,9 @@ final class SocketServer: Sendable {
         var cascade: Bool?
         var index: Int?
         var group: String?
+        // Request/response — `pane-list` filters
+        var workspace: String?
+        var scope: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -296,6 +430,7 @@ final class SocketServer: Sendable {
             case direction, path, name, color, target, text
             case newName = "new_name"
             case cascade, index, group
+            case workspace, scope
         }
     }
 
@@ -347,6 +482,16 @@ final class SocketServer: Sendable {
             guard let path = wire.path, !path.isEmpty else { return nil }
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
             return (.openFile(path: path, paneID: paneID), wire)
+        }
+
+        if wire.command == "pane-list" {
+            // `pane_id` is optional — required only when `scope == "current"`,
+            // which the reducer validates. Invalid UUIDs fail the request
+            // downstream rather than silently dropping the message.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let scope = (wire.scope?.isEmpty == true) ? nil : wire.scope
+            return (.paneList(paneID: paneID, workspace: workspace, scope: scope), wire)
         }
 
         guard let paneIDString = wire.paneID,
@@ -407,16 +552,25 @@ final class SocketServer: Sendable {
     /// Handles the session_id dual-fire logic: if a non-session-start command
     /// includes a session_id, a .sessionStarted message is also emitted.
     static func parseMessages(_ data: Data) -> [SocketMessage] {
+        parseMessagesWithCommands(data).map(\.0)
+    }
+
+    /// Like `parseMessages` but also returns the originating wire command
+    /// alongside each message, so callers (the server) can decide
+    /// whether to allocate a `ReplyHandle` for request-style commands.
+    /// The synthesized `.sessionStarted` dual-fires carry the original
+    /// command name so they never end up in the reply allowlist.
+    static func parseMessagesWithCommands(_ data: Data) -> [(SocketMessage, String)] {
         guard let text = String(data: data, encoding: .utf8) else { return [] }
 
-        var results: [SocketMessage] = []
+        var results: [(SocketMessage, String)] = []
         for line in text.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty,
                   let jsonData = trimmed.data(using: .utf8) else { continue }
 
             guard let (message, wire) = parseWireMessage(jsonData) else { continue }
-            results.append(message)
+            results.append((message, wire.command))
 
             // session_id is a common field on all Claude Code hook stdin JSON.
             // Fire .sessionStarted whenever it's present (unless the command
@@ -425,7 +579,7 @@ final class SocketServer: Sendable {
                let paneIDString = wire.paneID,
                let paneID = UUID(uuidString: paneIDString),
                let sessionID = wire.sessionID, !sessionID.isEmpty {
-                results.append(.sessionStarted(paneID: paneID, sessionID: sessionID))
+                results.append((.sessionStarted(paneID: paneID, sessionID: sessionID), wire.command))
             }
         }
         return results

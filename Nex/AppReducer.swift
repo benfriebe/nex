@@ -263,8 +263,12 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
 
-        /// Socket messages (agent lifecycle + pane/workspace commands)
-        case socketMessage(SocketMessage)
+        /// Socket messages (agent lifecycle + pane/workspace commands).
+        /// `reply` is non-nil only for request-style commands (currently
+        /// only `pane-list`). The reducer writes a single JSON line via
+        /// `reply.send(...)` and closes the connection with
+        /// `reply.close()`.
+        case socketMessage(SocketMessage, reply: SocketServer.ReplyHandle?)
 
         // Cross-workspace surface notifications
         case surfaceTitleChanged(paneID: UUID, title: String)
@@ -527,6 +531,93 @@ struct AppReducer {
         state.groups.append(createdGroup)
         state.topLevelOrder.append(.group(newID))
         return .send(.persistState)
+    }
+
+    /// Build the `pane-list` response payload and write it to the
+    /// reply handle. Pure read of in-memory state — runs on the main
+    /// actor and returns before any effects would fire.
+    ///
+    /// Filter semantics:
+    /// - `workspace` and `scope == "current"` are mutually exclusive
+    ///   (server replies with an error if both are set).
+    /// - `scope == "current"` requires a valid `paneID`; the response
+    ///   contains the panes in the workspace that owns it.
+    /// - Unknown `workspace` → error response; unknown `scope` (other
+    ///   than `nil` / `"all"` / `"current"`) → error response.
+    func handlePaneList(
+        state: State,
+        paneID: UUID?,
+        workspaceFilter: String?,
+        scope: String?,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        // Validate mutually exclusive filters.
+        if workspaceFilter != nil, scope == "current" {
+            reply.send(["ok": false, "error": "workspace and --current are mutually exclusive"])
+            reply.close()
+            return
+        }
+
+        // Resolve which workspaces to include.
+        let workspaces: [WorkspaceFeature.State]
+        switch scope {
+        case nil, "all":
+            if let filter = workspaceFilter {
+                guard let ws = state.resolveWorkspace(filter) else {
+                    reply.send(["ok": false, "error": "workspace not found: \(filter)"])
+                    reply.close()
+                    return
+                }
+                workspaces = [ws]
+            } else {
+                workspaces = Array(state.workspaces)
+            }
+        case "current":
+            guard let paneID,
+                  let ws = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) else {
+                reply.send(["ok": false, "error": "no workspace contains the requesting pane"])
+                reply.close()
+                return
+            }
+            workspaces = [ws]
+        default:
+            reply.send(["ok": false, "error": "unknown scope: \(scope ?? "")"])
+            reply.close()
+            return
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        var panes: [[String: Any]] = []
+        for workspace in workspaces {
+            for paneID in workspace.layout.allPaneIDs {
+                guard let pane = workspace.panes[id: paneID] else { continue }
+                var entry: [String: Any] = [
+                    "id": pane.id.uuidString,
+                    "type": pane.type.rawValue,
+                    "workspace_id": workspace.id.uuidString,
+                    "workspace_name": workspace.name,
+                    "working_directory": pane.workingDirectory,
+                    "status": pane.status.rawValue,
+                    "is_focused": workspace.focusedPaneID == pane.id,
+                    "is_active_workspace": state.activeWorkspaceID == workspace.id,
+                    "created_at": iso.string(from: pane.createdAt),
+                    "last_activity_at": iso.string(from: pane.lastActivityAt)
+                ]
+                if let label = pane.label { entry["label"] = label }
+                if let title = pane.title { entry["title"] = title }
+                if let branch = pane.gitBranch { entry["git_branch"] = branch }
+                if let sessionID = pane.claudeSessionID { entry["claude_session_id"] = sessionID }
+                if let filePath = pane.filePath { entry["file_path"] = filePath }
+                panes.append(entry)
+            }
+        }
+
+        reply.send(["ok": true, "panes": panes])
+        reply.close()
     }
 
     var body: some ReducerOf<Self> {
@@ -1533,7 +1624,7 @@ struct AppReducer {
 
             // MARK: - Socket Messages
 
-            case .socketMessage(let message):
+            case .socketMessage(let message, let reply):
                 switch message {
                 // MARK: Agent lifecycle
 
@@ -1832,6 +1923,18 @@ struct AppReducer {
                           let layout = PredefinedLayout(rawValue: name)
                     else { return .none }
                     return .send(.workspaces(.element(id: workspace.id, action: .selectLayout(layout))))
+
+                // MARK: Request / response
+
+                case .paneList(let paneID, let workspaceFilter, let scope):
+                    handlePaneList(
+                        state: state,
+                        paneID: paneID,
+                        workspaceFilter: workspaceFilter,
+                        scope: scope,
+                        reply: reply
+                    )
+                    return .none
                 }
 
             // MARK: - Cross-Workspace Surface Notifications

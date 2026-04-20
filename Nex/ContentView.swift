@@ -259,9 +259,9 @@ struct ContentView: View {
             }
             .onAppear {
                 // Start socket server and wire messages to AppReducer
-                socketServer.onMessage = { message in
+                socketServer.onMessage = { message, reply in
                     Task { @MainActor in
-                        store.send(.socketMessage(message))
+                        store.send(.socketMessage(message, reply: reply))
                     }
                 }
                 socketServer.start()

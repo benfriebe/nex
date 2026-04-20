@@ -12,6 +12,7 @@
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex pane move [left|right|up|down]
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+//   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
 //   nex group create <name> [--color blue]
@@ -80,6 +81,7 @@ func printUsage() {
       nex pane send --to <name-or-uuid> <command...>
       nex pane move [left|right|up|down]
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+      nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
       nex group create <name> [--color blue]
@@ -131,13 +133,78 @@ func sendJSON(_ payload: [String: String]) {
 func sendJSONAny(_ payload: [String: Any]) {
     switch transport {
     case .unix(let path):
-        sendViaUnix(path: path, payload: payload)
+        sendViaUnix(path: path, payload: payload, expectsReply: false)
     case .tcp(let host, let port):
-        sendViaTCP(host: host, port: port, payload: payload)
+        sendViaTCP(host: host, port: port, payload: payload, expectsReply: false)
     }
 }
 
-func sendViaUnix(path: String, payload: [String: Any]) {
+/// Round-trip variant: send the payload, read until EOF, return the
+/// accumulated response bytes. Returns `nil` if the transport fails;
+/// callers must treat that differently from "empty reply" (which is
+/// data.isEmpty but non-nil, signalling an older server that silently
+/// dropped the request).
+func sendJSONAndReadReply(_ payload: [String: Any]) -> Data? {
+    switch transport {
+    case .unix(let path):
+        sendViaUnix(path: path, payload: payload, expectsReply: true)
+    case .tcp(let host, let port):
+        sendViaTCP(host: host, port: port, payload: payload, expectsReply: true)
+    }
+}
+
+/// Default read timeout (seconds) for request/response commands.
+/// Protects against mixed-version setups where an older Nex accepts
+/// the connection but silently drops `pane-list` and never closes —
+/// without this timeout the CLI would hang indefinitely. Override via
+/// `NEX_REPLY_TIMEOUT` (seconds, integer) for slow TCP tunnels.
+let replyTimeoutSeconds: Int = {
+    if let env = ProcessInfo.processInfo.environment["NEX_REPLY_TIMEOUT"],
+       let n = Int(env), n > 0 {
+        return n
+    }
+    return 5
+}()
+
+/// Apply the reply timeout to `fd` as a receive-side socket option.
+/// After this, `read()` returns -1 with `errno == EAGAIN` if nothing
+/// arrives within the window.
+func setReadTimeout(fd: Int32, seconds: Int) {
+    var tv = timeval(tv_sec: seconds, tv_usec: 0)
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+}
+
+/// Read everything the peer sends until it closes its end. Returns
+/// nil if `read()` errors before any bytes arrive; otherwise returns
+/// the accumulated buffer (possibly empty when the server accepts
+/// and immediately closes, or times out waiting on an older server
+/// that doesn't recognise the request).
+func readUntilEOF(fd: Int32) -> Data? {
+    var accumulated = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while true {
+        let n = read(fd, &buffer, buffer.count)
+        if n > 0 {
+            accumulated.append(buffer, count: n)
+            continue
+        }
+        if n == 0 {
+            return accumulated
+        }
+        // n < 0 — EINTR retry; EAGAIN/EWOULDBLOCK means the
+        // SO_RCVTIMEO elapsed, which we treat the same as "no
+        // reply" (empty Data) so the caller can surface a friendly
+        // upgrade-required message.
+        if errno == EINTR { continue }
+        if errno == EAGAIN || errno == EWOULDBLOCK {
+            return accumulated
+        }
+        return accumulated.isEmpty ? nil : accumulated
+    }
+}
+
+@discardableResult
+func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -147,7 +214,10 @@ func sendViaUnix(path: String, payload: [String: Any]) {
     jsonString += "\n"
 
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { exit(0) }
+    guard fd >= 0 else {
+        if expectsReply { return nil }
+        exit(0)
+    }
 
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -166,6 +236,7 @@ func sendViaUnix(path: String, payload: [String: Any]) {
 
     guard connectResult == 0 else {
         close(fd)
+        if expectsReply { return nil }
         exit(0)
     }
 
@@ -174,10 +245,16 @@ func sendViaUnix(path: String, payload: [String: Any]) {
         _ = send(fd, ptr, len, 0)
     }
 
+    if expectsReply {
+        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+    }
+    let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
+    return reply
 }
 
-func sendViaTCP(host: String, port: UInt16, payload: [String: Any]) {
+@discardableResult
+func sendViaTCP(host: String, port: UInt16, payload: [String: Any], expectsReply: Bool) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -192,16 +269,24 @@ func sendViaTCP(host: String, port: UInt16, payload: [String: Any]) {
     hints.ai_socktype = SOCK_STREAM
     var result: UnsafeMutablePointer<addrinfo>?
     guard getaddrinfo(host, String(port), &hints, &result) == 0,
-          let addrInfo = result else { exit(0) }
+          let addrInfo = result
+    else {
+        if expectsReply { return nil }
+        exit(0)
+    }
     defer { freeaddrinfo(result) }
 
     let fd = socket(addrInfo.pointee.ai_family, addrInfo.pointee.ai_socktype, addrInfo.pointee.ai_protocol)
-    guard fd >= 0 else { exit(0) }
+    guard fd >= 0 else {
+        if expectsReply { return nil }
+        exit(0)
+    }
 
     let connectResult = connect(fd, addrInfo.pointee.ai_addr, addrInfo.pointee.ai_addrlen)
 
     guard connectResult == 0 else {
         close(fd)
+        if expectsReply { return nil }
         exit(0)
     }
 
@@ -210,7 +295,12 @@ func sendViaTCP(host: String, port: UInt16, payload: [String: Any]) {
         _ = send(fd, ptr, len, 0)
     }
 
+    if expectsReply {
+        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+    }
+    let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
+    return reply
 }
 
 // MARK: - Subcommands
@@ -282,14 +372,13 @@ func handleEvent(_ args: inout ArraySlice<String>) {
 
 func handlePane(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex pane split|create|close|name|send|move [...]\n", stderr)
+        fputs("Usage: nex pane split|create|close|name|send|move|list [...]\n", stderr)
         exit(1)
     }
 
-    let paneID = requirePaneID()
-
     switch action {
     case "split":
+        let paneID = requirePaneID()
         let direction = parseFlag("--direction", from: &args)
         let path = parseFlag("--path", from: &args)
         let name = parseFlag("--name", from: &args)
@@ -306,6 +395,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "create":
+        let paneID = requirePaneID()
         let path = parseFlag("--path", from: &args)
         let name = parseFlag("--name", from: &args)
         let target = parseFlag("--target", from: &args)
@@ -320,6 +410,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "close":
+        let paneID = requirePaneID()
         let payload: [String: String] = [
             "command": "pane-close",
             "pane_id": paneID
@@ -327,6 +418,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "name":
+        let paneID = requirePaneID()
         guard let name = args.popFirst() else {
             fputs("Usage: nex pane name <name>\n", stderr)
             exit(1)
@@ -340,6 +432,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "send":
+        let paneID = requirePaneID()
         guard let target = parseFlag("--to", from: &args) else {
             fputs("Usage: nex pane send --to <name-or-uuid> <command...>\n", stderr)
             exit(1)
@@ -360,6 +453,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "move":
+        let paneID = requirePaneID()
         guard let direction = args.popFirst() else {
             fputs("Usage: nex pane move [left|right|up|down]\n", stderr)
             exit(1)
@@ -377,6 +471,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         ])
 
     case "move-to-workspace":
+        let paneID = requirePaneID()
         guard let toWorkspace = parseFlag("--to-workspace", from: &args) else {
             fputs("Usage: nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]\n", stderr)
             exit(1)
@@ -392,10 +487,146 @@ func handlePane(_ args: inout ArraySlice<String>) {
         }
         sendJSON(payload)
 
+    case "list":
+        handlePaneList(&args)
+
     default:
         fputs("Unknown pane action: \(action)\n", stderr)
-        fputs("Valid actions: split, create, close, name, send, move, move-to-workspace\n", stderr)
+        fputs("Valid actions: split, create, close, name, send, move, move-to-workspace, list\n", stderr)
         exit(1)
+    }
+}
+
+// MARK: - pane list
+
+func handlePaneList(_ args: inout ArraySlice<String>) {
+    let workspace = parseFlag("--workspace", from: &args)
+    let currentOnly = popSwitch("--current", from: &args)
+    let asJSON = popSwitch("--json", from: &args)
+    let noHeader = popSwitch("--no-header", from: &args)
+
+    if workspace != nil, currentOnly {
+        fputs("pane list: --workspace and --current are mutually exclusive\n", stderr)
+        exit(1)
+    }
+
+    var payload: [String: Any] = [
+        "command": "pane-list"
+    ]
+    if let workspace {
+        payload["workspace"] = workspace
+    }
+    if currentOnly {
+        // `--current` requires NEX_PANE_ID. Matches the existing
+        // silent-exit behaviour of other pane commands when not in a
+        // Nex pane.
+        payload["pane_id"] = requirePaneID()
+        payload["scope"] = "current"
+    }
+
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        fputs("nex pane list: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+
+    guard !replyData.isEmpty else {
+        fputs("nex pane list: no response from Nex (upgrade required? need v0.20+)\n", stderr)
+        exit(1)
+    }
+
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex pane list: invalid JSON response\n", stderr)
+        exit(1)
+    }
+
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex pane list: \(msg)\n", stderr)
+        exit(1)
+    }
+
+    let panes = (json["panes"] as? [[String: Any]]) ?? []
+
+    if asJSON {
+        // Print the panes array unwrapped — consumers get a stable
+        // shape, and exit code still encodes success.
+        if let out = try? JSONSerialization.data(withJSONObject: panes, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+
+    printPaneTable(panes, noHeader: noHeader)
+}
+
+/// Render the `pane-list` response as a fixed-width table. Columns:
+/// ID (truncated UUID), LABEL, WORKSPACE, STATUS, CWD.
+///
+/// We truncate the UUID (first 8 + last 4) for readability; the
+/// `--json` output keeps the full UUID for scripts. Other fields
+/// print at their natural width with a 2-space gutter.
+func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
+    struct Row {
+        let id: String
+        let label: String
+        let workspace: String
+        let status: String
+        let cwd: String
+    }
+
+    let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+
+    let rows: [Row] = panes.map { entry in
+        let fullID = (entry["id"] as? String) ?? ""
+        let shortID: String
+        if fullID.count >= 12 {
+            let prefix = fullID.prefix(8)
+            let suffix = fullID.suffix(4)
+            shortID = "\(prefix)…\(suffix)"
+        } else {
+            shortID = fullID
+        }
+        var cwd = (entry["working_directory"] as? String) ?? ""
+        if !home.isEmpty, cwd.hasPrefix(home) {
+            cwd = "~" + cwd.dropFirst(home.count)
+        }
+        return Row(
+            id: shortID,
+            label: (entry["label"] as? String) ?? "-",
+            workspace: (entry["workspace_name"] as? String) ?? "",
+            status: (entry["status"] as? String) ?? "",
+            cwd: cwd
+        )
+    }
+
+    // Compute column widths from data (and headers if shown).
+    var widths = [0, 0, 0, 0, 0]
+    let headers = ["ID", "LABEL", "WORKSPACE", "STATUS", "CWD"]
+    if !noHeader {
+        for (i, h) in headers.enumerated() {
+            widths[i] = max(widths[i], h.count)
+        }
+    }
+    for r in rows {
+        widths[0] = max(widths[0], r.id.count)
+        widths[1] = max(widths[1], r.label.count)
+        widths[2] = max(widths[2], r.workspace.count)
+        widths[3] = max(widths[3], r.status.count)
+        widths[4] = max(widths[4], r.cwd.count)
+    }
+
+    func pad(_ s: String, _ w: Int) -> String {
+        if s.count >= w { return s }
+        return s + String(repeating: " ", count: w - s.count)
+    }
+
+    if !noHeader {
+        // Last column is not padded so trailing whitespace is avoided.
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(headers[4])")
+    }
+    for r in rows {
+        print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.workspace, widths[2]))  \(pad(r.status, widths[3]))  \(r.cwd)")
     }
 }
 

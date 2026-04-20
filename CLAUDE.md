@@ -73,13 +73,15 @@ make check
 - DB location: `~/Library/Application Support/Nex/nex.db`
 
 ### Agent monitoring & CLI
-- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `pane-move`, `pane-move-to-workspace`, `workspace-create`, `workspace-move`, `group-create`, `group-rename`, `group-delete`, `layout-cycle`, `layout-select`, `open`. Group icon management is deliberately UI-only (context menu); there is no `group-set-icon` wire command.
+- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `pane-move`, `pane-move-to-workspace`, `pane-list`, `workspace-create`, `workspace-move`, `group-create`, `group-rename`, `group-delete`, `layout-cycle`, `layout-select`, `open`. Group icon management is deliberately UI-only (context menu); there is no `group-set-icon` wire command.
+- **Request/response framing**: most commands are fire-and-forget (server reads, acts, drops the FD). `pane-list` is the first command that returns data — the server allocates a `SocketServer.ReplyHandle` for it, the reducer writes a single newline-terminated JSON line via `reply.send(...)`, then `reply.close()` cancels the client's dispatch source (EOF on the CLI side). The allowlist of reply-producing commands lives in `replyCommandAllowlist`; every other command is byte-identical on the wire.
 - **TCP transport**: enabled via `tcp-port = <port>` in `~/.config/nex/config`. Binds to `127.0.0.1` only (no auth needed — SSH tunnels handle remote security). Use cases: dev containers connect via `host.docker.internal:<port>`, remote agents connect via SSH reverse tunnel (`ssh -R <port>:localhost:<port> remote`).
 - `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace + group commands).
 - **Name-or-ID resolution** (`State.resolveGroup` / `State.resolveWorkspace`): commands like `workspace-move`, `group-rename`, `group-delete` accept either a UUID string or a case-sensitive name. UUID wins when it matches; names must be unique to resolve (ambiguous → no-op).
 - `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`. Subcommand structure:
   - `nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]`
   - `nex pane split|create|close|name|send|move|move-to-workspace [options]`
+  - `nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]` — only command that returns data; prints a human-readable table by default, JSON array with `--json`
   - `nex workspace create [--name ...] [--path ...] [--color ...] [--group <name>]`
   - `nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]`
   - `nex group create <name> [--color blue]`

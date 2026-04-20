@@ -554,7 +554,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "Target", create: false
-        ))) { state in
+        ), reply: nil)) { state in
             // Source workspace has no panes
             #expect(state.workspaces[id: Self.wsID1]?.panes.count == 0)
             #expect(state.workspaces[id: Self.wsID1]?.layout.isEmpty == true)
@@ -577,7 +577,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "NewWS", create: true
-        ))) { state in
+        ), reply: nil)) { state in
             // New workspace was created
             #expect(state.workspaces.count == 2)
             let newWS = state.workspaces.first(where: { $0.name == "NewWS" })
@@ -598,7 +598,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "NonExistent", create: false
-        )))
+        ), reply: nil))
         // No state change — pane stays in source
     }
 
@@ -609,7 +609,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "Source", create: false
-        )))
+        ), reply: nil))
         // No state change — same workspace
     }
 
@@ -621,7 +621,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "Target", create: false
-        ))) { state in
+        ), reply: nil)) { state in
             // Source workspace still exists but is empty
             #expect(state.workspaces[id: Self.wsID1] != nil)
             #expect(state.workspaces[id: Self.wsID1]?.panes.isEmpty == true)
@@ -641,7 +641,7 @@ struct AppReducerTests {
 
         await store.send(.socketMessage(.paneMoveToWorkspace(
             paneID: Self.paneID1, toWorkspace: "Empty", create: false
-        ))) { state in
+        ), reply: nil)) { state in
             // Pane becomes sole leaf in target
             #expect(state.workspaces[id: Self.wsID2]?.panes.count == 1)
             #expect(state.workspaces[id: Self.wsID2]?.layout == .leaf(Self.paneID1))

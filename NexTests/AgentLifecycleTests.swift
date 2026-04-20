@@ -50,7 +50,7 @@ struct AgentLifecycleTests {
         )
 
         // Send socket message for pane in WS2 (background workspace)
-        await store.send(.socketMessage(.agentStopped(paneID: paneID2)))
+        await store.send(.socketMessage(.agentStopped(paneID: paneID2), reply: nil))
 
         // The .send() effect routes to the child — wait for it
         await store.receive(
@@ -134,7 +134,7 @@ struct AgentLifecycleTests {
         )
 
         // Should produce no child effects — unknown pane
-        await store.send(.socketMessage(.agentStopped(paneID: unknownPaneID)))
+        await store.send(.socketMessage(.agentStopped(paneID: unknownPaneID), reply: nil))
     }
 
     // MARK: - Desktop Notifications
@@ -174,7 +174,7 @@ struct AgentLifecycleTests {
             activeWorkspaceID: wsID
         )
 
-        await store.send(.socketMessage(.sessionStarted(paneID: paneID, sessionID: "abc-123")))
+        await store.send(.socketMessage(.sessionStarted(paneID: paneID, sessionID: "abc-123"), reply: nil))
 
         await store.receive(
             .workspaces(.element(id: wsID, action: .sessionStarted(paneID: paneID, sessionID: "abc-123")))
@@ -199,7 +199,7 @@ struct AgentLifecycleTests {
         )
 
         // Error events always fire a notification (even if focused)
-        await store.send(.socketMessage(.agentError(paneID: paneID, message: "crash")))
+        await store.send(.socketMessage(.agentError(paneID: paneID, message: "crash"), reply: nil))
 
         await store.receive(
             .workspaces(.element(id: wsID, action: .agentError(paneID: paneID)))

@@ -555,4 +555,58 @@ struct SocketParsingTests {
         let result = SocketServer.parseWireMessage(data)
         #expect(result == nil)
     }
+
+    // MARK: - pane-list (request/response)
+
+    @Test func parsePaneListNoFilter() {
+        let data = jsonData("""
+        {"command":"pane-list"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: nil, workspace: nil, scope: nil))
+    }
+
+    @Test func parsePaneListWithWorkspaceFilter() {
+        let data = jsonData("""
+        {"command":"pane-list","workspace":"nex"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: nil, workspace: "nex", scope: nil))
+    }
+
+    @Test func parsePaneListWithScopeCurrent() {
+        let data = jsonData("""
+        {"command":"pane-list","pane_id":"\(Self.paneIDString)","scope":"current"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: Self.paneUUID, workspace: nil, scope: "current"))
+    }
+
+    @Test func parsePaneListEmptyWorkspaceNormalisedToNil() {
+        // Defensive — an empty-string workspace field should not be
+        // treated as a name-or-ID to resolve.
+        let data = jsonData("""
+        {"command":"pane-list","workspace":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: nil, workspace: nil, scope: nil))
+    }
+
+    @Test func parsePaneListEmptyScopeNormalisedToNil() {
+        let data = jsonData("""
+        {"command":"pane-list","scope":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: nil, workspace: nil, scope: nil))
+    }
+
+    @Test func parsePaneListIgnoresUnknownPaneID() {
+        // A malformed pane_id collapses to nil — the reducer will
+        // surface the error when scope=current requires a valid id.
+        let data = jsonData("""
+        {"command":"pane-list","pane_id":"not-a-uuid"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneList(paneID: nil, workspace: nil, scope: nil))
+    }
 }

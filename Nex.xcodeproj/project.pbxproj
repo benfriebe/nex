@@ -12,6 +12,7 @@
 		089AA30B37857F3539BF81C3 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84D4EC6AC4CDFB5377057239 /* HelpView.swift */; };
 		0A3E7A2B0CB52F2FE791A2B5 /* GroupCustomEmojiSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD30BE0FDF3CC57813A5DB46 /* GroupCustomEmojiSheet.swift */; };
 		0CB9F718A5EF25AF73DED570 /* WorkspaceGroupRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */; };
+		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
 		14C1E964B19A8C277D5EA5E4 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE56BB11F5C7C34821411297 /* QuartzCore.framework */; };
@@ -231,6 +232,7 @@
 		F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListView.swift; sourceTree = "<group>"; };
 		F90FF9C2E7F0BC50E51C47DE /* RepoRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryView.swift; sourceTree = "<group>"; };
 		F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneListTests.swift; sourceTree = "<group>"; };
 		FF88062F290789D98B545AC6 /* WorkspaceGroupCRUDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupCRUDTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -328,6 +330,7 @@
 				5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */,
 				200EB2588E40ABB7C51E24E6 /* MarkdownHTMLRendererTests.swift */,
 				A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */,
+				F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */,
 				CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */,
 				4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */,
 				1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */,
@@ -651,6 +654,7 @@
 				B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */,
 				EA22F9720B68648A78D237E3 /* MarkdownHTMLRendererTests.swift in Sources */,
 				4D7F4ECDA338E826904B584E /* PaneLayoutTests.swift in Sources */,
+				0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */,
 				F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */,
 				B3FBC9276113E015DA08D41A /* PersistenceTests.swift in Sources */,
 				B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */,
