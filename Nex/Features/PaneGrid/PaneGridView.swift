@@ -29,6 +29,9 @@ struct PaneGridView: View {
     var onSearchClose: (() -> Void)?
     var focusFollowsMouse: Bool = false
     var focusFollowsMouseDelay: Int = 0
+    var otherWorkspaces: [(id: UUID, name: String)] = []
+    var onRenamePane: ((UUID) -> Void)?
+    var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -128,6 +131,11 @@ struct PaneGridView: View {
                     dragSourcePaneID = nil
                     dragTargetPaneID = nil
                     dragDropZone = nil
+                },
+                otherWorkspaces: otherWorkspaces,
+                onRename: onRenamePane.map { handler in { handler(pane.id) } },
+                onMoveToWorkspace: onMovePaneToWorkspace.map { handler in
+                    { targetWS in handler(pane.id, targetWS) }
                 }
             )
 

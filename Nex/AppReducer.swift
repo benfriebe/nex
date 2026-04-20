@@ -13,6 +13,7 @@ struct AppReducer {
         var isSidebarVisible: Bool = true
         var isNewWorkspaceSheetPresented: Bool = false
         var renamingWorkspaceID: UUID?
+        var renamingPaneID: UUID?
         var renamingGroupID: UUID?
         var groupDeleteConfirmation: GroupDeleteConfirmation?
         var groupBulkCreatePrompt: GroupBulkCreatePrompt?
@@ -241,6 +242,7 @@ struct AppReducer {
         case dismissNewWorkspaceSheet
         case beginRenameActiveWorkspace
         case setRenamingWorkspaceID(UUID?)
+        case setRenamingPaneID(UUID?)
         case toggleWorkspaceSelection(UUID)
         case rangeSelectWorkspace(UUID)
         case clearWorkspaceSelection
@@ -771,6 +773,10 @@ struct AppReducer {
                 if state.renamingWorkspaceID == id {
                     state.renamingWorkspaceID = nil
                 }
+                if let renamingPaneID = state.renamingPaneID,
+                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                    state.renamingPaneID = nil
+                }
 
                 state.selectedWorkspaceIDs.remove(id)
                 if state.lastSelectionAnchor == id {
@@ -927,6 +933,10 @@ struct AppReducer {
                 state.renamingWorkspaceID = id
                 return .none
 
+            case .setRenamingPaneID(let id):
+                state.renamingPaneID = id
+                return .none
+
             case .toggleWorkspaceSelection(let id):
                 guard state.workspaces[id: id] != nil else { return .none }
                 if state.selectedWorkspaceIDs.contains(id) {
@@ -1008,6 +1018,10 @@ struct AppReducer {
                 }
                 if let renamingID = state.renamingWorkspaceID, ids.contains(renamingID) {
                     state.renamingWorkspaceID = nil
+                }
+                if let renamingPaneID = state.renamingPaneID,
+                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                    state.renamingPaneID = nil
                 }
                 state.selectedWorkspaceIDs.subtract(ids)
                 state.lastSelectionAnchor = nil
@@ -1151,6 +1165,10 @@ struct AppReducer {
                     }
                     if let renamingID = state.renamingWorkspaceID, removedSet.contains(renamingID) {
                         state.renamingWorkspaceID = nil
+                    }
+                    if let renamingPaneID = state.renamingPaneID,
+                       !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                        state.renamingPaneID = nil
                     }
                     state.selectedWorkspaceIDs.subtract(removedSet)
                     if let anchor = state.lastSelectionAnchor, removedSet.contains(anchor) {
@@ -1456,12 +1474,20 @@ struct AppReducer {
                 )
 
             case .workspaces(.element(id: let wsID, action: .closePane)):
+                if let renamingPaneID = state.renamingPaneID,
+                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                    state.renamingPaneID = nil
+                }
                 return .merge(
                     .send(.persistState),
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
 
             case .workspaces(.element(id: let wsID, action: .paneProcessTerminated)):
+                if let renamingPaneID = state.renamingPaneID,
+                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                    state.renamingPaneID = nil
+                }
                 return .merge(
                     .send(.persistState),
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
@@ -1904,7 +1930,7 @@ struct AppReducer {
                 case .paneName(let paneID, let name):
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
                     else { return .none }
-                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.label = name
+                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.label = name.isEmpty ? nil : name
                     return .send(.persistState)
 
                 case .paneSend(let paneID, let target, let text):

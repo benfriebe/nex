@@ -99,7 +99,23 @@ struct ContentView: View {
                             )))
                         },
                         focusFollowsMouse: store.focusFollowsMouse,
-                        focusFollowsMouseDelay: store.focusFollowsMouseDelay
+                        focusFollowsMouseDelay: store.focusFollowsMouseDelay,
+                        otherWorkspaces: store.workspaces
+                            .filter { $0.id != activeID }
+                            .map { (id: $0.id, name: $0.name) },
+                        onRenamePane: { paneID in
+                            store.send(.setRenamingPaneID(paneID))
+                        },
+                        onMovePaneToWorkspace: { paneID, targetWSID in
+                            store.send(.socketMessage(
+                                .paneMoveToWorkspace(
+                                    paneID: paneID,
+                                    toWorkspace: targetWSID.uuidString,
+                                    create: false
+                                ),
+                                reply: nil
+                            ))
+                        }
                     )
                 } else {
                     VStack(spacing: 8) {
@@ -170,6 +186,27 @@ struct ContentView: View {
                         },
                         onDismiss: {
                             store.send(.setRenamingWorkspaceID(nil))
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.renamingPaneID != nil },
+                set: { if !$0 { store.send(.setRenamingPaneID(nil)) } }
+            )) {
+                if let paneID = store.renamingPaneID,
+                   let pane = store.workspaces.flatMap(\.panes).first(where: { $0.id == paneID }) {
+                    RenamePaneSheet(
+                        currentName: pane.label ?? "",
+                        onRename: { newName in
+                            store.send(.socketMessage(
+                                .paneName(paneID: paneID, name: newName),
+                                reply: nil
+                            ))
+                            store.send(.setRenamingPaneID(nil))
+                        },
+                        onDismiss: {
+                            store.send(.setRenamingPaneID(nil))
                         }
                     )
                 }

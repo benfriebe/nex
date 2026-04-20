@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import SwiftUI
 
@@ -16,6 +17,9 @@ struct PaneHeaderView: View {
     var onToggleEdit: (() -> Void)?
     var onDragChanged: ((CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
+    var otherWorkspaces: [(id: UUID, name: String)] = []
+    var onRename: (() -> Void)?
+    var onMoveToWorkspace: ((UUID) -> Void)?
 
     @State private var isDragging = false
 
@@ -141,6 +145,7 @@ struct PaneHeaderView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .contextMenu { contextMenuContent }
         .onTapGesture(count: 2) { onToggleZoom?() }
         .onTapGesture { onFocus() }
         .gesture(
@@ -181,6 +186,41 @@ struct PaneHeaderView: View {
         case .idle:
             isFocused ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.3)
         }
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        if let onRename {
+            Button("Rename\u{2026}") { onRename() }
+        }
+        Button("Close Pane", role: .destructive) { onClose() }
+        Divider()
+        Button("Split Right") { onSplitHorizontal() }
+        Button("Split Down") { onSplitVertical() }
+        if !otherWorkspaces.isEmpty, let onMoveToWorkspace {
+            Divider()
+            Menu("Move to Workspace") {
+                ForEach(otherWorkspaces, id: \.id) { ws in
+                    Button(ws.name) { onMoveToWorkspace(ws.id) }
+                }
+            }
+        }
+        Divider()
+        Button("Open in Finder") { openInFinder() }
+        Button("Copy Working Directory") { copyWorkingDirectory() }
+    }
+
+    private func openInFinder() {
+        if pane.type == .markdown, let filePath = pane.filePath {
+            NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: pane.workingDirectory))
+        }
+    }
+
+    private func copyWorkingDirectory() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pane.workingDirectory, forType: .string)
     }
 
     private var displayPath: String {

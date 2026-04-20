@@ -82,6 +82,7 @@
 		B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */; };
 		B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */; };
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
+		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
 		C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */; };
 		C276E6F9F7B46ED43FF491D5 /* NexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3714AA1F15C85762BF36B1FE /* NexApp.swift */; };
 		CCBCDD690DA8A082B0C3D1EF /* StatusBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */; };
@@ -140,6 +141,7 @@
 		11C5539104EFEFA5CCB936F1 /* GroupIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIcon.swift; sourceTree = "<group>"; };
 		11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeOperationTests.swift; sourceTree = "<group>"; };
 		1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteItem.swift; sourceTree = "<group>"; };
+		191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenamePaneSheet.swift; sourceTree = "<group>"; };
 		1A198A2F5EA992907A3031ED /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1BA6AA9E98405375983902BD /* WorkspaceFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFeature.swift; sourceTree = "<group>"; };
 		1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryTests.swift; sourceTree = "<group>"; };
@@ -399,6 +401,7 @@
 				005B56542A2F5FD5D3BC588C /* PaneGridView.swift */,
 				BB94DA665D3B322A44251454 /* PaneHeaderView.swift */,
 				DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */,
+				191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */,
 				2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */,
 				7DED98594372C8E34542A5C2 /* SplitDividerView.swift */,
 				018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */,
@@ -724,6 +727,7 @@
 				5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */,
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
+				C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */,
 				0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */,
 				550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */,
 				6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */,
