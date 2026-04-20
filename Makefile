@@ -25,7 +25,7 @@ build:
 	xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation build
 
 test:
-	xcodebuild -scheme NexTests -destination 'platform=macOS' -skipMacroValidation test
+	xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation test
 
 check: format-check lint build test
 
