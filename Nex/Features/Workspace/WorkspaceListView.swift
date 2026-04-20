@@ -133,6 +133,9 @@ struct WorkspaceListView: View {
                                 }
                             }
                             .contextMenu {
+                                Button("New Workspace") {
+                                    store.send(.showNewWorkspaceSheet)
+                                }
                                 Button("New Group") {
                                     let placeholder = defaultGroupName(existing: store.groups)
                                     store.send(.createGroup(name: placeholder, autoRename: true))
@@ -175,11 +178,19 @@ struct WorkspaceListView: View {
                 selectionHeader
             }
             .safeAreaInset(edge: .bottom) {
-                Button(action: { store.send(.showNewWorkspaceSheet) }) {
+                Menu {
+                    Button("New Workspace") { store.send(.showNewWorkspaceSheet) }
+                    Button("New Group") {
+                        let placeholder = defaultGroupName(existing: store.groups)
+                        store.send(.createGroup(name: placeholder, autoRename: true))
+                    }
+                } label: {
                     Label("New Workspace", systemImage: "plus")
                         .frame(maxWidth: .infinity)
+                } primaryAction: {
+                    store.send(.showNewWorkspaceSheet)
                 }
-                .buttonStyle(.borderless)
+                .menuStyle(.borderlessButton)
                 .padding(12)
             }
             .confirmationDialog(
