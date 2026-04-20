@@ -1,3 +1,4 @@
+import Foundation
 @testable import Nex
 import Testing
 
@@ -148,5 +149,67 @@ struct ConfigParserTests {
     @Test func parseTCPPortOutOfRangeIgnored() {
         let result = ConfigParser.parseGeneralSettings(from: "tcp-port = 99999")
         #expect(result.tcpPort == 0)
+    }
+
+    // MARK: - Global Hotkey
+
+    @Test func parseGlobalHotkeyAbsentIsNil() {
+        let result = ConfigParser.parseGeneralSettings(from: "focus-follows-mouse = true")
+        #expect(result.globalHotkey == nil)
+    }
+
+    @Test func parseGlobalHotkeyWithModifiers() {
+        let result = ConfigParser.parseGeneralSettings(from: "global-hotkey = super+shift+t")
+        #expect(result.globalHotkey == KeyTrigger(keyCode: 17, modifiers: [.command, .shift]))
+    }
+
+    @Test func parseGlobalHotkeyNoneClears() {
+        let result = ConfigParser.parseGeneralSettings(from: "global-hotkey = none")
+        #expect(result.globalHotkey == nil)
+    }
+
+    @Test func parseGlobalHotkeyInvalidIgnored() {
+        let result = ConfigParser.parseGeneralSettings(from: "global-hotkey = super+badkey")
+        #expect(result.globalHotkey == nil)
+    }
+
+    @Test func parseGlobalHotkeyHideOnRepressDefaultsTrue() {
+        let result = ConfigParser.parseGeneralSettings(from: "")
+        #expect(result.globalHotkeyHideOnRepress == true)
+    }
+
+    @Test func parseGlobalHotkeyHideOnRepressFalse() {
+        let result = ConfigParser.parseGeneralSettings(from: "global-hotkey-hide-on-repress = false")
+        #expect(result.globalHotkeyHideOnRepress == false)
+    }
+
+    @Test func parseGlobalHotkeyHideOnRepressTrue() {
+        let result = ConfigParser.parseGeneralSettings(from: "global-hotkey-hide-on-repress = true")
+        #expect(result.globalHotkeyHideOnRepress == true)
+    }
+
+    @Test func globalHotkeyRoundTripThroughSetGeneralSetting() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nex-test-\(UUID().uuidString).config")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // Seed file with an unrelated setting to verify preservation.
+        try "focus-follows-mouse = true\n".write(to: tmp, atomically: true, encoding: .utf8)
+
+        ConfigParser.setGeneralSetting("global-hotkey", value: "super+shift+t", inFile: tmp.path)
+        ConfigParser.setGeneralSetting(
+            "global-hotkey-hide-on-repress", value: "false", inFile: tmp.path
+        )
+
+        let parsed = ConfigParser.parseGeneralSettings(fromFile: tmp.path)
+        #expect(parsed.globalHotkey == KeyTrigger(keyCode: 17, modifiers: [.command, .shift]))
+        #expect(parsed.globalHotkeyHideOnRepress == false)
+        #expect(parsed.focusFollowsMouse == true)
+
+        // Clear the hotkey.
+        ConfigParser.setGeneralSetting("global-hotkey", value: "none", inFile: tmp.path)
+        let cleared = ConfigParser.parseGeneralSettings(fromFile: tmp.path)
+        #expect(cleared.globalHotkey == nil)
+        #expect(cleared.focusFollowsMouse == true)
     }
 }

@@ -675,7 +675,12 @@ struct AppReducerTests {
         let store = makeStore()
 
         await store.send(.configLoaded(
-            focusFollowsMouse: false, focusFollowsMouseDelay: 100, theme: nil, tcpPort: 19400
+            focusFollowsMouse: false,
+            focusFollowsMouseDelay: 100,
+            theme: nil,
+            tcpPort: 19400,
+            globalHotkey: nil,
+            globalHotkeyHideOnRepress: true
         )) { state in
             #expect(state.tcpPort == 19400)
         }
@@ -685,12 +690,199 @@ struct AppReducerTests {
         let store = makeStore()
 
         await store.send(.configLoaded(
-            focusFollowsMouse: true, focusFollowsMouseDelay: 200, theme: nil, tcpPort: 0
+            focusFollowsMouse: true,
+            focusFollowsMouseDelay: 200,
+            theme: nil,
+            tcpPort: 0,
+            globalHotkey: nil,
+            globalHotkeyHideOnRepress: true
         )) { state in
             #expect(state.tcpPort == 0)
             #expect(state.focusFollowsMouse == true)
             #expect(state.focusFollowsMouseDelay == 200)
         }
+    }
+
+    // MARK: - Global Hotkey
+
+    /// Records every `register(_:)` call so tests can assert the reducer
+    /// is calling through to the hotkey service with the right trigger.
+    private actor RecordingGlobalHotkeyService: GlobalHotkeyServicing {
+        private var _calls: [KeyTrigger?] = []
+
+        nonisolated func register(_ trigger: KeyTrigger?) async throws {
+            await append(trigger)
+        }
+
+        private func append(_ trigger: KeyTrigger?) {
+            _calls.append(trigger)
+        }
+
+        func calls() -> [KeyTrigger?] {
+            _calls
+        }
+    }
+
+    /// Simulates a Carbon rejection (e.g. `eventHotKeyExistsErr`) so the
+    /// rollback path can be exercised in tests.
+    private struct FailingGlobalHotkeyService: GlobalHotkeyServicing {
+        struct RegistrationFailed: Error, CustomStringConvertible {
+            var description: String { "simulated registration failure" }
+        }
+
+        func register(_: KeyTrigger?) async throws {
+            throw RegistrationFailed()
+        }
+    }
+
+    @Test func configLoadedStoresGlobalHotkeyAndCallsRegister() async {
+        let recorder = RecordingGlobalHotkeyService()
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.globalHotkeyService = recorder
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let trigger = KeyTrigger(keyCode: 17, modifiers: [.command, .shift]) // ⌘⇧T
+        await store.send(.configLoaded(
+            focusFollowsMouse: false,
+            focusFollowsMouseDelay: 100,
+            theme: nil,
+            tcpPort: 0,
+            globalHotkey: trigger,
+            globalHotkeyHideOnRepress: false
+        )) { state in
+            state.globalHotkey = trigger
+            state.globalHotkeyHideOnRepress = false
+        }
+        await store.finish()
+        #expect(await recorder.calls() == [trigger])
+    }
+
+    @Test func setGlobalHotkeyUpdatesStateAndRegisters() async {
+        let recorder = RecordingGlobalHotkeyService()
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.globalHotkeyService = recorder
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let trigger = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
+        await store.send(.setGlobalHotkey(trigger)) { state in
+            state.globalHotkey = trigger
+            state.globalHotkeyRegistrationError = nil
+        }
+        await store.finish()
+        #expect(await recorder.calls() == [trigger])
+    }
+
+    @Test func setGlobalHotkeyNilClearsState() async {
+        var appState = AppReducer.State()
+        appState.globalHotkey = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
+        appState.globalHotkeyRegistrationError = "stale"
+
+        let recorder = RecordingGlobalHotkeyService()
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.globalHotkeyService = recorder
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setGlobalHotkey(nil)) { state in
+            state.globalHotkey = nil
+            state.globalHotkeyRegistrationError = nil
+        }
+        await store.finish()
+        #expect(await recorder.calls() == [KeyTrigger?.none])
+    }
+
+    @Test func setGlobalHotkeyHideOnRepressUpdatesState() async {
+        let store = makeStore()
+
+        await store.send(.setGlobalHotkeyHideOnRepress(false)) { state in
+            state.globalHotkeyHideOnRepress = false
+        }
+    }
+
+    @Test func globalHotkeyRegistrationFailedSetsError() async {
+        let store = makeStore()
+
+        await store.send(.globalHotkeyRegistrationFailed(reason: "eventHotKeyExistsErr")) { state in
+            state.globalHotkeyRegistrationError = "eventHotKeyExistsErr"
+        }
+    }
+
+    @Test func setGlobalHotkeyRollsBackOnRegistrationFailure() async {
+        // Seed with a previously-working hotkey.
+        let previous = KeyTrigger(keyCode: 17, modifiers: [.command, .shift]) // ⌘⇧T
+        let attempted = KeyTrigger(keyCode: 2, modifiers: .command) // ⌘D (collides, say)
+
+        var appState = AppReducer.State()
+        appState.globalHotkey = previous
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.globalHotkeyService = FailingGlobalHotkeyService()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Optimistic update to the attempted trigger.
+        await store.send(.setGlobalHotkey(attempted)) { state in
+            state.globalHotkey = attempted
+            state.globalHotkeyRegistrationError = nil
+        }
+        // Rollback action fires and restores `previous`.
+        await store.receive(
+            .globalHotkeyRegistrationRejected(
+                revertTo: previous,
+                reason: "simulated registration failure"
+            )
+        ) { state in
+            state.globalHotkey = previous
+            state.globalHotkeyRegistrationError = "simulated registration failure"
+        }
+    }
+
+    @Test func globalHotkeyConflictWithInAppIsComputed() {
+        var state = AppReducer.State()
+        state.keybindings = .defaults
+        state.globalHotkey = KeyTrigger(keyCode: 2, modifiers: .command) // ⌘D → splitRight
+        #expect(state.globalHotkeyConflictWithInApp == .action(.splitRight))
+    }
+
+    @Test func globalHotkeyNoConflictWhenUnbound() {
+        var state = AppReducer.State()
+        state.keybindings = .defaults
+        // ⌃⌥L — not in defaults.
+        state.globalHotkey = KeyTrigger(keyCode: 37, modifiers: [.control, .option])
+        #expect(state.globalHotkeyConflictWithInApp == nil)
+    }
+
+    @Test func globalHotkeyConflictNilWhenNoHotkey() {
+        var state = AppReducer.State()
+        state.keybindings = .defaults
+        state.globalHotkey = nil
+        #expect(state.globalHotkeyConflictWithInApp == nil)
     }
 
     // MARK: - setTCPPort

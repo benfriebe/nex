@@ -132,6 +132,19 @@ You can also edit keybindings in **Settings > Keybindings** with a visual key re
 
 Available actions: `new_workspace`, `open_file`, `switch_to_workspace_1`–`9`, `toggle_sidebar`, `toggle_inspector`, `split_right`, `split_down`, `close_pane`, `focus_next_pane`, `focus_previous_pane`, `next_workspace`, `previous_workspace`, `toggle_markdown_edit`, `toggle_zoom`, `reopen_closed_pane`, `toggle_search`, `close_search`, `cycle_layout`, `move_pane_left`, `move_pane_right`, `move_pane_up`, `move_pane_down`.
 
+### Global hotkey
+
+A single system-wide hotkey can bring Nex forward from any app. Set it in **Settings > Keybindings > Global**, or via the config file:
+
+```
+global-hotkey = super+shift+t
+global-hotkey-hide-on-repress = true
+```
+
+Set `global-hotkey = none` to clear. `global-hotkey-hide-on-repress` (default `true`) hides Nex when the hotkey is pressed while Nex is already frontmost.
+
+No Accessibility permission is required. The hotkey only works while Nex is running; if another app has already claimed the combination, Settings will surface a warning.
+
 ### Settings
 
 Open settings with `Cmd+,`. Available options:

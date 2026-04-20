@@ -309,3 +309,79 @@ struct KeyBindingMapTests {
         #expect(map.action(for: cmdP) == .commandPalette)
     }
 }
+
+@MainActor
+struct KeybindingConflictTests {
+    private let cmdShiftT = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
+    private let cmdD = KeyTrigger(keyCode: 2, modifiers: .command)
+    private let ctrlAltL = KeyTrigger(keyCode: 37, modifiers: [.control, .option])
+
+    @Test func conflictWithExistingActionReturnsAction() {
+        let conflict = KeybindingConflict.check(
+            trigger: cmdD,
+            in: .defaults,
+            globalHotkey: nil
+        )
+        #expect(conflict == .action(.splitRight))
+    }
+
+    @Test func conflictWithGlobalHotkeyWins() {
+        // cmdShiftT is bound to .reopenClosedPane by default; ensure the
+        // global-hotkey check fires first when both would match.
+        let conflict = KeybindingConflict.check(
+            trigger: cmdShiftT,
+            in: .defaults,
+            globalHotkey: cmdShiftT
+        )
+        #expect(conflict == .globalHotkey)
+    }
+
+    @Test func conflictExcludingSameActionIsNil() {
+        // Re-recording ⌘D for split_right (its current binding) should not
+        // report a self-collision.
+        let conflict = KeybindingConflict.check(
+            trigger: cmdD,
+            in: .defaults,
+            globalHotkey: nil,
+            excluding: .splitRight
+        )
+        #expect(conflict == nil)
+    }
+
+    @Test func conflictExcludingDifferentActionStillReports() {
+        // Recording ⌘D for close_pane must still collide with split_right.
+        let conflict = KeybindingConflict.check(
+            trigger: cmdD,
+            in: .defaults,
+            globalHotkey: nil,
+            excluding: .closePane
+        )
+        #expect(conflict == .action(.splitRight))
+    }
+
+    @Test func ignoreGlobalHotkeyFlagSkipsGlobalMatch() {
+        // Editing the global hotkey itself: a match against the current
+        // global trigger is not a conflict.
+        let conflict = KeybindingConflict.check(
+            trigger: cmdShiftT,
+            in: KeyBindingMap(),
+            globalHotkey: cmdShiftT,
+            ignoreGlobalHotkey: true
+        )
+        #expect(conflict == nil)
+    }
+
+    @Test func nonCollidingTriggerReturnsNil() {
+        let conflict = KeybindingConflict.check(
+            trigger: ctrlAltL,
+            in: .defaults,
+            globalHotkey: nil
+        )
+        #expect(conflict == nil)
+    }
+
+    @Test func messageIncludesActionDisplayName() {
+        #expect(KeybindingConflict.action(.splitRight).message.contains("Split Right"))
+        #expect(KeybindingConflict.globalHotkey.message.contains("global hotkey"))
+    }
+}

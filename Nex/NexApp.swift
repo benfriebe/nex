@@ -91,6 +91,13 @@ struct NexApp: App {
                         }
                     }
 
+                    // Global hotkey callback — registration happens from the
+                    // `.configLoaded` effect so it runs once the user's trigger
+                    // has actually been parsed off disk.
+                    GlobalHotkeyService.shared.onPressed = {
+                        store.send(.globalHotkeyPressed)
+                    }
+
                     store.send(.appLaunched)
 
                     let monitor = PaneShortcutMonitor(store: store)

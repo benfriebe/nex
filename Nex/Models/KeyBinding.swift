@@ -347,6 +347,48 @@ enum NexAction: String, CaseIterable {
     }
 }
 
+// MARK: - KeybindingConflict
+
+/// The outcome of checking whether a proposed trigger is already claimed.
+enum KeybindingConflict: Equatable {
+    case action(NexAction)
+    case globalHotkey
+
+    /// Human-readable reason for surfacing in the recorder sheet.
+    var message: String {
+        switch self {
+        case .action(let action):
+            "Already bound to \"\(action.displayName)\""
+        case .globalHotkey:
+            "Already bound to the global hotkey"
+        }
+    }
+
+    /// Look up whether `trigger` collides with any existing binding.
+    ///
+    /// - Parameters:
+    ///   - excluding: When recording a new combo for an action that already owns a
+    ///     binding, skip the match on its own current binding so re-recording the
+    ///     same combo is a no-op rather than a self-collision.
+    ///   - ignoreGlobalHotkey: Set when recording the global hotkey itself, so the
+    ///     check only considers in-app bindings.
+    static func check(
+        trigger: KeyTrigger,
+        in map: KeyBindingMap,
+        globalHotkey: KeyTrigger?,
+        excluding: NexAction? = nil,
+        ignoreGlobalHotkey: Bool = false
+    ) -> KeybindingConflict? {
+        if !ignoreGlobalHotkey, globalHotkey == trigger {
+            return .globalHotkey
+        }
+        if let existing = map.action(for: trigger), existing != excluding {
+            return .action(existing)
+        }
+        return nil
+    }
+}
+
 // MARK: - KeyBindingMap
 
 /// Maps key triggers to actions. Supports multiple triggers per action.

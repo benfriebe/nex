@@ -13,6 +13,8 @@ enum ConfigParser {
         var focusFollowsMouseDelay: Int = 100
         var theme: String?
         var tcpPort: Int = 0
+        var globalHotkey: KeyTrigger?
+        var globalHotkeyHideOnRepress: Bool = true
     }
 
     /// Parse general (non-keybind) settings from a config file.
@@ -50,6 +52,14 @@ enum ConfigParser {
                 if let port = Int(value), (1 ... 65535).contains(port) {
                     settings.tcpPort = port
                 }
+            case "global-hotkey":
+                if value == "none" || value == "unbind" || value.isEmpty {
+                    settings.globalHotkey = nil
+                } else if let trigger = KeyTrigger.parse(rawValue) {
+                    settings.globalHotkey = trigger
+                }
+            case "global-hotkey-hide-on-repress":
+                settings.globalHotkeyHideOnRepress = value != "false"
             default:
                 break
             }

@@ -6,6 +6,7 @@ import SwiftUI
 struct KeybindingsSettingsView: View {
     let store: StoreOf<AppReducer>
     @State private var recordingAction: NexAction?
+    @State private var recordingGlobal: Bool = false
 
     private static let categoryOrder = [
         "Pane Management", "Navigation", "Workspaces", "View", "Files", "Search"
@@ -15,6 +16,33 @@ struct KeybindingsSettingsView: View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
                 List {
+                    Section("Global") {
+                        globalHotkeyRow
+                        Toggle(
+                            "Press again to hide",
+                            isOn: Binding(
+                                get: { store.globalHotkeyHideOnRepress },
+                                set: { store.send(.setGlobalHotkeyHideOnRepress($0)) }
+                            )
+                        )
+                        .disabled(store.globalHotkey == nil)
+
+                        if let reason = store.globalHotkeyRegistrationError {
+                            Label(reason, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+
+                        if let conflict = store.globalHotkeyConflictWithInApp {
+                            Label(
+                                "Shadows in-app shortcut: \(conflict.message). The in-app shortcut will not fire while Nex is frontmost.",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        }
+                    }
+
                     ForEach(Self.categoryOrder, id: \.self) { category in
                         let actions = NexAction.bindableActions.filter { $0.category == category }
                         if !actions.isEmpty {
@@ -42,14 +70,75 @@ struct KeybindingsSettingsView: View {
                 .padding(12)
             }
             .sheet(item: recordingActionBinding) { action in
-                KeyRecorderSheet(action: action) { trigger in
+                KeyRecorderSheet(
+                    action: action,
+                    currentMap: store.keybindings,
+                    globalHotkey: store.globalHotkey
+                ) { trigger in
                     if let trigger {
                         store.send(.setKeybinding(trigger, action))
                     }
                     recordingAction = nil
                 }
             }
+            .sheet(isPresented: $recordingGlobal) {
+                GlobalKeyRecorderSheet(
+                    currentMap: store.keybindings,
+                    currentGlobalHotkey: store.globalHotkey
+                ) { trigger in
+                    if let trigger {
+                        store.send(.setGlobalHotkey(trigger))
+                    }
+                    recordingGlobal = false
+                }
+            }
         }
+    }
+
+    private var globalHotkeyRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Global Hotkey")
+                Text("Works from any app. No Accessibility permission required.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let trigger = store.globalHotkey {
+                HStack(spacing: 2) {
+                    Text(trigger.displayString)
+                        .font(.system(.body, design: .rounded))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(.quaternary)
+                        )
+
+                    Button {
+                        store.send(.setGlobalHotkey(nil))
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(minWidth: 120, alignment: .trailing)
+            } else {
+                Text("—")
+                    .foregroundStyle(.tertiary)
+                    .frame(minWidth: 120, alignment: .trailing)
+            }
+
+            Button("Record") {
+                recordingGlobal = true
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -121,12 +210,78 @@ extension NexAction: Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - Global Hotkey Recorder Sheet
+
+/// Modal sheet for capturing the system-wide global hotkey.
+/// Rejects combos that are already bound to an in-app action; the user can
+/// press another combo without closing the sheet.
+private struct GlobalKeyRecorderSheet: View {
+    let currentMap: KeyBindingMap
+    let currentGlobalHotkey: KeyTrigger?
+    let onComplete: (KeyTrigger?) -> Void
+
+    @State private var conflictMessage: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Record Global Hotkey")
+                .font(.headline)
+
+            Text("Press a key combination to bring Nex forward from any app.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            KeyRecorderView { trigger in
+                let conflict = KeybindingConflict.check(
+                    trigger: trigger,
+                    in: currentMap,
+                    globalHotkey: currentGlobalHotkey,
+                    ignoreGlobalHotkey: true
+                )
+                if let conflict {
+                    conflictMessage = conflict.message
+                    return
+                }
+                conflictMessage = nil
+                onComplete(trigger)
+            }
+            .frame(width: 240, height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.selection, lineWidth: 2)
+            )
+
+            if let conflictMessage {
+                Text(conflictMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack {
+                Button("Cancel") {
+                    onComplete(nil)
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+}
+
 // MARK: - Key Recorder Sheet
 
 /// Modal sheet that captures a single key combination.
+/// Rejects combos that collide with the global hotkey or a different action;
+/// re-recording the same combo for the same action is a no-op.
 private struct KeyRecorderSheet: View {
     let action: NexAction
+    let currentMap: KeyBindingMap
+    let globalHotkey: KeyTrigger?
     let onComplete: (KeyTrigger?) -> Void
+
+    @State private var conflictMessage: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -137,6 +292,17 @@ private struct KeyRecorderSheet: View {
                 .foregroundStyle(.secondary)
 
             KeyRecorderView { trigger in
+                let conflict = KeybindingConflict.check(
+                    trigger: trigger,
+                    in: currentMap,
+                    globalHotkey: globalHotkey,
+                    excluding: action
+                )
+                if let conflict {
+                    conflictMessage = conflict.message
+                    return
+                }
+                conflictMessage = nil
                 onComplete(trigger)
             }
             .frame(width: 200, height: 44)
@@ -144,6 +310,13 @@ private struct KeyRecorderSheet: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(.selection, lineWidth: 2)
             )
+
+            if let conflictMessage {
+                Text(conflictMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
 
             HStack {
                 Button("Cancel") {
