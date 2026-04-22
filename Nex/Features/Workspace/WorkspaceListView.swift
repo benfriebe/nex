@@ -48,6 +48,20 @@ struct WorkspaceListView: View {
     /// the other selected rows behind in their original slots.
     @State private var hiddenMultiDragIDs: Set<UUID> = []
 
+    /// Post-release "land into collapsed group" override. When dropping a
+    /// row onto a collapsed group that stays collapsed, the default
+    /// release (offset → 0 + entries-change fade) makes the row visually
+    /// fly back to its top-level slot before fading — confusing, since
+    /// the workspace actually went into the group. `landingPreview`
+    /// pins the row's offset to the group header's Y so it animates
+    /// "into" the group and fades there instead.
+    private struct LandingPreview: Equatable {
+        let workspaceID: UUID
+        let offsetY: CGFloat
+    }
+
+    @State private var landingPreview: LandingPreview?
+
     /// Underlying `NSScrollView` hosting the sidebar content. Captured
     /// via `ScrollViewFinder` once the view is in a window. Provides
     /// the authoritative scroll offset + viewport height and is driven
@@ -680,6 +694,10 @@ struct WorkspaceListView: View {
             // after a multi-select drag.
             let flatIndex = store.state.visibleWorkspaceOrder.firstIndex(of: workspaceID) ?? 0
             let isDragging = draggedWorkspaceID == workspaceID
+            // True while the row is playing the "falling into group" drop
+            // animation — styled smaller + more transparent so it reads
+            // as being consumed by the group rather than flying away.
+            let isLanding = landingPreview?.workspaceID == workspaceID
 
             let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
             // Show the dragged row nested when the current target is a
@@ -728,10 +746,15 @@ struct WorkspaceListView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .zIndex(isDragging ? 1 : 0)
-            .opacity(isDragging ? 0.8 : 1)
-            .scaleEffect(isDragging ? 1.03 : 1.0)
-            .shadow(color: isDragging ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
+            .zIndex(isDragging || isLanding ? 1 : 0)
+            .opacity(isLanding ? 0.15 : (isDragging ? 0.8 : 1))
+            // Drag lift: centered 1.03. Cleared when landing so the
+            // shrink below starts from identity.
+            .scaleEffect(isDragging && !isLanding ? 1.03 : 1.0)
+            // Landing shrink: scale in place (center anchor) so the row
+            // doesn't drift sideways as it collapses into the group.
+            .scaleEffect(isLanding ? 0.2 : 1.0)
+            .shadow(color: isDragging && !isLanding ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
             // Animate reorders for non-grabbed rows. The grabbed row
             // gets `.none` so its leadingInset and styling changes
             // don't spring against cursor tracking. `sidebarLayoutKey`
@@ -755,7 +778,7 @@ struct WorkspaceListView: View {
             // container-jump height at the animation midpoint. Keep
             // this last so the offset snaps straight to the new
             // cursor-tracking value every frame.
-            .offset(y: isDragging ? dragCurrentY - dragGrabOffset - workspaceStartY(workspaceID) : 0)
+            .offset(y: rowOffsetY(workspaceID: workspaceID, isDragging: isDragging))
             .gesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named("workspaceList"))
                     .onChanged { value in
@@ -852,8 +875,56 @@ struct WorkspaceListView: View {
                                 )
                             }
                         }
-                        cancelSpringLoad()
+                        // Cancel the pending spring-load timer. Keep
+                        // `springLoadedGroupID` though — a spring-loaded
+                        // group should stay visually expanded through
+                        // the drop animation so the row lands in a
+                        // visible slot; it collapses in the animation's
+                        // completion below.
+                        springLoadTask?.cancel()
+                        springLoadTask = nil
+                        springLoadTargetID = nil
+                        let persistingSpringLoad = springLoadedGroupID
                         cancelAutoScroll()
+
+                        // Special case: single-drag release onto a
+                        // collapsed group header that will stay collapsed.
+                        // Animate the row into the header's position so
+                        // the workspace visually "falls into" the group,
+                        // then commit the drop. Skipped when the group is
+                        // currently spring-loaded (visibly expanded) —
+                        // the normal animation already lands the row in
+                        // a visible child slot before the group collapses.
+                        if bulkIDs.isEmpty, singleNeedsRelease,
+                           case .ontoGroupHeader(let gid) = singleTarget,
+                           store.groups[id: gid]?.isCollapsed == true,
+                           persistingSpringLoad != gid,
+                           !store.settings.expandGroupOnWorkspaceDrop {
+                            let landingY = groupStartY(gid) - workspaceStartY(sourceID)
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                landingPreview = LandingPreview(workspaceID: sourceID, offsetY: landingY)
+                                currentDropTarget = nil
+                            } completion: {
+                                // Row has "landed" at the header — commit
+                                // the move. The row exits via the entries
+                                // change; `landingPreview` keeps its
+                                // offset pinned so the fade plays at the
+                                // header rather than the old slot.
+                                applyDropTarget(.ontoGroupHeader(groupID: gid), workspaceID: sourceID)
+                                draggedWorkspaceID = nil
+                                dragCurrentY = 0
+                                dragViewportY = 0
+                                dragGrabOffset = 0
+                                multiDragIDs = []
+                                hiddenMultiDragIDs = []
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(400))
+                                    landingPreview = nil
+                                }
+                            }
+                            return
+                        }
+
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                             draggedWorkspaceID = nil
                             dragCurrentY = 0
@@ -872,6 +943,19 @@ struct WorkspaceListView: View {
                                 }
                             } else if singleNeedsRelease, let singleTarget {
                                 applyDropTarget(singleTarget, workspaceID: sourceID)
+                            }
+                        } completion: {
+                            // After the row has settled, collapse any
+                            // spring-loaded group we kept open through
+                            // the drop animation. Only relevant when the
+                            // group is still persisted as collapsed —
+                            // drops that expand the group (via
+                            // expandGroupOnWorkspaceDrop) already cleared
+                            // isCollapsed so there's nothing to do.
+                            if persistingSpringLoad != nil {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    springLoadedGroupID = nil
+                                }
                             }
                         }
                     }
@@ -1051,6 +1135,18 @@ struct WorkspaceListView: View {
             }
             return h
         }
+    }
+
+    /// Offset applied to a workspace row. During an active drag the
+    /// grabbed row tracks the cursor; when a `landingPreview` is set
+    /// (release onto a collapsed group that stays collapsed) the row is
+    /// pinned to a fixed target so it animates toward the group header
+    /// and fades there rather than snapping back to its old slot.
+    private func rowOffsetY(workspaceID: UUID, isDragging: Bool) -> CGFloat {
+        if let landing = landingPreview, landing.workspaceID == workspaceID {
+            return landing.offsetY
+        }
+        return isDragging ? dragCurrentY - dragGrabOffset - workspaceStartY(workspaceID) : 0
     }
 
     /// Y of the resting top edge of the given workspace row in the drag
