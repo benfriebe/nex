@@ -295,6 +295,11 @@ struct ContentView: View {
                 store.send(.searchSelectedUpdated(paneID: paneID, selected: selected))
             }
             .onAppear {
+                // The xcodebuild test host instantiates ContentView; skip the
+                // socket listener so `xcodebuild test` never touches
+                // /tmp/nex.sock or binds a TCP port.
+                guard !NexApp.isTestMode else { return }
+
                 // Start socket server and wire messages to AppReducer
                 socketServer.onMessage = { message, reply in
                     Task { @MainActor in
