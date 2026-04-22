@@ -406,7 +406,10 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
-    @Test func moveWorkspaceIntoCollapsedGroupExpandsIt() async {
+    @Test func moveWorkspaceIntoCollapsedGroupExpandsByDefault() async {
+        // Default (`settings.expandGroupOnWorkspaceDrop == true`): dropping a
+        // workspace into a collapsed group auto-expands it so the moved
+        // workspace is immediately visible.
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
         let group = WorkspaceGroup(
             id: Self.groupA,
@@ -424,6 +427,44 @@ struct WorkspaceGroupCRUDTests {
             workspaceID: Self.wsID1, groupID: Self.groupA, index: nil
         )) { state in
             #expect(state.groups[id: Self.groupA]?.isCollapsed == false)
+            #expect(state.groups[id: Self.groupA]?.childOrder == [Self.wsID1])
+        }
+    }
+
+    @Test func moveWorkspaceIntoCollapsedGroupKeepsItCollapsedWhenSettingDisabled() async {
+        // Issue #59: with `expandGroupOnWorkspaceDrop` off, dropping a
+        // workspace into a collapsed group must not expand it — the move is
+        // silent and the workspace becomes visible only when the user
+        // expands the group themselves.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let group = WorkspaceGroup(
+            id: Self.groupA,
+            name: "G",
+            isCollapsed: true,
+            childOrder: []
+        )
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1]
+        appState.groups = [group]
+        appState.topLevelOrder = [.workspace(Self.wsID1), .group(Self.groupA)]
+        appState.settings.expandGroupOnWorkspaceDrop = false
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = UUIDGenerator { Self.groupA }
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.moveWorkspaceToGroup(
+            workspaceID: Self.wsID1, groupID: Self.groupA, index: nil
+        )) { state in
+            #expect(state.groups[id: Self.groupA]?.isCollapsed == true)
             #expect(state.groups[id: Self.groupA]?.childOrder == [Self.wsID1])
         }
     }

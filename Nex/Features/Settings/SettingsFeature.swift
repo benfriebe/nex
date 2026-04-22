@@ -16,6 +16,7 @@ struct SettingsFeature {
         var selectedTheme: NexTheme?
         var autoDetectRepos: Bool = true
         var inheritGroupOnNewWorkspace: Bool = true
+        var expandGroupOnWorkspaceDrop: Bool = true
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -41,6 +42,7 @@ struct SettingsFeature {
         case setWorktreeBasePath(String)
         case setAutoDetectRepos(Bool)
         case setInheritGroupOnNewWorkspace(Bool)
+        case setExpandGroupOnWorkspaceDrop(Bool)
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
     }
@@ -56,6 +58,7 @@ struct SettingsFeature {
     static let defaultsKeySelectedTheme = "settings.selectedTheme"
     static let defaultsKeyAutoDetectRepos = "settings.autoDetectRepos"
     static let defaultsKeyInheritGroupOnNewWorkspace = "settings.inheritGroupOnNewWorkspace"
+    static let defaultsKeyExpandGroupOnWorkspaceDrop = "settings.expandGroupOnWorkspaceDrop"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -75,6 +78,9 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyInheritGroupOnNewWorkspace) {
                     state.inheritGroupOnNewWorkspace = userDefaults.boolForKey(Self.defaultsKeyInheritGroupOnNewWorkspace)
+                }
+                if userDefaults.hasKey(Self.defaultsKeyExpandGroupOnWorkspaceDrop) {
+                    state.expandGroupOnWorkspaceDrop = userDefaults.boolForKey(Self.defaultsKeyExpandGroupOnWorkspaceDrop)
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -138,6 +144,11 @@ struct SettingsFeature {
             case .setInheritGroupOnNewWorkspace(let enabled):
                 state.inheritGroupOnNewWorkspace = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyInheritGroupOnNewWorkspace)
+                return .none
+
+            case .setExpandGroupOnWorkspaceDrop(let enabled):
+                state.expandGroupOnWorkspaceDrop = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyExpandGroupOnWorkspaceDrop)
                 return .none
 
             case .selectTheme(let theme):

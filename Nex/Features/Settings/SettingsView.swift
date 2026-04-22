@@ -94,6 +94,14 @@ private struct GeneralSettingsView: View {
                     Text("When the active workspace belongs to a group, new workspaces are created inside that same group. Disable to always create at the top level.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Toggle("Expand group when a workspace is dropped into it", isOn: Binding(
+                        get: { settingsStore.expandGroupOnWorkspaceDrop },
+                        set: { settingsStore.send(.setExpandGroupOnWorkspaceDrop($0)) }
+                    ))
+                    Text("When dragging a workspace into a collapsed group, expand the group on drop so the moved workspace is visible. Disable to keep the group collapsed and avoid disrupting the sidebar layout.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Panes") {
