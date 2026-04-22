@@ -1222,9 +1222,8 @@ struct AppReducer {
                     let insertAt = index.map { max(0, min($0, order.count)) } ?? order.count
                     order.insert(workspaceID, at: insertAt)
                     state.groups[id: targetGroupID]?.childOrder = order
-                    // Auto-expand the destination group so the moved workspace
-                    // is visible after the move.
-                    if state.groups[id: targetGroupID]?.isCollapsed == true {
+                    if state.settings.expandGroupOnWorkspaceDrop,
+                       state.groups[id: targetGroupID]?.isCollapsed == true {
                         state.groups[id: targetGroupID]?.isCollapsed = false
                     }
                 } else {
