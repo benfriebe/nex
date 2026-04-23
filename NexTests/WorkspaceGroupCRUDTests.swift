@@ -202,6 +202,128 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
+    @Test func createGroupNearSelectionGroupingActiveTopLevelTakesItsSlot() async {
+        // Regression for the P1 bug: when the "New Group..." row-menu flow
+        // folds the active, top-level workspace into a new group
+        // (`initialWorkspaceIDs = [active]`), the new group must land in
+        // the slot that workspace occupied instead of falling through to
+        // `append`, because the anchor is removed before the insertion
+        // index lookup.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(Self.wsID3)
+        ]
+        appState.activeWorkspaceID = Self.wsID2
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = UUIDGenerator { Self.groupA }
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createGroup(
+            name: "Bundle",
+            color: nil,
+            insertAfter: nil,
+            initialWorkspaceIDs: [Self.wsID2]
+        )) { state in
+            #expect(state.topLevelOrder.count == 3)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .group(let id) = state.topLevelOrder[1] { #expect(id == Self.groupA) }
+            if case .workspace(let id) = state.topLevelOrder[2] { #expect(id == Self.wsID3) }
+            #expect(state.groups[id: Self.groupA]?.childOrder == [Self.wsID2])
+        }
+    }
+
+    @Test func createGroupNearSelectionAnchorsToRowNotActiveWorkspace() async {
+        // Regression for the P2 bug: `.nearSelection` must anchor to the
+        // workspace being grouped (first initialWorkspaceIDs entry), not
+        // to the currently active workspace. The row-level "New Group..."
+        // on a non-active row previously placed the new group next to
+        // `activeWorkspaceID` instead.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(Self.wsID3)
+        ]
+        // Active workspace is wsID1, but the user right-clicks wsID3.
+        appState.activeWorkspaceID = Self.wsID1
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = UUIDGenerator { Self.groupA }
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createGroup(
+            name: "Bundle",
+            color: nil,
+            insertAfter: nil,
+            initialWorkspaceIDs: [Self.wsID3]
+        )) { state in
+            // The new group takes wsID3's slot (end of list here), not a
+            // slot next to wsID1 (the active workspace).
+            #expect(state.topLevelOrder.count == 3)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .workspace(let id) = state.topLevelOrder[1] { #expect(id == Self.wsID2) }
+            if case .group(let id) = state.topLevelOrder[2] { #expect(id == Self.groupA) }
+            #expect(state.groups[id: Self.groupA]?.childOrder == [Self.wsID3])
+        }
+    }
+
+    @Test func createGroupExplicitInsertAfterStillHonoredAfterDetachment() async {
+        // When the caller supplies an explicit `insertAfter` that points at
+        // a workspace being folded into the new group, the new group must
+        // still land in that slot; an explicit anchor is authoritative and
+        // should survive the detachment step.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
+        let store = makeStore(
+            workspaces: [ws1, ws2, ws3],
+            topLevelOrder: [
+                .workspace(Self.wsID1),
+                .workspace(Self.wsID2),
+                .workspace(Self.wsID3)
+            ]
+        )
+
+        await store.send(.createGroup(
+            name: "Bundle",
+            color: nil,
+            insertAfter: .workspace(Self.wsID2),
+            initialWorkspaceIDs: [Self.wsID2]
+        )) { state in
+            #expect(state.topLevelOrder.count == 3)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .group(let id) = state.topLevelOrder[1] { #expect(id == Self.groupA) }
+            if case .workspace(let id) = state.topLevelOrder[2] { #expect(id == Self.wsID3) }
+        }
+    }
+
     @Test func createGroupMovesInitialWorkspacesFromTopLevel() async {
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
