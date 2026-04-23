@@ -17,14 +17,6 @@ struct ScratchpadEditorView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> PaneFocusView {
         let container = PaneFocusView(paneID: paneID)
-        // Layer-backed border so the accent focus ring renders reliably on
-        // top of the embedded NSScrollView/NSTextView. The SwiftUI overlay
-        // in PaneGridView is not consistently visible through the text
-        // view's opaque drawing.
-        container.wantsLayer = true
-        container.layer?.borderColor = NSColor.controlAccentColor
-            .withAlphaComponent(0.4).cgColor
-        container.layer?.borderWidth = isFocused ? 1 : 0
 
         let textView = NSTextView()
         textView.isEditable = true
@@ -79,11 +71,7 @@ struct ScratchpadEditorView: NSViewRepresentable {
         return container
     }
 
-    func updateNSView(_ nsView: PaneFocusView, context _: Context) {
-        nsView.layer?.borderColor = NSColor.controlAccentColor
-            .withAlphaComponent(0.4).cgColor
-        nsView.layer?.borderWidth = isFocused ? 1 : 0
-    }
+    func updateNSView(_: PaneFocusView, context _: Context) {}
 
     // MARK: - Coordinator
 
