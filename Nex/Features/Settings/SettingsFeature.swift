@@ -2,6 +2,17 @@ import AppKit
 import ComposableArchitecture
 import Foundation
 
+/// Controls where a newly created workspace group is inserted in the sidebar.
+enum NewGroupPlacement: String, CaseIterable, Codable, Equatable {
+    /// Insert the new group after the active workspace's top-level entry
+    /// (or its parent group when nested). Falls back to appending if
+    /// there's no active workspace. This is the default.
+    case nearSelection = "near-selection"
+
+    /// Always append the new group to the end of the sidebar list.
+    case endOfList = "end-of-list"
+}
+
 @Reducer
 struct SettingsFeature {
     static let defaultWorktreeBasePath = "~/nex/worktrees/<repo>"
@@ -17,6 +28,7 @@ struct SettingsFeature {
         var autoDetectRepos: Bool = true
         var inheritGroupOnNewWorkspace: Bool = true
         var expandGroupOnWorkspaceDrop: Bool = true
+        var newGroupPlacement: NewGroupPlacement = .nearSelection
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -43,6 +55,7 @@ struct SettingsFeature {
         case setAutoDetectRepos(Bool)
         case setInheritGroupOnNewWorkspace(Bool)
         case setExpandGroupOnWorkspaceDrop(Bool)
+        case setNewGroupPlacement(NewGroupPlacement)
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
     }
@@ -59,6 +72,7 @@ struct SettingsFeature {
     static let defaultsKeyAutoDetectRepos = "settings.autoDetectRepos"
     static let defaultsKeyInheritGroupOnNewWorkspace = "settings.inheritGroupOnNewWorkspace"
     static let defaultsKeyExpandGroupOnWorkspaceDrop = "settings.expandGroupOnWorkspaceDrop"
+    static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -81,6 +95,10 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyExpandGroupOnWorkspaceDrop) {
                     state.expandGroupOnWorkspaceDrop = userDefaults.boolForKey(Self.defaultsKeyExpandGroupOnWorkspaceDrop)
+                }
+                if let raw = userDefaults.stringForKey(Self.defaultsKeyNewGroupPlacement),
+                   let placement = NewGroupPlacement(rawValue: raw) {
+                    state.newGroupPlacement = placement
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -149,6 +167,11 @@ struct SettingsFeature {
             case .setExpandGroupOnWorkspaceDrop(let enabled):
                 state.expandGroupOnWorkspaceDrop = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyExpandGroupOnWorkspaceDrop)
+                return .none
+
+            case .setNewGroupPlacement(let placement):
+                state.newGroupPlacement = placement
+                userDefaults.setString(placement.rawValue, Self.defaultsKeyNewGroupPlacement)
                 return .none
 
             case .selectTheme(let theme):

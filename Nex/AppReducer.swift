@@ -58,6 +58,22 @@ struct AppReducer {
             return workspaces[id: id]
         }
 
+        /// Sidebar entry that the active workspace occupies, used as an
+        /// insertion anchor for `.nearSelection` group placement. Returns
+        /// the workspace's own entry when it's top-level, or its parent
+        /// group's entry when nested. `nil` when there's no active
+        /// workspace or it isn't yet in the sidebar.
+        var activeWorkspaceSidebarAnchor: SidebarID? {
+            guard let activeID = activeWorkspaceID else { return nil }
+            if topLevelOrder.contains(.workspace(activeID)) {
+                return .workspace(activeID)
+            }
+            for group in groups where group.childOrder.contains(activeID) {
+                return .group(group.id)
+            }
+            return nil
+        }
+
         var commandPaletteItems: [CommandPaletteItem] {
             var items: [CommandPaletteItem] = []
             let home = NSHomeDirectory()
@@ -1053,6 +1069,22 @@ struct AppReducer {
                     validInitial.append(id)
                 }
 
+                // Resolve the insertion anchor before any mutations. When the
+                // caller specifies an explicit anchor, use it. Otherwise fall
+                // back to the `newGroupPlacement` setting: `.nearSelection`
+                // anchors off the active workspace (or its parent group),
+                // `.endOfList` always appends.
+                let resolvedInsertAfter: SidebarID? = if let insertAfter {
+                    insertAfter
+                } else {
+                    switch state.settings.newGroupPlacement {
+                    case .endOfList:
+                        nil
+                    case .nearSelection:
+                        state.activeWorkspaceSidebarAnchor
+                    }
+                }
+
                 let newGroup = WorkspaceGroup(
                     id: uuid(),
                     name: trimmed,
@@ -1077,7 +1109,7 @@ struct AppReducer {
 
                 // Insertion position in `topLevelOrder`.
                 let newEntry: SidebarID = .group(newGroup.id)
-                if let insertAfter, let idx = state.topLevelOrder.firstIndex(of: insertAfter) {
+                if let anchor = resolvedInsertAfter, let idx = state.topLevelOrder.firstIndex(of: anchor) {
                     state.topLevelOrder.insert(newEntry, at: idx + 1)
                 } else {
                     state.topLevelOrder.append(newEntry)

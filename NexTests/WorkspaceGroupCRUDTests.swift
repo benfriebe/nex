@@ -103,6 +103,105 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
+    @Test func createGroupDefaultPlacementFollowsActiveWorkspace() async {
+        // Default (`newGroupPlacement == .nearSelection`): an anchorless
+        // createGroup inserts the new group directly after the active
+        // workspace's sidebar entry rather than appending to the end.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
+        let store = makeStore(
+            workspaces: [ws1, ws2, ws3],
+            topLevelOrder: [
+                .workspace(Self.wsID1),
+                .workspace(Self.wsID2),
+                .workspace(Self.wsID3)
+            ],
+            activeWorkspaceID: Self.wsID2
+        )
+
+        await store.send(.createGroup(name: "Monitors")) { state in
+            #expect(state.topLevelOrder.count == 4)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .workspace(let id) = state.topLevelOrder[1] { #expect(id == Self.wsID2) }
+            if case .group = state.topLevelOrder[2] {} else { Issue.record("expected group at index 2") }
+            if case .workspace(let id) = state.topLevelOrder[3] { #expect(id == Self.wsID3) }
+        }
+    }
+
+    @Test func createGroupEndOfListPlacementAlwaysAppends() async {
+        // With `newGroupPlacement == .endOfList`, an anchorless createGroup
+        // ignores the active workspace and appends to the bottom of the
+        // sidebar (issue #58 opt-in behavior).
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2]
+        appState.topLevelOrder = [.workspace(Self.wsID1), .workspace(Self.wsID2)]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.settings.newGroupPlacement = .endOfList
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = UUIDGenerator { Self.groupA }
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createGroup(name: "Monitors")) { state in
+            #expect(state.topLevelOrder.count == 3)
+            #expect(state.topLevelOrder.last?.groupID == Self.groupA)
+        }
+    }
+
+    @Test func createGroupNearSelectionAnchorsToParentGroupWhenNested() async {
+        // When the active workspace lives inside a group, `.nearSelection`
+        // inserts the new group after the parent group's entry so the two
+        // groups are adjacent in the sidebar.
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
+        let parentGroup = WorkspaceGroup(
+            id: Self.groupB,
+            name: "Parent",
+            childOrder: [Self.wsID2]
+        )
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.groups = [parentGroup]
+        appState.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .group(Self.groupB),
+            .workspace(Self.wsID3)
+        ]
+        appState.activeWorkspaceID = Self.wsID2
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = UUIDGenerator { Self.groupA }
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createGroup(name: "Sibling")) { state in
+            #expect(state.topLevelOrder.count == 4)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .group(let id) = state.topLevelOrder[1] { #expect(id == Self.groupB) }
+            if case .group(let id) = state.topLevelOrder[2] { #expect(id == Self.groupA) }
+            if case .workspace(let id) = state.topLevelOrder[3] { #expect(id == Self.wsID3) }
+        }
+    }
+
     @Test func createGroupMovesInitialWorkspacesFromTopLevel() async {
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")

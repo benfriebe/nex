@@ -102,6 +102,17 @@ private struct GeneralSettingsView: View {
                     Text("When dragging a workspace into a collapsed group, expand the group on drop so the moved workspace is visible. Disable to keep the group collapsed and avoid disrupting the sidebar layout.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Picker("New group placement", selection: Binding(
+                        get: { settingsStore.newGroupPlacement },
+                        set: { settingsStore.send(.setNewGroupPlacement($0)) }
+                    )) {
+                        Text("Next to selection").tag(NewGroupPlacement.nearSelection)
+                        Text("End of list").tag(NewGroupPlacement.endOfList)
+                    }
+                    Text("Where a newly created group is inserted in the sidebar. \"Next to selection\" places it after the active workspace (or its parent group when nested). \"End of list\" always appends it to the bottom.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Panes") {
