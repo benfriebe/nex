@@ -305,6 +305,22 @@ struct CommandPaletteTests {
         #expect(paneItem.subtitle == "/tmp/project")
     }
 
+    @Test func scratchpadPaneAppearsWithIconAndTitle() {
+        let pane = Pane(id: Self.paneID1, type: .scratchpad, title: "Scratchpad")
+        let ws = Self.makeWorkspace(
+            id: Self.wsID1, name: "MyProject",
+            panes: [pane], layout: .leaf(Self.paneID1)
+        )
+
+        var state = AppReducer.State()
+        state.workspaces = [ws]
+        let paneItem = state.commandPaletteItems[1]
+        #expect(paneItem.paneID == Self.paneID1)
+        #expect(paneItem.title == "Scratchpad")
+        #expect(paneItem.icon == "note.text")
+        #expect(paneItem.workspaceName == "MyProject")
+    }
+
     @Test func paneItemsHaveWorkspaceName() {
         let pane = Pane(id: Self.paneID1, workingDirectory: "/tmp")
         let ws = Self.makeWorkspace(
