@@ -3,12 +3,18 @@ import SwiftUI
 
 /// Sheet for creating a new workspace with name, color, and optional repo associations.
 struct NewWorkspaceSheet: View {
-    /// Focusable inputs in reading order. Binding each with `.focused(...)`
-    /// gives SwiftUI explicit hops for Tab / Shift+Tab, and lets us land
-    /// initial focus on the name field when the sheet opens (#64).
+    /// Focusable controls in reading order. Tab / Shift+Tab hop between these
+    /// via the `.focused(...)` bindings. The color row is a single focus stop
+    /// (arrow keys move the selection within it) so the tab loop mirrors a
+    /// macOS radio group rather than producing one stop per swatch (#64).
     private enum Field: Hashable {
         case name
+        case color
         case group
+        case removeRepo(UUID)
+        case addRepository
+        case cancel
+        case create
     }
 
     let store: StoreOf<AppReducer>
@@ -57,6 +63,10 @@ struct NewWorkspaceSheet: View {
                             .onTapGesture { color = c }
                     }
                 }
+                .focusable()
+                .focused($focusedField, equals: .color)
+                .onKeyPress(.leftArrow) { cycleColor(-1) }
+                .onKeyPress(.rightArrow) { cycleColor(1) }
 
                 if !store.groups.isEmpty {
                     HStack {
@@ -99,6 +109,7 @@ struct NewWorkspaceSheet: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.plain)
+                                    .focused($focusedField, equals: .removeRepo(repo.id))
                                 }
                                 .padding(.vertical, 2)
                             }
@@ -109,6 +120,7 @@ struct NewWorkspaceSheet: View {
                                 .font(.system(size: 12))
                         }
                         .buttonStyle(.borderless)
+                        .focused($focusedField, equals: .addRepository)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -118,12 +130,14 @@ struct NewWorkspaceSheet: View {
                         store.send(.dismissNewWorkspaceSheet)
                     }
                     .keyboardShortcut(.cancelAction)
+                    .focused($focusedField, equals: .cancel)
 
                     Spacer()
 
                     Button("Create", action: create)
                         .keyboardShortcut(.defaultAction)
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .focused($focusedField, equals: .create)
                 }
             }
             .padding(20)
@@ -160,5 +174,14 @@ struct NewWorkspaceSheet: View {
             repos: selectedRepos,
             groupID: selectedGroupID
         ))
+    }
+
+    private func cycleColor(_ delta: Int) -> KeyPress.Result {
+        let cases = WorkspaceColor.allCases
+        guard let idx = cases.firstIndex(of: color) else { return .ignored }
+        let count = cases.count
+        let newIdx = (idx + delta + count) % count
+        color = cases[newIdx]
+        return .handled
     }
 }
