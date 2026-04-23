@@ -3,6 +3,14 @@ import SwiftUI
 
 /// Sheet for creating a new workspace with name, color, and optional repo associations.
 struct NewWorkspaceSheet: View {
+    /// Focusable inputs in reading order. Binding each with `.focused(...)`
+    /// gives SwiftUI explicit hops for Tab / Shift+Tab, and lets us land
+    /// initial focus on the name field when the sheet opens (#64).
+    private enum Field: Hashable {
+        case name
+        case group
+    }
+
     let store: StoreOf<AppReducer>
 
     @State private var name = ""
@@ -10,6 +18,7 @@ struct NewWorkspaceSheet: View {
     @State private var selectedRepos: [Repo] = []
     @State private var isRepoPickerPresented = false
     @State private var selectedGroupID: UUID?
+    @FocusState private var focusedField: Field?
 
     init(store: StoreOf<AppReducer>) {
         self.store = store
@@ -33,6 +42,7 @@ struct NewWorkspaceSheet: View {
 
                 TextField("Workspace name", text: $name)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .name)
                     .onSubmit(create)
 
                 HStack(spacing: 8) {
@@ -62,6 +72,7 @@ struct NewWorkspaceSheet: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
+                        .focused($focusedField, equals: .group)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -117,6 +128,12 @@ struct NewWorkspaceSheet: View {
             }
             .padding(20)
             .frame(width: 360)
+            .onAppear {
+                // Dispatching lets the sheet finish presenting before we
+                // steal first responder. Without this, the TextField
+                // sometimes loses focus back to the window on macOS.
+                DispatchQueue.main.async { focusedField = .name }
+            }
             .sheet(isPresented: $isRepoPickerPresented) {
                 RepoPickerView(
                     repos: store.repoRegistry,
