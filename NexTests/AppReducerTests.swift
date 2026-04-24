@@ -1714,4 +1714,142 @@ struct AppReducerTests {
             action: .openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: nil)
         )))
     }
+
+    // MARK: - Parked panes + workspace deletion
+
+    /// Deleting a workspace must tear down surfaces for *parked* panes
+    /// too. They're not in `layout.allPaneIDs`, so the original loop
+    /// (pre-parked-panes) would have leaked their PTYs.
+    @Test func deleteWorkspaceDestroysParkedPaneSurfaces() async {
+        let visibleID = UUID(uuidString: "00000000-0000-0000-0000-000000100001")!
+        let parkedID = UUID(uuidString: "00000000-0000-0000-0000-000000100002")!
+
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "W", paneID: visibleID)
+        ws.parkedPanes = [Pane(id: parkedID, type: .shell)]
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: visibleID, workingDirectory: "/tmp")
+        surfaceManager.createSurface(paneID: parkedID, workingDirectory: "/tmp")
+        #expect(surfaceManager.activeSurfaceCount == 2)
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.topLevelOrder = [.workspace(Self.wsID1)]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.deleteWorkspace(Self.wsID1))
+        await store.finish()
+
+        #expect(surfaceManager.activeSurfaceCount == 0)
+    }
+
+    /// End-to-end: a parked pane's PTY can exit on its own (SIGHUP,
+    /// background job, etc.). The surface callback fires
+    /// `.surfaceProcessExited`. AppReducer must route this to the
+    /// workspace (which lives in the `parkedPanes` lane, not `panes`)
+    /// so the parked-eviction branch in `WorkspaceFeature` runs.
+    /// Before this fix the event was dropped and the parked entry
+    /// leaked.
+    @Test func parkedShellSurfaceExitReachesWorkspaceAndEvicts() async {
+        let visibleID = UUID(uuidString: "00000000-0000-0000-0000-0000BA5EBA11")!
+        let parkedID = UUID(uuidString: "00000000-0000-0000-0000-0000DEADBEEF")!
+        let markdownID = UUID(uuidString: "00000000-0000-0000-0000-000012345678")!
+
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "W", paneID: visibleID)
+        // Simulate a `--here` overlay: shell parked, markdown linked.
+        var markdownPane = Pane(id: markdownID, type: .markdown, filePath: "/tmp/x.md")
+        markdownPane.parkedSourcePaneID = parkedID
+        ws.panes.append(markdownPane)
+        ws.parkedPanes = [Pane(id: parkedID, type: .shell)]
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: visibleID, workingDirectory: "/tmp")
+        surfaceManager.createSurface(paneID: parkedID, workingDirectory: "/tmp")
+        #expect(surfaceManager.activeSurfaceCount == 2)
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.topLevelOrder = [.workspace(Self.wsID1)]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.surfaceProcessExited(paneID: parkedID))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1,
+            action: .paneProcessTerminated(paneID: parkedID)
+        )))
+        await store.finish()
+
+        let wsState = store.state.workspaces[id: Self.wsID1]
+        #expect(wsState?.parkedPanes[id: parkedID] == nil)
+        // Markdown pane's link cleared so its close takes the normal path.
+        #expect(wsState?.panes[id: markdownID]?.parkedSourcePaneID == nil)
+        #expect(surfaceManager.surface(for: parkedID) == nil)
+        #expect(surfaceManager.surface(for: visibleID) != nil)
+    }
+
+    /// Agent lifecycle events (e.g. claude exits in a parked shell)
+    /// must also reach the workspace so the parked pane's status
+    /// tracking stays consistent. When we unpark later, the restored
+    /// terminal's badge should reflect reality.
+    @Test func parkedAgentStoppedUpdatesParkedPaneStatus() async {
+        let visibleID = UUID(uuidString: "00000000-0000-0000-0000-000022222222")!
+        let parkedID = UUID(uuidString: "00000000-0000-0000-0000-000033333333")!
+
+        var parkedPane = Pane(id: parkedID, type: .shell)
+        parkedPane.status = .running
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "W", paneID: visibleID)
+        ws.parkedPanes = [parkedPane]
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.topLevelOrder = [.workspace(Self.wsID1)]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+            $0.notificationService = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.socketMessage(.agentStopped(paneID: parkedID), reply: nil))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1,
+            action: .agentStopped(paneID: parkedID)
+        )))
+        await store.finish()
+
+        let parked = store.state.workspaces[id: Self.wsID1]?.parkedPanes[id: parkedID]
+        #expect(parked?.status == .waitingForInput)
+    }
 }

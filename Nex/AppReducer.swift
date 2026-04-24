@@ -196,6 +196,18 @@ struct AppReducer {
             return matches.count == 1 ? matches.first : nil
         }
 
+        /// Locate the workspace owning a pane, checking both the
+        /// visible layout and the parked lane. Used by surface/agent
+        /// lifecycle routing so events on shells parked by
+        /// `nex open --here` aren't dropped. User-command routing
+        /// (pane send, split, close, etc.) intentionally searches
+        /// only `panes` — parked panes are not user-addressable.
+        func workspaceContainingPane(_ paneID: UUID) -> WorkspaceFeature.State? {
+            workspaces.first(where: {
+                $0.panes[id: paneID] != nil || $0.parkedPanes[id: paneID] != nil
+            })
+        }
+
         func workspaces(inGroup groupID: UUID) -> [WorkspaceFeature.State] {
             guard let group = groups[id: groupID] else { return [] }
             return group.childOrder.compactMap { workspaces[id: $0] }
@@ -993,6 +1005,7 @@ struct AppReducer {
             case .deleteWorkspace(let id):
                 guard let workspace = state.workspaces[id: id] else { return .none }
                 let paneIDs = workspace.layout.allPaneIDs
+                    + workspace.parkedPanes.map(\.id)
                 state.workspaces.remove(id: id)
                 state.topLevelOrder.removeAll { $0 == .workspace(id) }
                 for groupID in state.groups.ids {
@@ -1237,6 +1250,7 @@ struct AppReducer {
                 for id in ids {
                     guard let workspace = state.workspaces[id: id] else { continue }
                     panesToDestroy.append(contentsOf: workspace.layout.allPaneIDs)
+                    panesToDestroy.append(contentsOf: workspace.parkedPanes.map(\.id))
                     state.workspaces.remove(id: id)
                 }
                 let removedSet = Set(ids)
@@ -1440,6 +1454,7 @@ struct AppReducer {
                     for wsID in childIDs {
                         guard let workspace = state.workspaces[id: wsID] else { continue }
                         paneIDs.append(contentsOf: workspace.layout.allPaneIDs)
+                        paneIDs.append(contentsOf: workspace.parkedPanes.map(\.id))
                         state.workspaces.remove(id: wsID)
                     }
                     let removedSet = Set(childIDs)
@@ -1767,19 +1782,17 @@ struct AppReducer {
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
 
-            case .workspaces(.element(id: let wsID, action: .openMarkdownFile(_, .some))):
-                // `--here` reuse removed a pane — mirror closePane's
-                // parent-level cleanup so renamingPaneID isn't left
-                // dangling and auto-detected repo associations are
-                // reconciled against the new working directory set.
-                if let renamingPaneID = state.renamingPaneID,
-                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+            case .workspaces(.element(_, action: .openMarkdownFile(_, .some(let reusePaneID)))):
+                // `--here` reuse parks (doesn't remove) the source
+                // pane. Only clear renamingPaneID if it targeted the
+                // source — the overlay can't continue into a parked
+                // pane that's no longer visible. No auto-unlink pass
+                // is needed because the source still owns its working
+                // directory, just off-layout.
+                if state.renamingPaneID == reusePaneID {
                     state.renamingPaneID = nil
                 }
-                return .merge(
-                    .send(.persistState),
-                    scheduleAutoUnlink(workspaceID: wsID, in: state)
-                )
+                return .send(.persistState)
 
             case .workspaces(.element(id: let wsID, action: .paneProcessTerminated)):
                 if let renamingPaneID = state.renamingPaneID,
@@ -2103,14 +2116,16 @@ struct AppReducer {
                 // MARK: Agent lifecycle
 
                 case .agentStarted(let paneID):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     // If we get a "start" while already running, the previous "stop"
                     // was missed (e.g. user interrupted Claude). Reset to idle first
                     // so the status lifecycle stays clean.
-                    if workspace.panes[id: paneID]?.status == .running {
-                        state.workspaces[id: workspace.id]?.panes[id: paneID]?.status = .idle
+                    if workspace.pane(id: paneID)?.status == .running {
+                        state.workspaces[id: workspace.id]?.mutatePane(id: paneID) {
+                            $0.status = .idle
+                        }
                     }
 
                     return .merge(
@@ -2119,7 +2134,7 @@ struct AppReducer {
                     )
 
                 case .agentStopped(let paneID):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     let isFocused = state.activeWorkspaceID == workspace.id && workspace.focusedPaneID == paneID
@@ -2128,7 +2143,7 @@ struct AppReducer {
                     let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
                     let shouldNotify = !isFocused || !isAppActive
                     let shouldBounce = !isAppActive
-                    let title = workspace.panes[id: paneID]?.title ?? workspace.name
+                    let title = workspace.pane(id: paneID)?.title ?? workspace.name
 
                     return .merge(
                         .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID)))),
@@ -2151,7 +2166,7 @@ struct AppReducer {
                     )
 
                 case .agentError(let paneID, let message):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     let notifService = notificationService
@@ -2171,7 +2186,7 @@ struct AppReducer {
                     )
 
                 case .notification(let paneID, let title, let body):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     let isFocused = state.activeWorkspaceID == workspace.id && workspace.focusedPaneID == paneID
@@ -2191,7 +2206,7 @@ struct AppReducer {
                     return .merge(effects)
 
                 case .sessionStarted(let paneID, let sessionID):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                    guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     return .merge(
@@ -2418,27 +2433,24 @@ struct AppReducer {
             // MARK: - Cross-Workspace Surface Notifications
 
             case .surfaceTitleChanged(let paneID, let title):
-                guard let workspace = state.workspaces.first(where: { ws in
-                    ws.panes[id: paneID] != nil
-                }) else { return .none }
+                guard let workspace = state.workspaceContainingPane(paneID)
+                else { return .none }
                 return .send(.workspaces(.element(
                     id: workspace.id,
                     action: .paneTitleChanged(paneID: paneID, title: title)
                 )))
 
             case .surfaceDirectoryChanged(let paneID, let directory):
-                guard let workspace = state.workspaces.first(where: { ws in
-                    ws.panes[id: paneID] != nil
-                }) else { return .none }
+                guard let workspace = state.workspaceContainingPane(paneID)
+                else { return .none }
                 return .send(.workspaces(.element(
                     id: workspace.id,
                     action: .paneDirectoryChanged(paneID: paneID, directory: directory)
                 )))
 
             case .surfaceProcessExited(let paneID):
-                guard let workspace = state.workspaces.first(where: { ws in
-                    ws.panes[id: paneID] != nil
-                }) else { return .none }
+                guard let workspace = state.workspaceContainingPane(paneID)
+                else { return .none }
                 return .send(.workspaces(.element(
                     id: workspace.id,
                     action: .paneProcessTerminated(paneID: paneID)
@@ -2448,7 +2460,7 @@ struct AppReducer {
 
             case .desktopNotification(let paneID, let title, let body):
                 // Suppress if this pane is focused and app is active
-                if let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }),
+                if let workspace = state.workspaceContainingPane(paneID),
                    state.activeWorkspaceID == workspace.id,
                    workspace.focusedPaneID == paneID,
                    MainActor.assumeIsolated({ NSApp.isActive }) {
@@ -2692,6 +2704,7 @@ struct AppReducer {
                 guard !candidateIDs.isEmpty else { return .none }
 
                 let panePaths = workspace.panes.map(\.workingDirectory)
+                    + workspace.parkedPanes.map(\.workingDirectory)
 
                 func isPathInside(_ path: String, _ root: String) -> Bool {
                     let p = (path as NSString).standardizingPath

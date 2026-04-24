@@ -28,6 +28,11 @@ struct Pane: Identifiable, Equatable {
     /// Rendered body font size (px) for markdown preview panes. Per-pane,
     /// in-memory only; adjusted via Cmd+= / Cmd+-.
     var markdownFontSize: Double
+    /// When set on a markdown pane created via `nex open --here`, points
+    /// at the parked source pane in the workspace's `parkedPanes` lane.
+    /// Closing this pane restores the source instead of taking the
+    /// normal close path. In-memory only; not persisted.
+    var parkedSourcePaneID: UUID?
 
     /// Convenience accessor for rendering logic.
     var isUsingExternalEditor: Bool { externalEditorCommand != nil }
@@ -48,6 +53,7 @@ struct Pane: Identifiable, Equatable {
         status: PaneStatus = .idle,
         claudeSessionID: String? = nil,
         markdownFontSize: Double = 14,
+        parkedSourcePaneID: UUID? = nil,
         createdAt: Date = Date(),
         lastActivityAt: Date = Date()
     ) {
@@ -64,6 +70,7 @@ struct Pane: Identifiable, Equatable {
         self.status = status
         self.claudeSessionID = claudeSessionID
         self.markdownFontSize = markdownFontSize
+        self.parkedSourcePaneID = parkedSourcePaneID
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt
     }

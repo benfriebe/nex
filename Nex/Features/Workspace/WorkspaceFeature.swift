@@ -24,6 +24,12 @@ struct WorkspaceFeature {
         var focusedPaneID: UUID?
         var repoAssociations: IdentifiedArrayOf<RepoAssociation> = []
         var recentlyClosedPanes: [ClosedPaneSnapshot] = []
+        /// Panes that are off-layout but whose ghostty surfaces/PTYs must
+        /// stay alive (currently: sources parked by `nex open --here`).
+        /// Not persisted — surfaces can't be restored across app
+        /// restarts. A `Pane` lives in exactly one of `panes` or
+        /// `parkedPanes` at any time.
+        var parkedPanes: IdentifiedArrayOf<Pane> = []
         var zoomedPaneID: UUID?
         var savedLayout: PaneLayout?
         var searchingPaneID: UUID?
@@ -77,6 +83,27 @@ struct WorkspaceFeature {
             self.repoAssociations = repoAssociations
             self.createdAt = createdAt
             self.lastAccessedAt = lastAccessedAt
+        }
+
+        /// Read a pane wherever it lives — visible layout or the
+        /// parked lane (sources hidden by `nex open --here`). Surface
+        /// and agent lifecycle events can target parked panes; user
+        /// commands (send/split/close) intentionally only look at
+        /// `panes`.
+        func pane(id paneID: UUID) -> Pane? {
+            panes[id: paneID] ?? parkedPanes[id: paneID]
+        }
+
+        /// Mutate a pane wherever it lives (visible or parked). If the
+        /// pane isn't found the closure is not invoked.
+        mutating func mutatePane(id paneID: UUID, _ body: (inout Pane) -> Void) {
+            if var pane = panes[id: paneID] {
+                body(&pane)
+                panes[id: paneID] = pane
+            } else if var pane = parkedPanes[id: paneID] {
+                body(&pane)
+                parkedPanes[id: paneID] = pane
+            }
         }
 
         /// Generate a filesystem-safe slug from a display name.
@@ -260,10 +287,10 @@ struct WorkspaceFeature {
                 }
 
                 if let reusePaneID, let oldPane = state.panes[id: reusePaneID] {
-                    // `--here`: replace the originating pane in place.
-                    // Mirrors closePane's cleanup so the two paths stay in
-                    // lockstep (search, zoom, recently-closed, surface
-                    // teardown).
+                    // `--here`: park the originating pane so its PTY
+                    // stays alive off-layout. Closing the new markdown
+                    // pane will unpark it and restore the terminal.
+                    // Mirrors closePane's search/zoom cleanup.
                     if state.searchingPaneID == reusePaneID {
                         state.searchingPaneID = nil
                         state.searchNeedle = ""
@@ -275,35 +302,14 @@ struct WorkspaceFeature {
                         state.zoomedPaneID = nil
                         state.savedLayout = nil
                     }
-                    let hasBackingSurface = oldPane.type == .shell
-                        || (oldPane.type == .markdown && oldPane.isUsingExternalEditor)
-                    state.recentlyClosedPanes.append(
-                        ClosedPaneSnapshot(
-                            workingDirectory: oldPane.workingDirectory,
-                            label: oldPane.label,
-                            type: oldPane.type,
-                            filePath: oldPane.filePath,
-                            scratchpadContent: oldPane.scratchpadContent,
-                            claudeSessionID: oldPane.claudeSessionID,
-                            markdownFontSize: oldPane.markdownFontSize
-                        )
-                    )
-                    if state.recentlyClosedPanes.count > 10 {
-                        state.recentlyClosedPanes.removeFirst()
-                    }
+                    var linkedPane = newPane
+                    linkedPane.parkedSourcePaneID = reusePaneID
                     state.layout = state.layout.replacing(paneID: reusePaneID, with: .leaf(newPaneID))
                     state.panes.remove(id: reusePaneID)
-                    state.panes.append(newPane)
+                    state.parkedPanes.append(oldPane)
+                    state.panes.append(linkedPane)
                     state.focusedPaneID = newPaneID
                     state.currentLayoutIndex = nil
-                    if hasBackingSurface {
-                        return .merge(
-                            .run { _ in
-                                await surfaceManager.destroySurface(paneID: reusePaneID)
-                            },
-                            branchEffect
-                        )
-                    }
                     return branchEffect
                 }
 
@@ -370,6 +376,33 @@ struct WorkspaceFeature {
                     state.zoomedPaneID = nil
                     state.savedLayout = nil
                 }
+
+                // Unpark: if the closing pane was created via `nex open
+                // --here` and its source is still parked, restore the
+                // source terminal instead of closing. The markdown
+                // pane's own surface (if it entered external-editor
+                // mode) still needs torn down.
+                if let closingPane = state.panes[id: paneID],
+                   let sourceID = closingPane.parkedSourcePaneID,
+                   let parkedPane = state.parkedPanes[id: sourceID] {
+                    let markdownHasSurface = closingPane.type == .markdown
+                        && closingPane.isUsingExternalEditor
+                    state.parkedPanes.remove(id: sourceID)
+                    state.panes.remove(id: paneID)
+                    state.panes.append(parkedPane)
+                    state.layout = state.layout.replacing(
+                        paneID: paneID, with: .leaf(sourceID)
+                    )
+                    state.focusedPaneID = sourceID
+                    state.currentLayoutIndex = nil
+                    if markdownHasSurface {
+                        return .run { _ in
+                            await surfaceManager.destroySurface(paneID: paneID)
+                        }
+                    }
+                    return .none
+                }
+
                 let paneType = state.panes[id: paneID]?.type ?? .shell
                 // A markdown pane hosts a ghostty surface only while editing
                 // via an external editor. We must destroy that surface on
@@ -435,19 +468,39 @@ struct WorkspaceFeature {
                 return .none
 
             case .paneTitleChanged(let paneID, let title):
-                state.panes[id: paneID]?.title = title
-                state.panes[id: paneID]?.lastActivityAt = now
+                let timestamp = now
+                state.mutatePane(id: paneID) {
+                    $0.title = title
+                    $0.lastActivityAt = timestamp
+                }
                 return .none
 
             case .paneDirectoryChanged(let paneID, let directory):
-                state.panes[id: paneID]?.workingDirectory = directory
-                state.panes[id: paneID]?.lastActivityAt = now
+                let timestamp = now
+                state.mutatePane(id: paneID) {
+                    $0.workingDirectory = directory
+                    $0.lastActivityAt = timestamp
+                }
                 return .run { send in
                     let branch = try? await gitService.getCurrentBranch(directory)
                     await send(.paneBranchChanged(paneID: paneID, branch: branch))
                 }
 
             case .paneProcessTerminated(let paneID):
+                // If a parked pane's process died (SIGHUP, etc.), evict
+                // it from the parked lane and clear references from
+                // any markdown panes that were going to restore it.
+                // The standard closePane path would be a no-op here
+                // (parked panes aren't in state.panes or state.layout).
+                if state.parkedPanes[id: paneID] != nil {
+                    state.parkedPanes.remove(id: paneID)
+                    for pane in state.panes where pane.parkedSourcePaneID == paneID {
+                        state.panes[id: pane.id]?.parkedSourcePaneID = nil
+                    }
+                    return .run { _ in
+                        await surfaceManager.destroySurface(paneID: paneID)
+                    }
+                }
                 // If this was a markdown pane whose external editor just exited,
                 // flip back to view mode instead of closing the pane. The
                 // MarkdownPaneView file watcher will reload any on-disk changes.
@@ -484,31 +537,31 @@ struct WorkspaceFeature {
                 return .none
 
             case .agentStarted(let paneID):
-                state.panes[id: paneID]?.status = .running
+                state.mutatePane(id: paneID) { $0.status = .running }
                 return .none
 
             case .agentStopped(let paneID):
-                state.panes[id: paneID]?.status = .waitingForInput
+                state.mutatePane(id: paneID) { $0.status = .waitingForInput }
                 return .none
 
             case .agentError(let paneID):
-                state.panes[id: paneID]?.status = .waitingForInput
+                state.mutatePane(id: paneID) { $0.status = .waitingForInput }
                 return .none
 
             case .sessionStarted(let paneID, let sessionID):
-                state.panes[id: paneID]?.claudeSessionID = sessionID
+                state.mutatePane(id: paneID) { $0.claudeSessionID = sessionID }
                 return .none
 
             case .clearPaneStatus(let paneID):
                 // Only clear waitingForInput — don't clobber .running if the agent
                 // already started again before the 600ms focus timer fired.
-                if state.panes[id: paneID]?.status == .waitingForInput {
-                    state.panes[id: paneID]?.status = .idle
+                if state.pane(id: paneID)?.status == .waitingForInput {
+                    state.mutatePane(id: paneID) { $0.status = .idle }
                 }
                 return .none
 
             case .paneBranchChanged(let paneID, let branch):
-                state.panes[id: paneID]?.gitBranch = branch
+                state.mutatePane(id: paneID) { $0.gitBranch = branch }
                 return .none
 
             case .toggleMarkdownEdit(let paneID):

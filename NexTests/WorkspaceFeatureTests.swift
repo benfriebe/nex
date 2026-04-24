@@ -1299,11 +1299,17 @@ struct WorkspaceFeatureTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: sourceID)) { state in
+            // Source moved to parked lane (alive but off-layout), not removed.
             #expect(state.panes[id: sourceID] == nil)
+            #expect(state.parkedPanes[id: sourceID] != nil)
+            #expect(state.parkedPanes[id: sourceID]?.workingDirectory == sourceCwd)
             let created = state.panes[id: newPaneID]
             #expect(created?.type == .markdown)
             #expect(created?.filePath == "/tmp/plan.md")
             #expect(created?.label == "plan.md")
+            // New markdown pane links back to the parked source so close
+            // knows to restore it.
+            #expect(created?.parkedSourcePaneID == sourceID)
             #expect(state.focusedPaneID == newPaneID)
             #expect(state.currentLayoutIndex == nil)
             // Layout: sibling is preserved, source leaf swapped for newPaneID.
@@ -1315,10 +1321,8 @@ struct WorkspaceFeatureTests {
             } else {
                 Issue.record("Expected horizontal split with source leaf replaced by new pane")
             }
-            // Snapshot of the replaced pane is queued for Undo.
-            #expect(state.recentlyClosedPanes.count == 1)
-            #expect(state.recentlyClosedPanes.first?.type == .shell)
-            #expect(state.recentlyClosedPanes.first?.workingDirectory == sourceCwd)
+            // Park is a dismiss-not-close: no recentlyClosedPanes snapshot.
+            #expect(state.recentlyClosedPanes.isEmpty)
         }
     }
 
@@ -1343,14 +1347,19 @@ struct WorkspaceFeatureTests {
         await store.send(.openMarkdownFile(filePath: "/tmp/notes.md", reusePaneID: sourceID)) { state in
             #expect(state.panes[id: sourceID] == nil)
             #expect(state.panes.count == 1)
+            #expect(state.parkedPanes.count == 1)
+            #expect(state.parkedPanes[id: sourceID] != nil)
+            #expect(state.panes[id: newPaneID]?.parkedSourcePaneID == sourceID)
             #expect(state.layout == .leaf(newPaneID))
             #expect(state.focusedPaneID == newPaneID)
         }
     }
 
-    @Test func openMarkdownFileReuseDestroysBackingSurfaceForShell() async {
-        // Regression guard: reusing a shell pane in place must tear down
-        // the backing ghostty surface, not leak it.
+    @Test func openMarkdownFileReusePreservesBackingSurfaceForShell() async {
+        // Correctness claim: reusing a shell pane must NOT tear down
+        // its backing ghostty surface. The PTY stays alive while the
+        // pane is parked, ready for closePane to unpark it back into
+        // the layout with all state (scrollback, prompt, jobs) intact.
         var workspace = WorkspaceFeature.State(name: "Test")
         let sourceID = workspace.panes.first!.id
         let siblingID = UUID()
@@ -1366,6 +1375,7 @@ struct WorkspaceFeatureTests {
         let surfaceManager = SurfaceManager()
         surfaceManager.createSurface(paneID: sourceID, workingDirectory: "/tmp")
         #expect(surfaceManager.activeSurfaceCount == 1)
+        let originalSurface = surfaceManager.surface(for: sourceID)
 
         let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000333333")!
 
@@ -1382,8 +1392,11 @@ struct WorkspaceFeatureTests {
         await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: sourceID))
         await store.finish()
 
+        // Source is parked (still alive), surface untouched.
         #expect(store.state.panes[id: sourceID] == nil)
-        #expect(surfaceManager.activeSurfaceCount == 0)
+        #expect(store.state.parkedPanes[id: sourceID] != nil)
+        #expect(surfaceManager.activeSurfaceCount == 1)
+        #expect(surfaceManager.surface(for: sourceID) === originalSurface)
     }
 
     @Test func openMarkdownFileReuseClearsZoomAndSearchState() async {
@@ -1434,6 +1447,218 @@ struct WorkspaceFeatureTests {
             #expect(state.searchTotal == nil)
             #expect(state.searchSelected == nil)
             #expect(state.focusedPaneID == newPaneID)
+            // Source parked for later restore.
+            #expect(state.parkedPanes[id: sourceID] != nil)
         }
+    }
+
+    // MARK: - Close markdown pane → unpark source (--here round-trip)
+
+    @Test func closeMarkdownUnparksSource() async {
+        // Round-trip: shell → `--here` markdown → close markdown.
+        // The shell's surface (PTY) must be the SAME object before and
+        // after — that's the whole point of the feature.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let shellID = workspace.panes.first!.id
+        let siblingID = UUID()
+        workspace.panes.append(Pane(id: siblingID, type: .shell))
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(shellID),
+            second: .leaf(siblingID)
+        )
+        workspace.focusedPaneID = shellID
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: shellID, workingDirectory: "/tmp")
+        let originalSurface = surfaceManager.surface(for: shellID)
+        #expect(originalSurface != nil)
+
+        let markdownID = UUID(uuidString: "00000000-0000-0000-0000-0000000FFFFF")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.date = .constant(Date(timeIntervalSince1970: 5000))
+            $0.uuid = .constant(markdownID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: shellID))
+        await store.finish()
+        #expect(store.state.parkedPanes[id: shellID] != nil)
+
+        await store.send(.closePane(markdownID))
+        await store.finish()
+
+        // Shell back in the visible pane set; markdown gone; layout
+        // restored to shell + sibling; focus on shell.
+        #expect(store.state.panes[id: shellID] != nil)
+        #expect(store.state.panes[id: markdownID] == nil)
+        #expect(store.state.parkedPanes[id: shellID] == nil)
+        #expect(store.state.focusedPaneID == shellID)
+        if case .split(_, _, .leaf(let first), .leaf(let second)) = store.state.layout {
+            #expect(first == shellID)
+            #expect(second == siblingID)
+        } else {
+            Issue.record("Expected layout restored with shell + sibling split")
+        }
+        // Surface identity: same SurfaceView instance, PTY untouched.
+        #expect(surfaceManager.surface(for: shellID) === originalSurface)
+        #expect(surfaceManager.activeSurfaceCount == 1)
+    }
+
+    @Test func closeMarkdownWithExternalEditorTearsDownOnlyOwnSurface() async {
+        // While the source is parked, the markdown pane itself can
+        // have entered external-editor mode (its own PTY). On close
+        // we tear down the markdown's surface but leave the parked
+        // shell's surface alone.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let shellID = workspace.panes.first!.id
+        workspace.layout = .leaf(shellID)
+        workspace.focusedPaneID = shellID
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: shellID, workingDirectory: "/tmp")
+        let shellSurface = surfaceManager.surface(for: shellID)
+
+        let markdownID = UUID(uuidString: "00000000-0000-0000-0000-00000000EEEE")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.date = .constant(Date(timeIntervalSince1970: 5000))
+            $0.uuid = .constant(markdownID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+            // Resolvable editor so toggleMarkdownEdit flips to
+            // external-editor mode and createSurface(paneID: markdownID)
+            // runs through the real path.
+            $0.editorService.buildCommand = { path in "nvim \(path)" }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // 1. --here parks shell, creates markdown pane.
+        await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: shellID))
+        await store.finish()
+
+        // 2. Markdown enters external editor mode → second surface.
+        await store.send(.toggleMarkdownEdit(markdownID))
+        await store.finish()
+        #expect(store.state.panes[id: markdownID]?.isUsingExternalEditor == true)
+        #expect(surfaceManager.activeSurfaceCount == 2)
+
+        // 3. Close markdown. Unpark branch runs; markdown's own
+        // surface is destroyed but shell's stays alive.
+        await store.send(.closePane(markdownID))
+        await store.finish()
+
+        #expect(surfaceManager.surface(for: markdownID) == nil)
+        #expect(surfaceManager.surface(for: shellID) === shellSurface)
+        #expect(surfaceManager.activeSurfaceCount == 1)
+        #expect(store.state.panes[id: shellID] != nil)
+        #expect(store.state.parkedPanes[id: shellID] == nil)
+    }
+
+    @Test func chainedReuseUnwindsOneLevel() async {
+        // shell → --here → mdA; from mdA → --here → mdB.
+        // Close mdB: mdA comes back (still linked to shell).
+        // Close mdA: shell comes back.
+        var workspace = WorkspaceFeature.State(name: "Chain")
+        let shellID = workspace.panes.first!.id
+        workspace.layout = .leaf(shellID)
+        workspace.focusedPaneID = shellID
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: shellID, workingDirectory: "/tmp")
+        let shellSurface = surfaceManager.surface(for: shellID)
+
+        let mdAID = UUID(uuidString: "00000000-0000-0000-0000-000000AAAAAA")!
+        let mdBID = UUID(uuidString: "00000000-0000-0000-0000-000000BBBBBB")!
+
+        // First `--here`: shellID → mdAID
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.date = .constant(Date(timeIntervalSince1970: 5000))
+            $0.uuid = .constant(mdAID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/A.md", reusePaneID: shellID))
+        await store.finish()
+        #expect(store.state.parkedPanes[id: shellID] != nil)
+        #expect(store.state.panes[id: mdAID]?.parkedSourcePaneID == shellID)
+
+        // Second `--here`: mdAID → mdBID. Swap the uuid dep.
+        store.dependencies.uuid = .constant(mdBID)
+        await store.send(.openMarkdownFile(filePath: "/tmp/B.md", reusePaneID: mdAID))
+        await store.finish()
+        // shell still parked (deeper); mdA parked on top.
+        #expect(store.state.parkedPanes[id: shellID] != nil)
+        #expect(store.state.parkedPanes[id: mdAID] != nil)
+        #expect(store.state.panes[id: mdBID]?.parkedSourcePaneID == mdAID)
+        // Critical chain invariant: parked mdA keeps its link to shell.
+        #expect(store.state.parkedPanes[id: mdAID]?.parkedSourcePaneID == shellID)
+
+        // Close B → mdA restored, still linked to shell.
+        await store.send(.closePane(mdBID))
+        await store.finish()
+        #expect(store.state.panes[id: mdAID] != nil)
+        #expect(store.state.panes[id: mdAID]?.parkedSourcePaneID == shellID)
+        #expect(store.state.parkedPanes[id: mdAID] == nil)
+        #expect(store.state.parkedPanes[id: shellID] != nil)
+        #expect(store.state.focusedPaneID == mdAID)
+
+        // Close A → shell restored.
+        await store.send(.closePane(mdAID))
+        await store.finish()
+        #expect(store.state.panes[id: shellID] != nil)
+        #expect(store.state.parkedPanes.isEmpty)
+        #expect(store.state.focusedPaneID == shellID)
+
+        // Shell's surface is the same all the way through.
+        #expect(surfaceManager.surface(for: shellID) === shellSurface)
+    }
+
+    @Test func parkedShellTerminationEvictsAndUnlinks() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let shellID = workspace.panes.first!.id
+        workspace.layout = .leaf(shellID)
+        workspace.focusedPaneID = shellID
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: shellID, workingDirectory: "/tmp")
+
+        let markdownID = UUID(uuidString: "00000000-0000-0000-0000-00000000CCCC")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.date = .constant(Date(timeIntervalSince1970: 5000))
+            $0.uuid = .constant(markdownID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: shellID))
+        await store.finish()
+        #expect(store.state.parkedPanes[id: shellID] != nil)
+
+        // Parked shell's process dies unexpectedly.
+        await store.send(.paneProcessTerminated(paneID: shellID))
+        await store.finish()
+
+        // Parked lane emptied; markdown's link cleared so a subsequent
+        // close takes the normal path.
+        #expect(store.state.parkedPanes[id: shellID] == nil)
+        #expect(store.state.panes[id: markdownID]?.parkedSourcePaneID == nil)
+        #expect(surfaceManager.activeSurfaceCount == 0)
     }
 }
