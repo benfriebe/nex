@@ -9,6 +9,7 @@ struct MarkdownPaneView: NSViewRepresentable {
     let isFocused: Bool
     var backgroundColor: NSColor = .windowBackgroundColor
     var backgroundOpacity: Double = 1.0
+    @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -47,6 +48,11 @@ struct MarkdownPaneView: NSViewRepresentable {
         context.coordinator.startWatching()
 
         container.embed(webView)
+
+        if isFocused, !sidebarTextEditingActive {
+            claimFirstResponder(webView)
+        }
+        context.coordinator.lastIsFocused = isFocused
         return container
     }
 
@@ -56,6 +62,22 @@ struct MarkdownPaneView: NSViewRepresentable {
             context.coordinator.filePath = filePath
             context.coordinator.loadFile()
             context.coordinator.startWatching()
+        }
+        // Only claim on a real false→true transition so re-renders caused
+        // by unrelated state changes (e.g., the user typing in the command
+        // palette's TextField) don't yank first responder back.
+        if isFocused, !context.coordinator.lastIsFocused, !sidebarTextEditingActive,
+           let webView = context.coordinator.webView {
+            claimFirstResponder(webView)
+        }
+        context.coordinator.lastIsFocused = isFocused
+    }
+
+    private func claimFirstResponder(_ webView: WKWebView) {
+        DispatchQueue.main.async { [weak webView] in
+            guard let webView, let window = webView.window else { return }
+            if window.firstResponder === webView { return }
+            window.makeFirstResponder(webView)
         }
     }
 
@@ -73,6 +95,7 @@ struct MarkdownPaneView: NSViewRepresentable {
         var filePath: String = ""
         var backgroundColor: NSColor = .windowBackgroundColor
         var backgroundOpacity: Double = 1.0
+        var lastIsFocused: Bool = false
         private var currentContent: String = ""
         var pendingScrollFraction: CGFloat?
         nonisolated(unsafe) var fileWatcher: DispatchSourceFileSystemObject?

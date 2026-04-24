@@ -10,6 +10,7 @@ struct ScratchpadEditorView: NSViewRepresentable {
     let onContentChanged: (String) -> Void
     var backgroundColor: NSColor = .textBackgroundColor
     var backgroundOpacity: Double = 1.0
+    @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -68,10 +69,32 @@ struct ScratchpadEditorView: NSViewRepresentable {
         )
 
         container.embed(scrollView)
+
+        if isFocused, !sidebarTextEditingActive {
+            claimFirstResponder(textView)
+        }
+        context.coordinator.lastIsFocused = isFocused
         return container
     }
 
-    func updateNSView(_: PaneFocusView, context _: Context) {}
+    func updateNSView(_: PaneFocusView, context: Context) {
+        guard let textView = context.coordinator.textView else { return }
+        // Only claim on a real false→true transition so re-renders caused
+        // by unrelated state changes (e.g., the user typing in the command
+        // palette's TextField) don't yank first responder back.
+        if isFocused, !context.coordinator.lastIsFocused, !sidebarTextEditingActive {
+            claimFirstResponder(textView)
+        }
+        context.coordinator.lastIsFocused = isFocused
+    }
+
+    private func claimFirstResponder(_ textView: NSTextView) {
+        DispatchQueue.main.async { [weak textView] in
+            guard let textView, let window = textView.window else { return }
+            if window.firstResponder === textView { return }
+            window.makeFirstResponder(textView)
+        }
+    }
 
     // MARK: - Coordinator
 
@@ -82,6 +105,7 @@ struct ScratchpadEditorView: NSViewRepresentable {
         var rulerView: LineNumberRulerView?
         var paneID: UUID?
         var onContentChanged: ((String) -> Void)?
+        var lastIsFocused: Bool = false
         private var saveTask: Task<Void, Never>?
 
         func restoreScrollFraction() {
