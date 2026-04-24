@@ -1767,6 +1767,20 @@ struct AppReducer {
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
 
+            case .workspaces(.element(id: let wsID, action: .openMarkdownFile(_, .some))):
+                // `--here` reuse removed a pane — mirror closePane's
+                // parent-level cleanup so renamingPaneID isn't left
+                // dangling and auto-detected repo associations are
+                // reconciled against the new working directory set.
+                if let renamingPaneID = state.renamingPaneID,
+                   !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
+                    state.renamingPaneID = nil
+                }
+                return .merge(
+                    .send(.persistState),
+                    scheduleAutoUnlink(workspaceID: wsID, in: state)
+                )
+
             case .workspaces(.element(id: let wsID, action: .paneProcessTerminated)):
                 if let renamingPaneID = state.renamingPaneID,
                    !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
@@ -2360,19 +2374,19 @@ struct AppReducer {
 
                 // MARK: File commands
 
-                case .openFile(let path, let paneID):
+                case .openFile(let path, let paneID, let reuse):
                     if let paneID,
                        let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
                         state.workspaces[id: workspace.id]?.focusedPaneID = paneID
                         return .send(.workspaces(.element(
                             id: workspace.id,
-                            action: .openMarkdownFile(filePath: path)
+                            action: .openMarkdownFile(filePath: path, reusePaneID: reuse ? paneID : nil)
                         )))
                     }
                     guard let activeID = state.activeWorkspaceID else { return .none }
                     return .send(.workspaces(.element(
                         id: activeID,
-                        action: .openMarkdownFile(filePath: path)
+                        action: .openMarkdownFile(filePath: path, reusePaneID: nil)
                     )))
 
                 // MARK: Layout commands

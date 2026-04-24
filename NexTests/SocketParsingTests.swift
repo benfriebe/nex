@@ -383,7 +383,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: Self.paneUUID))
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: Self.paneUUID, reuse: false))
     }
 
     @Test func parseOpenCommandNoPaneID() {
@@ -392,7 +392,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: nil))
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: nil, reuse: false))
     }
 
     @Test func parseOpenCommandMissingPath() {
@@ -409,6 +409,24 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result == nil)
+    }
+
+    @Test func parseOpenCommandWithReuse() {
+        let data = jsonData("""
+        {"command":"open","path":"/tmp/plan.md","pane_id":"\(Self.paneIDString)","reuse":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: Self.paneUUID, reuse: true))
+    }
+
+    @Test func parseOpenCommandReuseFalseExplicit() {
+        let data = jsonData("""
+        {"command":"open","path":"/tmp/plan.md","pane_id":"\(Self.paneIDString)","reuse":false}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .openFile(path: "/tmp/plan.md", paneID: Self.paneUUID, reuse: false))
     }
 
     // MARK: - parseWireMessage — Error cases

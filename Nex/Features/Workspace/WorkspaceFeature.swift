@@ -112,7 +112,7 @@ struct WorkspaceFeature {
         case sessionStarted(paneID: UUID, sessionID: String)
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
-        case openMarkdownFile(filePath: String)
+        case openMarkdownFile(filePath: String, reusePaneID: UUID? = nil)
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -239,7 +239,7 @@ struct WorkspaceFeature {
                     )
                 }
 
-            case .openMarkdownFile(let filePath):
+            case .openMarkdownFile(let filePath, let reusePaneID):
                 let newPaneID = uuid()
                 let dir = (filePath as NSString).deletingLastPathComponent
                 let fileName = (filePath as NSString).lastPathComponent
@@ -254,6 +254,59 @@ struct WorkspaceFeature {
                     lastActivityAt: now
                 )
 
+                let branchEffect: Effect<Action> = .run { send in
+                    let branch = try? await gitService.getCurrentBranch(dir)
+                    await send(.paneBranchChanged(paneID: newPaneID, branch: branch))
+                }
+
+                if let reusePaneID, let oldPane = state.panes[id: reusePaneID] {
+                    // `--here`: replace the originating pane in place.
+                    // Mirrors closePane's cleanup so the two paths stay in
+                    // lockstep (search, zoom, recently-closed, surface
+                    // teardown).
+                    if state.searchingPaneID == reusePaneID {
+                        state.searchingPaneID = nil
+                        state.searchNeedle = ""
+                        state.searchTotal = nil
+                        state.searchSelected = nil
+                    }
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    let hasBackingSurface = oldPane.type == .shell
+                        || (oldPane.type == .markdown && oldPane.isUsingExternalEditor)
+                    state.recentlyClosedPanes.append(
+                        ClosedPaneSnapshot(
+                            workingDirectory: oldPane.workingDirectory,
+                            label: oldPane.label,
+                            type: oldPane.type,
+                            filePath: oldPane.filePath,
+                            scratchpadContent: oldPane.scratchpadContent,
+                            claudeSessionID: oldPane.claudeSessionID,
+                            markdownFontSize: oldPane.markdownFontSize
+                        )
+                    )
+                    if state.recentlyClosedPanes.count > 10 {
+                        state.recentlyClosedPanes.removeFirst()
+                    }
+                    state.layout = state.layout.replacing(paneID: reusePaneID, with: .leaf(newPaneID))
+                    state.panes.remove(id: reusePaneID)
+                    state.panes.append(newPane)
+                    state.focusedPaneID = newPaneID
+                    state.currentLayoutIndex = nil
+                    if hasBackingSurface {
+                        return .merge(
+                            .run { _ in
+                                await surfaceManager.destroySurface(paneID: reusePaneID)
+                            },
+                            branchEffect
+                        )
+                    }
+                    return branchEffect
+                }
+
                 if let sourceID = state.focusedPaneID {
                     let (newLayout, _) = state.layout.splitting(
                         paneID: sourceID,
@@ -267,10 +320,7 @@ struct WorkspaceFeature {
                 state.panes.append(newPane)
                 state.focusedPaneID = newPaneID
                 state.currentLayoutIndex = nil
-                return .run { send in
-                    let branch = try? await gitService.getCurrentBranch(dir)
-                    await send(.paneBranchChanged(paneID: newPaneID, branch: branch))
-                }
+                return branchEffect
 
             case .createScratchpad:
                 let newPaneID = uuid()

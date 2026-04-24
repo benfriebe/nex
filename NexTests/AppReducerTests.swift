@@ -1679,4 +1679,39 @@ struct AppReducerTests {
             #expect(state.workspaces[id: Self.wsID1]?.focusedPaneID == nil)
         }
     }
+
+    // MARK: - openFile socket handoff
+
+    /// `--here` (reuse=true) with a resolvable source pane must hand
+    /// off a non-nil `reusePaneID` to the workspace action — a bug
+    /// that always passed `nil` here would silently fall back to the
+    /// split behaviour and would not be caught by the wire-parsing
+    /// or workspace-feature tests in isolation.
+    @Test func openFileWithReusePassesReusePaneID() async {
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "W", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(
+            .openFile(path: "/tmp/plan.md", paneID: Self.paneID1, reuse: true),
+            reply: nil
+        ))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1,
+            action: .openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: Self.paneID1)
+        )))
+    }
+
+    @Test func openFileWithoutReuseSendsNilReusePaneID() async {
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "W", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(
+            .openFile(path: "/tmp/plan.md", paneID: Self.paneID1, reuse: false),
+            reply: nil
+        ))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1,
+            action: .openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: nil)
+        )))
+    }
 }

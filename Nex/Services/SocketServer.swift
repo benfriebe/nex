@@ -35,8 +35,9 @@ enum SocketMessage: Equatable {
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
-    /// File commands
-    case openFile(path: String, paneID: UUID?)
+    /// File commands. `reuse` = replace the originating pane in place
+    /// (`nex open --here`) instead of splitting off it.
+    case openFile(path: String, paneID: UUID?, reuse: Bool)
     /// Layout commands
     case layoutCycle(paneID: UUID)
     case layoutSelect(paneID: UUID, name: String)
@@ -431,6 +432,8 @@ final class SocketServer: Sendable {
         // Request/response — `pane-list` filters
         var workspace: String?
         var scope: String?
+        /// `nex open --here` → replace originating pane in place.
+        var reuse: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -441,6 +444,7 @@ final class SocketServer: Sendable {
             case newName = "new_name"
             case cascade, index, group
             case workspace, scope
+            case reuse
         }
     }
 
@@ -491,7 +495,7 @@ final class SocketServer: Sendable {
         if wire.command == "open" {
             guard let path = wire.path, !path.isEmpty else { return nil }
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            return (.openFile(path: path, paneID: paneID), wire)
+            return (.openFile(path: path, paneID: paneID, reuse: wire.reuse ?? false), wire)
         }
 
         if wire.command == "pane-close" {

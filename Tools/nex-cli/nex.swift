@@ -21,7 +21,7 @@
 //   nex group delete <name-or-id> [--cascade]
 //   nex layout cycle
 //   nex layout select <name>
-//   nex open <filepath>
+//   nex open [--here] <filepath>
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
 // Reads NEX_SOCKET from the environment to select transport:
@@ -91,7 +91,7 @@ func printUsage() {
       nex group delete <name-or-id> [--cascade]
       nex layout cycle
       nex layout select <name>
-      nex open <filepath>
+      nex open [--here] <filepath>
     \n
     """, stderr)
 }
@@ -824,14 +824,15 @@ func handleLayout(_ args: inout ArraySlice<String>) {
 }
 
 func handleOpen(_ args: inout ArraySlice<String>) {
+    let reuse = popSwitch("--here", from: &args)
     guard let filePath = args.popFirst() else {
-        fputs("Usage: nex open <filepath>\n", stderr)
+        fputs("Usage: nex open [--here] <filepath>\n", stderr)
         exit(1)
     }
 
     let absolutePath = URL(fileURLWithPath: filePath).standardizedFileURL.path
 
-    var payload: [String: String] = [
+    var payload: [String: Any] = [
         "command": "open",
         "path": absolutePath
     ]
@@ -840,7 +841,11 @@ func handleOpen(_ args: inout ArraySlice<String>) {
         payload["pane_id"] = paneID
     }
 
-    sendJSON(payload)
+    if reuse {
+        payload["reuse"] = true
+    }
+
+    sendJSONAny(payload)
 }
 
 // MARK: - Main

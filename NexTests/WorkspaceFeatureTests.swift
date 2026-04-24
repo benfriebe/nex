@@ -1268,4 +1268,172 @@ struct WorkspaceFeatureTests {
             state.currentLayoutIndex = 0
         }
     }
+
+    // MARK: - openMarkdownFile --here (reuse)
+
+    @Test func openMarkdownFileReusesPaneInPlace() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let sourceID = workspace.panes.first!.id
+        let siblingID = UUID()
+        workspace.panes.append(Pane(id: siblingID))
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(sourceID),
+            second: .leaf(siblingID)
+        )
+        workspace.focusedPaneID = sourceID
+        let sourceCwd = workspace.panes[id: sourceID]!.workingDirectory
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000ABCDEF")!
+        let fixedNow = Date(timeIntervalSince1970: 1000)
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(fixedNow)
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: sourceID)) { state in
+            #expect(state.panes[id: sourceID] == nil)
+            let created = state.panes[id: newPaneID]
+            #expect(created?.type == .markdown)
+            #expect(created?.filePath == "/tmp/plan.md")
+            #expect(created?.label == "plan.md")
+            #expect(state.focusedPaneID == newPaneID)
+            #expect(state.currentLayoutIndex == nil)
+            // Layout: sibling is preserved, source leaf swapped for newPaneID.
+            if case .split(let dir, let ratio, .leaf(let first), .leaf(let second)) = state.layout {
+                #expect(dir == .horizontal)
+                #expect(ratio == 0.5)
+                #expect(first == newPaneID)
+                #expect(second == siblingID)
+            } else {
+                Issue.record("Expected horizontal split with source leaf replaced by new pane")
+            }
+            // Snapshot of the replaced pane is queued for Undo.
+            #expect(state.recentlyClosedPanes.count == 1)
+            #expect(state.recentlyClosedPanes.first?.type == .shell)
+            #expect(state.recentlyClosedPanes.first?.workingDirectory == sourceCwd)
+        }
+    }
+
+    @Test func openMarkdownFileReuseWhenOnlyPane() async {
+        var workspace = WorkspaceFeature.State(name: "Solo")
+        let sourceID = workspace.panes.first!.id
+        workspace.layout = .leaf(sourceID)
+        workspace.focusedPaneID = sourceID
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000111111")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 2000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/notes.md", reusePaneID: sourceID)) { state in
+            #expect(state.panes[id: sourceID] == nil)
+            #expect(state.panes.count == 1)
+            #expect(state.layout == .leaf(newPaneID))
+            #expect(state.focusedPaneID == newPaneID)
+        }
+    }
+
+    @Test func openMarkdownFileReuseDestroysBackingSurfaceForShell() async {
+        // Regression guard: reusing a shell pane in place must tear down
+        // the backing ghostty surface, not leak it.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let sourceID = workspace.panes.first!.id
+        let siblingID = UUID()
+        workspace.panes.append(Pane(id: siblingID, type: .shell))
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(sourceID),
+            second: .leaf(siblingID)
+        )
+        workspace.focusedPaneID = sourceID
+
+        let surfaceManager = SurfaceManager()
+        surfaceManager.createSurface(paneID: sourceID, workingDirectory: "/tmp")
+        #expect(surfaceManager.activeSurfaceCount == 1)
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000333333")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.date = .constant(Date(timeIntervalSince1970: 4000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/plan.md", reusePaneID: sourceID))
+        await store.finish()
+
+        #expect(store.state.panes[id: sourceID] == nil)
+        #expect(surfaceManager.activeSurfaceCount == 0)
+    }
+
+    @Test func openMarkdownFileReuseClearsZoomAndSearchState() async {
+        var workspace = WorkspaceFeature.State(name: "Zoomed")
+        let sourceID = workspace.panes.first!.id
+        let siblingID = UUID()
+        workspace.panes.append(Pane(id: siblingID))
+        let fullLayout: PaneLayout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(sourceID),
+            second: .leaf(siblingID)
+        )
+        workspace.layout = .leaf(sourceID) // zoomed layout
+        workspace.savedLayout = fullLayout
+        workspace.zoomedPaneID = sourceID
+        workspace.focusedPaneID = sourceID
+        workspace.searchingPaneID = sourceID
+        workspace.searchNeedle = "foo"
+        workspace.searchTotal = 3
+        workspace.searchSelected = 1
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000222222")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 3000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openMarkdownFile(filePath: "/tmp/x.md", reusePaneID: sourceID)) { state in
+            // Zoom restored to full layout, then source swapped for new pane.
+            #expect(state.savedLayout == nil)
+            #expect(state.zoomedPaneID == nil)
+            if case .split(_, _, .leaf(let first), .leaf(let second)) = state.layout {
+                #expect(first == newPaneID)
+                #expect(second == siblingID)
+            } else {
+                Issue.record("Expected restored layout with source leaf replaced")
+            }
+            // Search state cleared because source was the searching pane.
+            #expect(state.searchingPaneID == nil)
+            #expect(state.searchNeedle == "")
+            #expect(state.searchTotal == nil)
+            #expect(state.searchSelected == nil)
+            #expect(state.focusedPaneID == newPaneID)
+        }
+    }
 }
