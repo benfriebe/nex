@@ -12,6 +12,7 @@ struct AppReducer {
         var activeWorkspaceID: UUID?
         var isSidebarVisible: Bool = true
         var isNewWorkspaceSheetPresented: Bool = false
+        var pendingSheetGroupID: UUID?
         var renamingWorkspaceID: UUID?
         var renamingPaneID: UUID?
         var renamingGroupID: UUID?
@@ -274,7 +275,7 @@ struct AppReducer {
         case switchToNextWorkspace
         case switchToPreviousWorkspace
         case toggleSidebar
-        case showNewWorkspaceSheet
+        case showNewWorkspaceSheet(groupID: UUID? = nil)
         case dismissNewWorkspaceSheet
         case beginRenameActiveWorkspace
         case setRenamingWorkspaceID(UUID?)
@@ -976,6 +977,7 @@ struct AppReducer {
                 }
                 state.activeWorkspaceID = workspace.id
                 state.isNewWorkspaceSheetPresented = false
+                state.pendingSheetGroupID = nil
 
                 // Create the initial surface for the default pane
                 let paneID = workspace.panes.first!.id
@@ -1150,12 +1152,14 @@ struct AppReducer {
                 state.isSidebarVisible.toggle()
                 return .none
 
-            case .showNewWorkspaceSheet:
+            case .showNewWorkspaceSheet(let groupID):
                 state.isNewWorkspaceSheetPresented = true
+                state.pendingSheetGroupID = groupID
                 return .none
 
             case .dismissNewWorkspaceSheet:
                 state.isNewWorkspaceSheetPresented = false
+                state.pendingSheetGroupID = nil
                 return .none
 
             case .beginRenameActiveWorkspace:

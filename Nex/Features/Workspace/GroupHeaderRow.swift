@@ -166,5 +166,9 @@ struct GroupEmptyRow: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 16)
+        // Right-click anywhere on the row should open the empty-group
+        // context menu — without an explicit hit shape only the Text's
+        // glyph area would respond.
+        .contentShape(Rectangle())
     }
 }

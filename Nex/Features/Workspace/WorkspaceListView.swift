@@ -148,7 +148,7 @@ struct WorkspaceListView: View {
                             }
                             .contextMenu {
                                 Button("New Workspace") {
-                                    store.send(.showNewWorkspaceSheet)
+                                    store.send(.showNewWorkspaceSheet())
                                 }
                                 Button("New Group") {
                                     let placeholder = defaultGroupName(existing: store.groups)
@@ -193,7 +193,7 @@ struct WorkspaceListView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Menu {
-                    Button("New Workspace") { store.send(.showNewWorkspaceSheet) }
+                    Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
                     Button("New Group") {
                         let placeholder = defaultGroupName(existing: store.groups)
                         store.send(.createGroup(name: placeholder, autoRename: true))
@@ -202,7 +202,7 @@ struct WorkspaceListView: View {
                     Label("New Workspace", systemImage: "plus")
                         .frame(maxWidth: .infinity)
                 } primaryAction: {
-                    store.send(.showNewWorkspaceSheet)
+                    store.send(.showNewWorkspaceSheet())
                 }
                 .menuStyle(.borderlessButton)
                 .padding(12)
@@ -350,6 +350,15 @@ struct WorkspaceListView: View {
                     .spring(response: 0.35, dampingFraction: 0.8),
                     value: sidebarLayoutKey
                 )
+                .contextMenu {
+                    Button("New Workspace") {
+                        store.send(.showNewWorkspaceSheet(groupID: groupID))
+                    }
+                    if let group = store.groups[id: groupID] {
+                        Divider()
+                        groupContextMenu(groupID: groupID, group: group)
+                    }
+                }
         }
     }
 

@@ -9,7 +9,7 @@ struct NexCommands: Commands {
         // Replace the default "New Window" (⌘N) with "New Workspace"
         CommandGroup(replacing: .newItem) {
             menuButton("New Workspace", action: .newWorkspace) {
-                store.send(.showNewWorkspaceSheet)
+                store.send(.showNewWorkspaceSheet())
             }
 
             menuButton("New Group", action: .newGroup) {

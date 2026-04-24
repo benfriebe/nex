@@ -29,10 +29,13 @@ struct NewWorkspaceSheet: View {
     init(store: StoreOf<AppReducer>) {
         self.store = store
         _color = State(initialValue: store.workspaces.nextRandomColor())
-        // Preselect the active workspace's group when inheritance is enabled,
-        // so the sheet opens pointing at the group the user is likely to want.
-        // They can always flip to "No group" or pick a different one.
+        // When the sheet was opened scoped to a specific group (e.g. from the
+        // empty-group context menu), honour that first. Otherwise fall back to
+        // preselecting the active workspace's group when inheritance is
+        // enabled. Either way the user can still flip to "No group" or pick a
+        // different one.
         let defaultGroupID: UUID? = {
+            if let pending = store.pendingSheetGroupID { return pending }
             guard store.settings.inheritGroupOnNewWorkspace,
                   let activeID = store.activeWorkspaceID else { return nil }
             return store.state.groupID(forWorkspace: activeID)

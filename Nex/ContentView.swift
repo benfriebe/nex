@@ -125,7 +125,7 @@ struct ContentView: View {
                         Text("No workspace selected")
                             .foregroundStyle(.secondary)
                         Button("Create Workspace") {
-                            store.send(.showNewWorkspaceSheet)
+                            store.send(.showNewWorkspaceSheet())
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

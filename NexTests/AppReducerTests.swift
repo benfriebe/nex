@@ -528,14 +528,26 @@ struct AppReducerTests {
     @Test func showNewWorkspaceSheet() async {
         let store = makeStore()
 
-        await store.send(.showNewWorkspaceSheet) { state in
-            #expect(state.isNewWorkspaceSheetPresented == true)
+        await store.send(.showNewWorkspaceSheet()) { state in
+            state.isNewWorkspaceSheetPresented = true
+        }
+    }
+
+    @Test func showNewWorkspaceSheetScopedToGroup() async {
+        let groupID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
+        let store = makeStore()
+
+        await store.send(.showNewWorkspaceSheet(groupID: groupID)) { state in
+            state.isNewWorkspaceSheetPresented = true
+            state.pendingSheetGroupID = groupID
         }
     }
 
     @Test func dismissNewWorkspaceSheet() async {
+        let groupID = UUID(uuidString: "20000000-0000-0000-0000-000000000002")!
         var appState = AppReducer.State()
         appState.isNewWorkspaceSheetPresented = true
+        appState.pendingSheetGroupID = groupID
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -549,8 +561,39 @@ struct AppReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.dismissNewWorkspaceSheet) { state in
-            #expect(state.isNewWorkspaceSheetPresented == false)
+            state.isNewWorkspaceSheetPresented = false
+            state.pendingSheetGroupID = nil
         }
+    }
+
+    @Test func createWorkspaceClearsPendingSheetGroupID() async {
+        // When the sheet is open scoped to a group and the user submits, the
+        // pending preselection hint should be cleared alongside the sheet flag
+        // so a subsequent generic open doesn't remember the previous group.
+        let groupID = UUID(uuidString: "20000000-0000-0000-0000-000000000003")!
+        let group = WorkspaceGroup(id: groupID, name: "G", color: nil, icon: nil)
+        var appState = AppReducer.State()
+        appState.groups = [group]
+        appState.topLevelOrder = [.group(groupID)]
+        appState.isNewWorkspaceSheetPresented = true
+        appState.pendingSheetGroupID = groupID
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspace(name: "New", groupID: groupID))
+
+        #expect(store.state.isNewWorkspaceSheetPresented == false)
+        #expect(store.state.pendingSheetGroupID == nil)
     }
 
     // MARK: - beginRenameActiveWorkspace / setRenamingWorkspaceID
