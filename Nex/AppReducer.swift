@@ -789,11 +789,16 @@ struct AppReducer {
             return fail("pane '\(resolvedID.uuidString)' is not in workspace '\(scopedWorkspace.name)'")
         }
 
-        reply?.send([
+        var payload: [String: Any] = [
             "ok": true,
             "pane_id": resolvedID.uuidString,
-            "workspace_id": workspace.id.uuidString
-        ])
+            "workspace_id": workspace.id.uuidString,
+            "workspace_name": workspace.name
+        ]
+        if let label = workspace.panes[id: resolvedID]?.label {
+            payload["label"] = label
+        }
+        reply?.send(payload)
         reply?.close()
         return .send(.workspaces(.element(id: workspace.id, action: .closePane(resolvedID))))
     }

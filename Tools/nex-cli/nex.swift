@@ -456,6 +456,16 @@ func handlePane(_ args: inout ArraySlice<String>) {
             fputs("nex pane close: \(msg)\n", stderr)
             exit(1)
         }
+        // Success — print the resolved pane id (and label/workspace
+        // when known) so humans see clear confirmation and scripts can
+        // chain on the id.
+        let closedID = (json["pane_id"] as? String) ?? "?"
+        let label = json["label"] as? String
+        let wsName = json["workspace_name"] as? String
+        var line = "pane deleted: \(closedID)"
+        if let label { line += " (\(label))" }
+        if let wsName { line += " in workspace \(wsName)" }
+        print(line)
 
     case "name":
         let paneID = requirePaneID()

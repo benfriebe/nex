@@ -102,6 +102,8 @@ struct PaneCloseReplyTests {
         #expect(sink.payloads[0]["ok"] as? Bool == true)
         #expect(sink.payloads[0]["pane_id"] as? String == Self.pane1.uuidString)
         #expect(sink.payloads[0]["workspace_id"] as? String == Self.ws1ID.uuidString)
+        #expect(sink.payloads[0]["workspace_name"] as? String == "alpha")
+        #expect(sink.payloads[0]["label"] as? String == "worker")
     }
 
     @Test func closeByPaneIDRepliesOk() async {
