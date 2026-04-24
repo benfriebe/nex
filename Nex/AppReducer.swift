@@ -678,6 +678,126 @@ struct AppReducer {
         reply.close()
     }
 
+    /// Resolve + dispatch a `pane-close` request. `paneID` comes from
+    /// `NEX_PANE_ID` (no-flag form); `target` is the `--target
+    /// <name-or-uuid>` value; `workspaceFilter` optionally narrows
+    /// label resolution to a specific workspace. Writes a structured
+    /// `{ok,...}` reply and closes the connection. `reply` is nil on
+    /// the legacy fire-and-forget path used by older CLIs (pre
+    /// request/response) — we still dispatch the close in that case so
+    /// old clients keep working against a new server.
+    func handlePaneClose(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ error: String) -> Effect<Action> {
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        // If `--workspace` was supplied, resolve it up front so an
+        // unknown workspace returns a specific error rather than
+        // cascading into "unresolved target".
+        let scopedWorkspace: WorkspaceFeature.State?
+        if let filter = workspaceFilter {
+            guard let ws = state.resolveWorkspace(filter) else {
+                return fail("workspace not found: \(filter)")
+            }
+            scopedWorkspace = ws
+        } else {
+            scopedWorkspace = nil
+        }
+
+        // Resolve the pane to close. `target` wins over `paneID` when
+        // both are present (documented precedence).
+        let resolvedID: UUID
+        if let target {
+            if let uuid = UUID(uuidString: target) {
+                if let scopedWorkspace {
+                    guard scopedWorkspace.panes[id: uuid] != nil else {
+                        return fail("no pane with UUID '\(target)' in workspace '\(scopedWorkspace.name)'")
+                    }
+                } else {
+                    guard state.workspaces.contains(where: { $0.panes[id: uuid] != nil }) else {
+                        return fail("no pane with UUID '\(target)'")
+                    }
+                }
+                resolvedID = uuid
+            } else {
+                // Label lookup. Workspace scope wins when supplied;
+                // otherwise prefer the origin workspace (caller's own)
+                // before falling back to a globally-unique match.
+                let candidates: [Pane]
+                if let scopedWorkspace {
+                    candidates = Array(scopedWorkspace.panes.filter { $0.label == target })
+                } else if let paneID,
+                          let origin = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
+                    let local = origin.panes.filter { $0.label == target }
+                    if local.count == 1 {
+                        candidates = Array(local)
+                    } else if local.isEmpty {
+                        candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
+                    } else {
+                        // Ambiguous within origin workspace — extremely
+                        // rare (label uniqueness isn't enforced) but
+                        // surface rather than closing an arbitrary one.
+                        candidates = Array(local)
+                    }
+                } else {
+                    candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
+                }
+
+                switch candidates.count {
+                case 0:
+                    let scope = scopedWorkspace.map { " in workspace '\($0.name)'" } ?? ""
+                    return fail("no pane with label '\(target)'\(scope)")
+                case 1:
+                    resolvedID = candidates[0].id
+                default:
+                    return fail(
+                        "label '\(target)' is ambiguous (\(candidates.count) matches); " +
+                            "pass --workspace <name-or-id> to disambiguate"
+                    )
+                }
+            }
+        } else if let paneID {
+            guard state.workspaces.contains(where: { $0.panes[id: paneID] != nil }) else {
+                return fail("no pane with UUID '\(paneID.uuidString)'")
+            }
+            resolvedID = paneID
+        } else {
+            // The wire decoder rejects this case, so it should never
+            // reach here in production — defensive fail keeps the
+            // contract honest.
+            return fail("missing pane_id and target")
+        }
+
+        guard let workspace = state.workspaces.first(where: { $0.panes[id: resolvedID] != nil }) else {
+            // Same defensive branch — resolution above already
+            // verified the pane exists.
+            return fail("pane not found: \(resolvedID.uuidString)")
+        }
+
+        // If `--workspace` was supplied, confirm the resolved pane
+        // actually lives there. UUID resolution already enforces this;
+        // the guard covers future paths that might bypass the check.
+        if let scopedWorkspace, scopedWorkspace.id != workspace.id {
+            return fail("pane '\(resolvedID.uuidString)' is not in workspace '\(scopedWorkspace.name)'")
+        }
+
+        reply?.send([
+            "ok": true,
+            "pane_id": resolvedID.uuidString,
+            "workspace_id": workspace.id.uuidString
+        ])
+        reply?.close()
+        return .send(.workspaces(.element(id: workspace.id, action: .closePane(resolvedID))))
+    }
+
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
@@ -1961,19 +2081,14 @@ struct AppReducer {
                         action: .splitPane(direction: .horizontal, sourcePaneID: sourcePaneID, label: name)
                     )))
 
-                case .paneClose(let paneID, let target):
-                    // Resolve which pane to close: `--target` (name or UUID)
-                    // takes precedence over the caller's pane_id so commands
-                    // run from outside Nex still work.
-                    let resolvedID: UUID? = if let target {
-                        Self.resolveTarget(target, from: paneID, state: state)
-                    } else {
-                        paneID
-                    }
-                    guard let resolvedID,
-                          let workspace = state.workspaces.first(where: { $0.panes[id: resolvedID] != nil })
-                    else { return .none }
-                    return .send(.workspaces(.element(id: workspace.id, action: .closePane(resolvedID))))
+                case .paneClose(let paneID, let target, let workspaceFilter):
+                    return handlePaneClose(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
 
                 case .paneName(let paneID, let name):
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })

@@ -127,7 +127,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: nil))
+        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: nil, workspace: nil))
     }
 
     @Test func parsePaneCloseWithTarget() {
@@ -138,7 +138,7 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .paneClose(paneID: nil, target: "worker-1"))
+        #expect(result?.0 == .paneClose(paneID: nil, target: "worker-1", workspace: nil))
     }
 
     @Test func parsePaneCloseWithTargetAndPaneID() {
@@ -148,7 +148,26 @@ struct SocketParsingTests {
         {"command":"pane-close","pane_id":"\(Self.paneIDString)","target":"worker-1"}
         """)
         let result = SocketServer.parseWireMessage(data)
-        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: "worker-1"))
+        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: "worker-1", workspace: nil))
+    }
+
+    @Test func parsePaneCloseWithWorkspace() {
+        // `--workspace <name-or-uuid>` narrows label resolution to a
+        // specific workspace — disambiguates cross-workspace label
+        // collisions.
+        let data = jsonData("""
+        {"command":"pane-close","target":"worker","workspace":"alpha"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneClose(paneID: nil, target: "worker", workspace: "alpha"))
+    }
+
+    @Test func parsePaneCloseEmptyWorkspaceNormalisedToNil() {
+        let data = jsonData("""
+        {"command":"pane-close","target":"worker","workspace":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneClose(paneID: nil, target: "worker", workspace: nil))
     }
 
     @Test func parsePaneCloseMissingBothRejected() {

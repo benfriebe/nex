@@ -7,7 +7,7 @@
 //   nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
 //   nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
-//   nex pane close [--target <name-or-uuid>]
+//   nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
 //   nex pane name <name>
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex pane move [left|right|up|down]
@@ -77,7 +77,7 @@ func printUsage() {
       nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
       nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
-      nex pane close [--target <name-or-uuid>]
+      nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex pane name <name>
       nex pane send --to <name-or-uuid> <command...>
       nex pane move [left|right|up|down]
@@ -421,7 +421,8 @@ func handlePane(_ args: inout ArraySlice<String>) {
 
     case "close":
         let target = parseFlag("--target", from: &args)
-        var payload = [
+        let workspace = parseFlag("--workspace", from: &args)
+        var payload: [String: Any] = [
             "command": "pane-close"
         ]
         if let target {
@@ -431,7 +432,30 @@ func handlePane(_ args: inout ArraySlice<String>) {
         } else {
             payload["pane_id"] = requirePaneID()
         }
-        sendJSON(payload)
+        if let workspace {
+            // `--workspace <name-or-id>` disambiguates when the same
+            // label is reused across workspaces. Ignored when `target`
+            // is a UUID; useful for label lookups.
+            payload["workspace"] = workspace
+        }
+
+        guard let replyData = sendJSONAndReadReply(payload) else {
+            fputs("nex pane close: transport failure (is Nex running?)\n", stderr)
+            exit(1)
+        }
+        guard !replyData.isEmpty else {
+            fputs("nex pane close: no response from Nex (upgrade required? need v0.20+)\n", stderr)
+            exit(1)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+            fputs("nex pane close: invalid JSON response\n", stderr)
+            exit(1)
+        }
+        if let ok = json["ok"] as? Bool, ok == false {
+            let msg = (json["error"] as? String) ?? "unknown error"
+            fputs("nex pane close: \(msg)\n", stderr)
+            exit(1)
+        }
 
     case "name":
         let paneID = requirePaneID()

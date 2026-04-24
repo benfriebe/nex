@@ -1418,7 +1418,7 @@ struct AppReducerTests {
 
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker"), reply: nil))
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker", workspace: nil), reply: nil))
         await store.receive(.workspaces(.element(
             id: Self.wsID1, action: .closePane(Self.paneID1)
         ))) { state in
@@ -1439,7 +1439,7 @@ struct AppReducerTests {
 
         let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker"), reply: nil))
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker", workspace: nil), reply: nil))
         // No `.closePane` is dispatched — both panes survive.
         #expect(store.state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
         #expect(store.state.workspaces[id: Self.wsID2]?.panes[id: Self.paneID2] != nil)
@@ -1450,7 +1450,7 @@ struct AppReducerTests {
         let ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "missing"), reply: nil))
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "missing", workspace: nil), reply: nil))
         #expect(store.state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
     }
 
@@ -1470,7 +1470,7 @@ struct AppReducerTests {
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
         await store.send(.socketMessage(.paneClose(
-            paneID: Self.paneID1, target: "worker"
+            paneID: Self.paneID1, target: "worker", workspace: nil
         ), reply: nil))
         await store.receive(.workspaces(.element(
             id: Self.wsID1, action: .closePane(Self.paneID2)
@@ -1491,7 +1491,7 @@ struct AppReducerTests {
         ws.panes[id: Self.paneID1]?.label = "only"
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "only"), reply: nil))
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "only", workspace: nil), reply: nil))
         await store.receive(.workspaces(.element(
             id: Self.wsID1, action: .closePane(Self.paneID1)
         ))) { state in
