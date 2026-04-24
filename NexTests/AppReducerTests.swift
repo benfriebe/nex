@@ -106,10 +106,10 @@ struct AppReducerTests {
         }
     }
 
-    @Test func createWorkspaceWithGroupIDInsertsAdjacentToActive() async {
+    @Test func createWorkspaceWithGroupIDPlacesInGroupChildOrder() async {
         // Seed a group containing wsID1 (active). Creating a new workspace with
-        // that group's ID should place the new workspace right after wsID1 in
-        // the group's childOrder, NOT in topLevelOrder.
+        // that group's ID should add it to the group's childOrder (not to
+        // topLevelOrder). Default placement appends to the end of the group.
         let existing = Self.makeWorkspace(id: Self.wsID1, name: "Existing", paneID: Self.paneID1)
         let groupID = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000001")!
         let group = WorkspaceGroup(id: groupID, name: "Work", childOrder: [Self.wsID1])
@@ -139,6 +139,141 @@ struct AppReducerTests {
         #expect(store.state.groups[id: groupID]?.childOrder == [Self.wsID1, newID])
         #expect(store.state.topLevelOrder == [.group(groupID)])
         #expect(store.state.activeWorkspaceID == newID)
+    }
+
+    @Test func createWorkspaceTopLevelDefaultAppendsToEndOfList() async {
+        // Default (`newWorkspacePlacement == .endOfList`): a new top-level
+        // workspace is appended to the bottom of the sidebar regardless of
+        // which workspace is active.
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "C", paneID: UUID())
+        let store = makeStore(workspaces: [ws1, ws2, ws3], activeWorkspaceID: Self.wsID2)
+
+        await store.send(.createWorkspace(name: "New"))
+
+        let newID = store.state.workspaces.last!.id
+        #expect(store.state.topLevelOrder == [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(wsID3),
+            .workspace(newID)
+        ])
+    }
+
+    @Test func createWorkspaceTopLevelNearSelectionInsertsAfterActive() async {
+        // With `newWorkspacePlacement == .nearSelection`, a new top-level
+        // workspace slots in immediately after the active workspace's
+        // sidebar entry instead of appending to the bottom.
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "C", paneID: UUID())
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(wsID3)
+        ]
+        appState.activeWorkspaceID = Self.wsID2
+        appState.settings.newWorkspacePlacement = .nearSelection
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspace(name: "New"))
+
+        let newID = store.state.workspaces.last!.id
+        #expect(store.state.topLevelOrder == [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(newID),
+            .workspace(wsID3)
+        ])
+    }
+
+    @Test func createWorkspaceInGroupDefaultAppendsToGroupEnd() async {
+        // Default (`newWorkspacePlacement == .endOfList`): a new workspace
+        // created into a group is appended to the end of its childOrder
+        // regardless of which child is currently active.
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "C", paneID: UUID())
+        let groupID = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000003")!
+        let group = WorkspaceGroup(id: groupID, name: "Work", childOrder: [Self.wsID1, Self.wsID2, wsID3])
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.groups = [group]
+        appState.topLevelOrder = [.group(groupID)]
+        // Active is the middle child; default placement should still append.
+        appState.activeWorkspaceID = Self.wsID2
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspace(name: "New", groupID: groupID))
+
+        let newID = store.state.workspaces.last!.id
+        #expect(store.state.groups[id: groupID]?.childOrder == [Self.wsID1, Self.wsID2, wsID3, newID])
+    }
+
+    @Test func createWorkspaceInGroupNearSelectionInsertsAfterActive() async {
+        // With `newWorkspacePlacement == .nearSelection`, a new in-group
+        // workspace is inserted directly after the active workspace's slot
+        // in that group's childOrder instead of appending to the end.
+        let wsID3 = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)
+        let ws3 = Self.makeWorkspace(id: wsID3, name: "C", paneID: UUID())
+        let groupID = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000004")!
+        let group = WorkspaceGroup(id: groupID, name: "Work", childOrder: [Self.wsID1, Self.wsID2, wsID3])
+
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.groups = [group]
+        appState.topLevelOrder = [.group(groupID)]
+        appState.activeWorkspaceID = Self.wsID2
+        appState.settings.newWorkspacePlacement = .nearSelection
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspace(name: "New", groupID: groupID))
+
+        let newID = store.state.workspaces.last!.id
+        #expect(store.state.groups[id: groupID]?.childOrder == [Self.wsID1, Self.wsID2, newID, wsID3])
     }
 
     @Test func createWorkspaceWithGroupIDExpandsCollapsedGroup() async {

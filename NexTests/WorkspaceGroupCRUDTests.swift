@@ -103,10 +103,10 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
-    @Test func createGroupDefaultPlacementFollowsActiveWorkspace() async {
-        // Default (`newGroupPlacement == .nearSelection`): an anchorless
-        // createGroup inserts the new group directly after the active
-        // workspace's sidebar entry rather than appending to the end.
+    @Test func createGroupDefaultPlacementAppendsToEndOfList() async {
+        // Default (`newGroupPlacement == .endOfList`): an anchorless
+        // createGroup appends to the bottom of the sidebar regardless of
+        // which workspace is active.
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
         let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
@@ -122,24 +122,26 @@ struct WorkspaceGroupCRUDTests {
 
         await store.send(.createGroup(name: "Monitors")) { state in
             #expect(state.topLevelOrder.count == 4)
-            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
-            if case .workspace(let id) = state.topLevelOrder[1] { #expect(id == Self.wsID2) }
-            if case .group = state.topLevelOrder[2] {} else { Issue.record("expected group at index 2") }
-            if case .workspace(let id) = state.topLevelOrder[3] { #expect(id == Self.wsID3) }
+            #expect(state.topLevelOrder.last?.groupID == Self.groupA)
         }
     }
 
-    @Test func createGroupEndOfListPlacementAlwaysAppends() async {
-        // With `newGroupPlacement == .endOfList`, an anchorless createGroup
-        // ignores the active workspace and appends to the bottom of the
-        // sidebar (issue #58 opt-in behavior).
+    @Test func createGroupNearSelectionPlacementFollowsActiveWorkspace() async {
+        // With `newGroupPlacement == .nearSelection`, an anchorless
+        // createGroup inserts the new group directly after the active
+        // workspace's sidebar entry rather than appending to the end.
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A")
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B")
+        let ws3 = Self.makeWorkspace(id: Self.wsID3, name: "C")
         var appState = AppReducer.State()
-        appState.workspaces = [ws1, ws2]
-        appState.topLevelOrder = [.workspace(Self.wsID1), .workspace(Self.wsID2)]
-        appState.activeWorkspaceID = Self.wsID1
-        appState.settings.newGroupPlacement = .endOfList
+        appState.workspaces = [ws1, ws2, ws3]
+        appState.topLevelOrder = [
+            .workspace(Self.wsID1),
+            .workspace(Self.wsID2),
+            .workspace(Self.wsID3)
+        ]
+        appState.activeWorkspaceID = Self.wsID2
+        appState.settings.newGroupPlacement = .nearSelection
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -154,8 +156,11 @@ struct WorkspaceGroupCRUDTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.createGroup(name: "Monitors")) { state in
-            #expect(state.topLevelOrder.count == 3)
-            #expect(state.topLevelOrder.last?.groupID == Self.groupA)
+            #expect(state.topLevelOrder.count == 4)
+            if case .workspace(let id) = state.topLevelOrder[0] { #expect(id == Self.wsID1) }
+            if case .workspace(let id) = state.topLevelOrder[1] { #expect(id == Self.wsID2) }
+            if case .group = state.topLevelOrder[2] {} else { Issue.record("expected group at index 2") }
+            if case .workspace(let id) = state.topLevelOrder[3] { #expect(id == Self.wsID3) }
         }
     }
 
@@ -180,6 +185,7 @@ struct WorkspaceGroupCRUDTests {
             .workspace(Self.wsID3)
         ]
         appState.activeWorkspaceID = Self.wsID2
+        appState.settings.newGroupPlacement = .nearSelection
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -220,6 +226,7 @@ struct WorkspaceGroupCRUDTests {
             .workspace(Self.wsID3)
         ]
         appState.activeWorkspaceID = Self.wsID2
+        appState.settings.newGroupPlacement = .nearSelection
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -265,6 +272,7 @@ struct WorkspaceGroupCRUDTests {
         ]
         // Active workspace is wsID1, but the user right-clicks wsID3.
         appState.activeWorkspaceID = Self.wsID1
+        appState.settings.newGroupPlacement = .nearSelection
 
         let store = TestStore(initialState: appState) {
             AppReducer()

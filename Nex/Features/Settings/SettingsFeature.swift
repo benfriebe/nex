@@ -2,14 +2,17 @@ import AppKit
 import ComposableArchitecture
 import Foundation
 
-/// Controls where a newly created workspace group is inserted in the sidebar.
-enum NewGroupPlacement: String, CaseIterable, Codable, Equatable {
-    /// Insert the new group after the active workspace's top-level entry
-    /// (or its parent group when nested). Falls back to appending if
-    /// there's no active workspace. This is the default.
+/// Controls where a newly created sidebar entry (group or workspace) is
+/// inserted. Used by both `newGroupPlacement` and `newWorkspacePlacement`.
+enum SidebarPlacement: String, CaseIterable, Codable, Equatable {
+    /// Insert near the active workspace: at the top level, after its
+    /// sidebar entry (or its parent group's entry when nested); inside a
+    /// group, after the active workspace's slot in that group's children.
+    /// Falls back to appending when there's no active workspace.
     case nearSelection = "near-selection"
 
-    /// Always append the new group to the end of the sidebar list.
+    /// Always append to the end of the list (or the end of the target
+    /// group's children). This is the default.
     case endOfList = "end-of-list"
 }
 
@@ -28,7 +31,8 @@ struct SettingsFeature {
         var autoDetectRepos: Bool = true
         var inheritGroupOnNewWorkspace: Bool = true
         var expandGroupOnWorkspaceDrop: Bool = true
-        var newGroupPlacement: NewGroupPlacement = .nearSelection
+        var newGroupPlacement: SidebarPlacement = .endOfList
+        var newWorkspacePlacement: SidebarPlacement = .endOfList
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -55,7 +59,8 @@ struct SettingsFeature {
         case setAutoDetectRepos(Bool)
         case setInheritGroupOnNewWorkspace(Bool)
         case setExpandGroupOnWorkspaceDrop(Bool)
-        case setNewGroupPlacement(NewGroupPlacement)
+        case setNewGroupPlacement(SidebarPlacement)
+        case setNewWorkspacePlacement(SidebarPlacement)
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
     }
@@ -73,6 +78,7 @@ struct SettingsFeature {
     static let defaultsKeyInheritGroupOnNewWorkspace = "settings.inheritGroupOnNewWorkspace"
     static let defaultsKeyExpandGroupOnWorkspaceDrop = "settings.expandGroupOnWorkspaceDrop"
     static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
+    static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -97,8 +103,12 @@ struct SettingsFeature {
                     state.expandGroupOnWorkspaceDrop = userDefaults.boolForKey(Self.defaultsKeyExpandGroupOnWorkspaceDrop)
                 }
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyNewGroupPlacement),
-                   let placement = NewGroupPlacement(rawValue: raw) {
+                   let placement = SidebarPlacement(rawValue: raw) {
                     state.newGroupPlacement = placement
+                }
+                if let raw = userDefaults.stringForKey(Self.defaultsKeyNewWorkspacePlacement),
+                   let placement = SidebarPlacement(rawValue: raw) {
+                    state.newWorkspacePlacement = placement
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -172,6 +182,11 @@ struct SettingsFeature {
             case .setNewGroupPlacement(let placement):
                 state.newGroupPlacement = placement
                 userDefaults.setString(placement.rawValue, Self.defaultsKeyNewGroupPlacement)
+                return .none
+
+            case .setNewWorkspacePlacement(let placement):
+                state.newWorkspacePlacement = placement
+                userDefaults.setString(placement.rawValue, Self.defaultsKeyNewWorkspacePlacement)
                 return .none
 
             case .selectTheme(let theme):

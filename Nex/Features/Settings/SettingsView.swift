@@ -103,12 +103,23 @@ private struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    Picker("New workspace placement", selection: Binding(
+                        get: { settingsStore.newWorkspacePlacement },
+                        set: { settingsStore.send(.setNewWorkspacePlacement($0)) }
+                    )) {
+                        Text("Next to selection").tag(SidebarPlacement.nearSelection)
+                        Text("End of list").tag(SidebarPlacement.endOfList)
+                    }
+                    Text("Where a newly created workspace is inserted. \"Next to selection\" places it immediately after the active workspace's slot (within the target group when creating into one, falling back to append when the active workspace isn't in that group). \"End of list\" always appends to the bottom of the sidebar (or the end of the target group).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Picker("New group placement", selection: Binding(
                         get: { settingsStore.newGroupPlacement },
                         set: { settingsStore.send(.setNewGroupPlacement($0)) }
                     )) {
-                        Text("Next to selection").tag(NewGroupPlacement.nearSelection)
-                        Text("End of list").tag(NewGroupPlacement.endOfList)
+                        Text("Next to selection").tag(SidebarPlacement.nearSelection)
+                        Text("End of list").tag(SidebarPlacement.endOfList)
                     }
                     Text("Where a newly created group is inserted in the sidebar. \"Next to selection\" places it after the active workspace (or its parent group when nested). \"End of list\" always appends it to the bottom.")
                         .font(.caption)

@@ -219,6 +219,104 @@ struct WorkspaceGroupSocketTests {
         }
     }
 
+    @Test func socketWorkspaceCreateWithExistingGroupNearSelectionInsertsAfterActive() async {
+        // `nex workspace create --group ...` must honor
+        // `newWorkspacePlacement`. With `.nearSelection` and an active
+        // workspace that already lives in the target group, the new
+        // workspace slots in right after that workspace's position
+        // rather than appending to the group's end.
+        let wsA = Self.makeWorkspace(id: Self.ws1ID, name: "A")
+        let wsB = Self.makeWorkspace(id: Self.ws2ID, name: "B")
+        let group = WorkspaceGroup(
+            id: Self.groupAID,
+            name: "Monitors",
+            childOrder: [Self.ws1ID, Self.ws2ID]
+        )
+        var appState = AppReducer.State()
+        appState.workspaces = [wsA, wsB]
+        appState.groups = [group]
+        appState.topLevelOrder = [.group(Self.groupAID)]
+        // Active workspace is the FIRST child — nearSelection should
+        // land the new workspace between ws1 and ws2.
+        appState.activeWorkspaceID = Self.ws1ID
+        appState.settings.newWorkspacePlacement = .nearSelection
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.socketMessage(.workspaceCreate(
+            name: "Alpha",
+            path: nil,
+            color: nil,
+            group: "Monitors"
+        ), reply: nil))
+        await store.receive(\.moveWorkspaceToGroup) { state in
+            let childOrder = state.groups[id: Self.groupAID]?.childOrder ?? []
+            #expect(childOrder.count == 3)
+            #expect(childOrder[0] == Self.ws1ID)
+            #expect(childOrder[2] == Self.ws2ID)
+            // Middle entry is the freshly created workspace.
+            let newID = state.workspaces.last?.id
+            #expect(childOrder[1] == newID)
+        }
+    }
+
+    @Test func socketWorkspaceCreateWithExistingGroupEndOfListAppends() async {
+        // Default `.endOfList`: even with an active workspace in the
+        // target group, the new workspace appends to the group's end
+        // rather than slotting in next to the active one.
+        let wsA = Self.makeWorkspace(id: Self.ws1ID, name: "A")
+        let wsB = Self.makeWorkspace(id: Self.ws2ID, name: "B")
+        let group = WorkspaceGroup(
+            id: Self.groupAID,
+            name: "Monitors",
+            childOrder: [Self.ws1ID, Self.ws2ID]
+        )
+        var appState = AppReducer.State()
+        appState.workspaces = [wsA, wsB]
+        appState.groups = [group]
+        appState.topLevelOrder = [.group(Self.groupAID)]
+        appState.activeWorkspaceID = Self.ws1ID
+        // Leave `newWorkspacePlacement` at its default (`.endOfList`).
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.socketMessage(.workspaceCreate(
+            name: "Alpha",
+            path: nil,
+            color: nil,
+            group: "Monitors"
+        ), reply: nil))
+        await store.receive(\.moveWorkspaceToGroup) { state in
+            let childOrder = state.groups[id: Self.groupAID]?.childOrder ?? []
+            #expect(childOrder.count == 3)
+            #expect(childOrder[0] == Self.ws1ID)
+            #expect(childOrder[1] == Self.ws2ID)
+            // New workspace appended at the end.
+            let newID = state.workspaces.last?.id
+            #expect(childOrder[2] == newID)
+        }
+    }
+
     @Test func socketWorkspaceCreateWithoutGroupStaysTopLevel() async {
         let store = makeStore()
 
