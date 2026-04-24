@@ -42,8 +42,10 @@
 		550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221A3B0170CFD708F3B03A84 /* Repo.swift */; };
 		5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */; };
 		58B6A951A34B2ED1516194C4 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E08D39F8F87D7505CD32D25D /* WebKit.framework */; };
+		59239C7AD0D26E390C647C46 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 98CF017F4F26916F63300A33 /* Yams */; };
 		5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
+		696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */; };
 		6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */; };
 		6C50041FBB0F31598067D4FA /* LineNumberRulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852AC6AE9B24B4528577F454 /* LineNumberRulerView.swift */; };
 		6CF210BA0C7BFE62B90844F7 /* KeybindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */; };
@@ -238,6 +240,7 @@
 		F173122691292BD9062F356E /* CheckForUpdatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckForUpdatesView.swift; sourceTree = "<group>"; };
 		F1A8D5B3446F6056F443CDB8 /* Nex.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Nex.entitlements; sourceTree = "<group>"; };
 		F228193206574DB257C8B3FB /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontMatter.swift; sourceTree = "<group>"; };
 		F5CE8D708EEECA4A82BE0AC1 /* PaneCloseReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneCloseReplyTests.swift; sourceTree = "<group>"; };
 		F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListView.swift; sourceTree = "<group>"; };
 		F90FF9C2E7F0BC50E51C47DE /* RepoRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryView.swift; sourceTree = "<group>"; };
@@ -255,6 +258,7 @@
 				811C87C669F7A920EE05E8DA /* GRDB in Frameworks */,
 				52D4477AF5CCF1724D609119 /* Sparkle in Frameworks */,
 				A15BBD1CFDB5E52E44B7ED59 /* Markdown in Frameworks */,
+				59239C7AD0D26E390C647C46 /* Yams in Frameworks */,
 				2364A5458060B16493954543 /* Metal.framework in Frameworks */,
 				58B6A951A34B2ED1516194C4 /* WebKit.framework in Frameworks */,
 				14C1E964B19A8C277D5EA5E4 /* QuartzCore.framework in Frameworks */,
@@ -499,6 +503,7 @@
 			children = (
 				852AC6AE9B24B4528577F454 /* LineNumberRulerView.swift */,
 				7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */,
+				F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */,
 				1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */,
 				B02A888F436610636F5A4D55 /* MarkdownPaneView.swift */,
 			);
@@ -571,6 +576,7 @@
 				3A812A87D56E4976C8BF532E /* GRDB */,
 				EFC4D8E9A152683486EC7F29 /* Sparkle */,
 				A7AC116A099F0911E230E51F /* Markdown */,
+				98CF017F4F26916F63300A33 /* Yams */,
 			);
 			productName = Nex;
 			productReference = E5859C5B2E1850D1262AFE4B /* Nex.app */;
@@ -606,6 +612,7 @@
 				6E173FC7EE2E93830E33275D /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
 				74E1DDA9D84597B0F162BA1C /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				A90C5D38F552F217B7D089E9 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				BDC72AE7CC087295CCC0D1B0 /* XCRemoteSwiftPackageReference "Yams" */,
 				9F09C051CE1194C74915BD2E /* XCRemoteSwiftPackageReference "swift-markdown" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -719,6 +726,7 @@
 				6CF210BA0C7BFE62B90844F7 /* KeybindingsSettingsView.swift in Sources */,
 				6C50041FBB0F31598067D4FA /* LineNumberRulerView.swift in Sources */,
 				291A22061671351813971551 /* MarkdownEditorView.swift in Sources */,
+				696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */,
 				AC234A5AAADE90A7EC7BB5F8 /* MarkdownHTMLRenderer.swift in Sources */,
 				E56B0EC49D7AC553B5CDC2CC /* MarkdownPaneView.swift in Sources */,
 				F232D23668E3159B6EA5FC37 /* NewGroupSheet.swift in Sources */,
@@ -1093,6 +1101,14 @@
 				minimumVersion = 2.6.0;
 			};
 		};
+		BDC72AE7CC087295CCC0D1B0 /* XCRemoteSwiftPackageReference "Yams" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jpsim/Yams";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1105,6 +1121,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6E173FC7EE2E93830E33275D /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
 			productName = ComposableArchitecture;
+		};
+		98CF017F4F26916F63300A33 /* Yams */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BDC72AE7CC087295CCC0D1B0 /* XCRemoteSwiftPackageReference "Yams" */;
+			productName = Yams;
 		};
 		A7AC116A099F0911E230E51F /* Markdown */ = {
 			isa = XCSwiftPackageProductDependency;

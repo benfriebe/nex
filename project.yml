@@ -38,6 +38,9 @@ packages:
   swift-markdown:
     url: https://github.com/swiftlang/swift-markdown
     from: "0.5.0"
+  Yams:
+    url: https://github.com/jpsim/Yams
+    from: "5.1.0"
 
 targets:
   Nex:
@@ -86,6 +89,7 @@ targets:
       - package: Sparkle
       - package: swift-markdown
         product: Markdown
+      - package: Yams
       - sdk: Metal.framework
       - sdk: WebKit.framework
       - sdk: QuartzCore.framework
