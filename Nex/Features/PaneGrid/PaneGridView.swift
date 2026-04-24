@@ -174,7 +174,8 @@ struct PaneGridView: View {
                         filePath: pane.filePath ?? "",
                         isFocused: pane.id == focusedPaneID,
                         backgroundColor: ghosttyConfig.backgroundColor,
-                        backgroundOpacity: ghosttyConfig.backgroundOpacity
+                        backgroundOpacity: ghosttyConfig.backgroundOpacity,
+                        fontSize: pane.markdownFontSize
                     )
                 }
             case .scratchpad:

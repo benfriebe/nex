@@ -9,6 +9,7 @@ struct MarkdownPaneView: NSViewRepresentable {
     let isFocused: Bool
     var backgroundColor: NSColor = .windowBackgroundColor
     var backgroundOpacity: Double = 1.0
+    var fontSize: Double = 14
     @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
 
     func makeCoordinator() -> Coordinator {
@@ -44,6 +45,7 @@ struct MarkdownPaneView: NSViewRepresentable {
         context.coordinator.filePath = filePath
         context.coordinator.backgroundColor = backgroundColor
         context.coordinator.backgroundOpacity = backgroundOpacity
+        context.coordinator.fontSize = fontSize
         context.coordinator.loadFile()
         context.coordinator.startWatching()
 
@@ -60,8 +62,12 @@ struct MarkdownPaneView: NSViewRepresentable {
         if context.coordinator.filePath != filePath {
             context.coordinator.stopWatching()
             context.coordinator.filePath = filePath
+            context.coordinator.fontSize = fontSize
             context.coordinator.loadFile()
             context.coordinator.startWatching()
+        } else if context.coordinator.fontSize != fontSize {
+            context.coordinator.fontSize = fontSize
+            context.coordinator.renderCurrentContent()
         }
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
@@ -95,8 +101,13 @@ struct MarkdownPaneView: NSViewRepresentable {
         var filePath: String = ""
         var backgroundColor: NSColor = .windowBackgroundColor
         var backgroundOpacity: Double = 1.0
+        var fontSize: Double = 14
         var lastIsFocused: Bool = false
         private var currentContent: String = ""
+        /// Monotonic token: incremented before each render, checked after
+        /// the async `window.scrollY` round-trip to drop stale reloads when
+        /// the user holds Cmd+= / Cmd+- and multiple renders are in flight.
+        private var renderToken: UInt64 = 0
         var pendingScrollFraction: CGFloat?
         nonisolated(unsafe) var fileWatcher: DispatchSourceFileSystemObject?
         nonisolated(unsafe) var fileDescriptor: Int32 = -1
@@ -113,21 +124,38 @@ struct MarkdownPaneView: NSViewRepresentable {
 
             guard content != currentContent else { return }
             currentContent = content
+            renderAndReload(content: content)
+        }
 
+        /// Re-render the currently loaded content (e.g. after a font-size change)
+        /// without touching disk.
+        func renderCurrentContent() {
+            guard !currentContent.isEmpty else { return }
+            renderAndReload(content: currentContent)
+        }
+
+        private func renderAndReload(content: String) {
+            renderToken &+= 1
+            let token = renderToken
             let html = MarkdownRenderer.renderToHTML(
                 content,
                 backgroundColor: backgroundColor,
-                backgroundOpacity: backgroundOpacity
+                backgroundOpacity: backgroundOpacity,
+                baseFontSize: fontSize
             )
             let baseURL = URL(fileURLWithPath: filePath).deletingLastPathComponent()
 
-            // Save scroll position, reload, then restore
+            // Save scroll position, reload, then restore. Drop the load if a
+            // newer render has been requested in the meantime — otherwise a
+            // stale callback from rapid Cmd+=/Cmd+- key repeat can overwrite
+            // the current render.
             webView?.evaluateJavaScript("window.scrollY") { [weak self] result, _ in
+                guard let self, token == renderToken else { return }
                 let scrollY = result as? Double ?? 0
-                self?.webView?.loadHTMLString(html, baseURL: baseURL)
+                webView?.loadHTMLString(html, baseURL: baseURL)
                 if scrollY > 0 {
-                    self?.pendingScrollFraction = nil
-                    self?.webView?.evaluateJavaScript("window.scrollTo(0, \(scrollY))")
+                    pendingScrollFraction = nil
+                    webView?.evaluateJavaScript("window.scrollTo(0, \(scrollY))")
                 }
             }
         }

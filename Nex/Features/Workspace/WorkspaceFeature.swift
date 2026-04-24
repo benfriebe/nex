@@ -8,6 +8,7 @@ struct ClosedPaneSnapshot: Equatable {
     var filePath: String?
     var scratchpadContent: String?
     var claudeSessionID: String?
+    var markdownFontSize: Double = 14
 }
 
 @Reducer
@@ -113,6 +114,8 @@ struct WorkspaceFeature {
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String)
         case toggleMarkdownEdit(UUID)
+        case increaseMarkdownFontSize(UUID)
+        case decreaseMarkdownFontSize(UUID)
         case createScratchpad
         case scratchpadContentChanged(paneID: UUID, content: String)
         case addRepoAssociation(RepoAssociation)
@@ -332,7 +335,8 @@ struct WorkspaceFeature {
                             type: pane.type,
                             filePath: pane.filePath,
                             scratchpadContent: pane.scratchpadContent,
-                            claudeSessionID: pane.claudeSessionID
+                            claudeSessionID: pane.claudeSessionID,
+                            markdownFontSize: pane.markdownFontSize
                         )
                     )
                     if state.recentlyClosedPanes.count > 10 {
@@ -495,6 +499,24 @@ struct WorkspaceFeature {
 
                 state.panes[id: paneID]?.isEditing = true
                 state.panes[id: paneID]?.externalEditorCommand = nil
+                return .none
+
+            case .increaseMarkdownFontSize(let paneID):
+                guard let pane = state.panes[id: paneID],
+                      pane.type == .markdown,
+                      !pane.isEditing
+                else { return .none }
+                let next = min(pane.markdownFontSize + 1, 32)
+                state.panes[id: paneID]?.markdownFontSize = next
+                return .none
+
+            case .decreaseMarkdownFontSize(let paneID):
+                guard let pane = state.panes[id: paneID],
+                      pane.type == .markdown,
+                      !pane.isEditing
+                else { return .none }
+                let next = max(pane.markdownFontSize - 1, 8)
+                state.panes[id: paneID]?.markdownFontSize = next
                 return .none
 
             case .addRepoAssociation(let assoc):
@@ -675,7 +697,8 @@ struct WorkspaceFeature {
                     workingDirectory: snapshot.workingDirectory,
                     filePath: snapshot.filePath,
                     isEditing: snapshot.type == .scratchpad,
-                    scratchpadContent: snapshot.scratchpadContent
+                    scratchpadContent: snapshot.scratchpadContent,
+                    markdownFontSize: snapshot.markdownFontSize
                 )
 
                 let (newLayout, _) = state.layout.splitting(

@@ -25,6 +25,9 @@ struct Pane: Identifiable, Equatable {
     /// but never written to a file on disk.
     var scratchpadContent: String?
     var claudeSessionID: String?
+    /// Rendered body font size (px) for markdown preview panes. Per-pane,
+    /// in-memory only; adjusted via Cmd+= / Cmd+-.
+    var markdownFontSize: Double
 
     /// Convenience accessor for rendering logic.
     var isUsingExternalEditor: Bool { externalEditorCommand != nil }
@@ -44,6 +47,7 @@ struct Pane: Identifiable, Equatable {
         scratchpadContent: String? = nil,
         status: PaneStatus = .idle,
         claudeSessionID: String? = nil,
+        markdownFontSize: Double = 14,
         createdAt: Date = Date(),
         lastActivityAt: Date = Date()
     ) {
@@ -59,6 +63,7 @@ struct Pane: Identifiable, Equatable {
         self.scratchpadContent = scratchpadContent
         self.status = status
         self.claudeSessionID = claudeSessionID
+        self.markdownFontSize = markdownFontSize
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt
     }

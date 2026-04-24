@@ -232,6 +232,12 @@ final class PaneShortcutMonitor {
         case .toggleMarkdownEdit:
             return handleToggleMarkdownEdit(activeWorkspaceID: id)
 
+        case .increaseMarkdownFontSize:
+            return handleMarkdownFontSize(activeWorkspaceID: id, increase: true)
+
+        case .decreaseMarkdownFontSize:
+            return handleMarkdownFontSize(activeWorkspaceID: id, increase: false)
+
         case .toggleZoom:
             store.send(.workspaces(.element(id: id, action: .toggleZoomPane)))
             return true
@@ -304,6 +310,21 @@ final class PaneShortcutMonitor {
         else { return false }
 
         store.send(.workspaces(.element(id: id, action: .toggleMarkdownEdit(focusedID))))
+        return true
+    }
+
+    private func handleMarkdownFontSize(activeWorkspaceID id: UUID, increase: Bool) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID,
+              let pane = workspace.panes[id: focusedID],
+              pane.type == .markdown,
+              !pane.isEditing
+        else { return false }
+
+        let action: WorkspaceFeature.Action = increase
+            ? .increaseMarkdownFontSize(focusedID)
+            : .decreaseMarkdownFontSize(focusedID)
+        store.send(.workspaces(.element(id: id, action: action)))
         return true
     }
 

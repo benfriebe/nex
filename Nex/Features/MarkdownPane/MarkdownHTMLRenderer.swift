@@ -162,14 +162,20 @@ enum MarkdownRenderer {
     static func renderToHTML(
         _ markdown: String,
         backgroundColor: NSColor = .windowBackgroundColor,
-        backgroundOpacity: Double = 1.0
+        backgroundOpacity: Double = 1.0,
+        baseFontSize: Double = 14
     ) -> String {
         let document = Document(parsing: markdown)
         var visitor = MarkdownHTMLRenderer()
         let bodyHTML = visitor.visit(document)
         let bgCSS = cssBackground(color: backgroundColor, opacity: backgroundOpacity)
         let isDark = isDarkBackground(color: backgroundColor)
-        return wrapInHTMLDocument(bodyHTML, backgroundCSS: bgCSS, isDark: isDark)
+        return wrapInHTMLDocument(
+            bodyHTML,
+            backgroundCSS: bgCSS,
+            isDark: isDark,
+            baseFontSize: baseFontSize
+        )
     }
 
     private static func isDarkBackground(color: NSColor) -> Bool {
@@ -186,7 +192,12 @@ enum MarkdownRenderer {
         return "background-color: rgba(\(r), \(g), \(b), \(opacity));"
     }
 
-    private static func wrapInHTMLDocument(_ body: String, backgroundCSS: String, isDark: Bool) -> String {
+    private static func wrapInHTMLDocument(
+        _ body: String,
+        backgroundCSS: String,
+        isDark: Bool,
+        baseFontSize: Double
+    ) -> String {
         """
         <!DOCTYPE html>
         <html class="\(isDark ? "dark" : "light")">
@@ -194,7 +205,7 @@ enum MarkdownRenderer {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-        \(css(backgroundCSS: backgroundCSS))
+        \(css(backgroundCSS: backgroundCSS, baseFontSize: baseFontSize))
         </style>
         </head>
         <body>
@@ -208,11 +219,12 @@ enum MarkdownRenderer {
 
     // MARK: - Stylesheet
 
-    private static func css(backgroundCSS: String) -> String {
-        """
+    private static func css(backgroundCSS: String, baseFontSize: Double) -> String {
+        let codeFontSize = max(baseFontSize - 1, 6)
+        return """
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-            font-size: 14px;
+            font-size: \(baseFontSize)px;
             line-height: 1.6;
             padding: 20px 28px;
             margin: 0;
@@ -238,7 +250,7 @@ enum MarkdownRenderer {
             padding: 16px;
             border-radius: 6px;
             overflow-x: auto;
-            font-size: 13px;
+            font-size: \(codeFontSize)px;
             line-height: 1.45;
         }
         .dark pre { background: #161b22; }
