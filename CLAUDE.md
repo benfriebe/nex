@@ -63,6 +63,7 @@ make check
 ### Markdown panes
 - **Entry points**: ⌘O (file picker filtered to `.md`) or drag-and-drop a `.md` file onto the window. Both route through `AppReducer.openFileAtPath` → `WorkspaceFeature.openMarkdownFile`.
 - **View mode** (`MarkdownPaneView`): `WKWebView` with `drawsBackground=false`. File content is parsed via swift-markdown → `MarkdownHTMLRenderer` → full HTML document with CSS (light/dark). Live file watching via `DispatchSource` detects writes, renames, and deletes (vim-style save). Scroll position is preserved across reloads.
+- **Front-matter**: if a file begins with a `---`-fenced YAML block, `FrontMatterExtractor` pulls it out before swift-markdown parsing and `FrontMatterRenderer` emits a styled two-column table at the top of the preview. Parsing uses Yams; malformed YAML falls back to a styled raw block, and blocks larger than 64 KiB are skipped (rendered as plain markdown) to guard against pathological input.
 - **Edit mode** (`MarkdownEditorView`): `NSTextView` (plain text, monospace 13pt) in an `NSScrollView`. Auto-saves to disk with 500ms debounce.
 - **Toggle**: ⌘E switches between view and edit mode (only when a markdown pane is focused). Header button also toggles.
 - **Background**: both views receive `ghosttyConfig.backgroundColor` / `backgroundOpacity` so they match terminal panes. The pane container also has a matching background fill for any gaps.

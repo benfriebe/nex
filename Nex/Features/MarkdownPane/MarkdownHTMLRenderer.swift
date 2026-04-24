@@ -165,13 +165,15 @@ enum MarkdownRenderer {
         backgroundOpacity: Double = 1.0,
         baseFontSize: Double = 14
     ) -> String {
-        let document = Document(parsing: markdown)
+        let (yaml, body) = FrontMatterExtractor.extract(markdown)
+        let document = Document(parsing: body)
         var visitor = MarkdownHTMLRenderer()
         let bodyHTML = visitor.visit(document)
+        let fmHTML = yaml.map(FrontMatterRenderer.render) ?? ""
         let bgCSS = cssBackground(color: backgroundColor, opacity: backgroundOpacity)
         let isDark = isDarkBackground(color: backgroundColor)
         return wrapInHTMLDocument(
-            bodyHTML,
+            fmHTML + bodyHTML,
             backgroundCSS: bgCSS,
             isDark: isDark,
             baseFontSize: baseFontSize
@@ -296,6 +298,59 @@ enum MarkdownRenderer {
         img { max-width: 100%; border-radius: 4px; }
         del { color: #656d76; }
         .dark del { color: #9198a1; }
+        table.frontmatter {
+            margin: 0 0 1.5em;
+            border: 1px solid #d1d9e0;
+            border-radius: 6px;
+            border-collapse: separate;
+            border-spacing: 0;
+            width: auto;
+            min-width: 40%;
+            max-width: 100%;
+            font-size: 0.9em;
+            overflow: hidden;
+        }
+        .dark table.frontmatter { border-color: #3d444d; }
+        table.frontmatter th,
+        table.frontmatter td {
+            border: none;
+            border-bottom: 1px solid #d1d9e0;
+            padding: 6px 12px;
+            text-align: start;
+            vertical-align: top;
+        }
+        .dark table.frontmatter th,
+        .dark table.frontmatter td { border-bottom-color: #3d444d; }
+        table.frontmatter tr:last-child th,
+        table.frontmatter tr:last-child td { border-bottom: none; }
+        table.frontmatter th {
+            font-weight: 600;
+            color: #656d76;
+            background: #f6f8fa;
+            white-space: nowrap;
+            width: 1%;
+        }
+        .dark table.frontmatter th { background: #161b22; color: #9198a1; }
+        table.frontmatter td {
+            font-family: 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.95em;
+            word-break: break-word;
+        }
+        pre.frontmatter-raw,
+        pre.frontmatter-nested {
+            margin: 0;
+            padding: 8px 10px;
+            background: transparent;
+            border: none;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+        }
+        pre.frontmatter-raw {
+            border-left: 3px solid #d1d9e0;
+            padding-left: 10px;
+            margin: 0 0 1.5em;
+        }
+        .dark pre.frontmatter-raw { border-left-color: #3d444d; }
         """
     }
 }
