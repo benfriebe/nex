@@ -127,7 +127,47 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .paneClose(paneID: Self.paneUUID))
+        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: nil))
+    }
+
+    @Test func parsePaneCloseWithTarget() {
+        // `--target <name-or-uuid>` lets callers outside Nex close a
+        // pane without NEX_PANE_ID. The reducer resolves the label.
+        let data = jsonData("""
+        {"command":"pane-close","target":"worker-1"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .paneClose(paneID: nil, target: "worker-1"))
+    }
+
+    @Test func parsePaneCloseWithTargetAndPaneID() {
+        // If both are supplied, the wire decoder keeps them both and
+        // the reducer prefers `target`.
+        let data = jsonData("""
+        {"command":"pane-close","pane_id":"\(Self.paneIDString)","target":"worker-1"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .paneClose(paneID: Self.paneUUID, target: "worker-1"))
+    }
+
+    @Test func parsePaneCloseMissingBothRejected() {
+        let data = jsonData("""
+        {"command":"pane-close"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
+    @Test func parsePaneCloseEmptyTargetNormalisedToNil() {
+        // An empty `target` is dropped — without a pane_id, the
+        // message is rejected so a cleared field doesn't accidentally
+        // resolve to something odd.
+        let data = jsonData("""
+        {"command":"pane-close","target":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
     }
 
     @Test func parsePaneNameCommand() {

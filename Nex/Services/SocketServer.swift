@@ -12,7 +12,14 @@ enum SocketMessage: Equatable {
     // Pane commands
     case paneSplit(paneID: UUID, direction: PaneLayout.SplitDirection?, path: String?, name: String?, target: String?)
     case paneCreate(paneID: UUID, path: String?, name: String?, target: String?)
-    case paneClose(paneID: UUID)
+    /// Close a pane. In practice the CLI sends one or the other:
+    /// `paneID` comes from `NEX_PANE_ID` for the no-flag form; `target`
+    /// carries the `--target <name-or-uuid>` value. The decoder
+    /// preserves whichever fields are present (both are allowed on
+    /// the wire) and rejects a message missing both. The reducer
+    /// prefers `target` when both are supplied and no-ops if it
+    /// doesn't resolve.
+    case paneClose(paneID: UUID?, target: String?)
     case paneName(paneID: UUID, name: String)
     case paneSend(paneID: UUID, target: String, text: String)
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
@@ -484,6 +491,16 @@ final class SocketServer: Sendable {
             return (.openFile(path: path, paneID: paneID), wire)
         }
 
+        if wire.command == "pane-close" {
+            // Accept either `pane_id` (current pane, existing behaviour)
+            // or `target` (name-or-UUID, new). At least one must be
+            // present; the reducer resolves `target` to a concrete pane.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            guard paneID != nil || target != nil else { return nil }
+            return (.paneClose(paneID: paneID, target: target), wire)
+        }
+
         if wire.command == "pane-list" {
             // `pane_id` is optional — required only when `scope == "current"`,
             // which the reducer validates. Invalid UUIDs fail the request
@@ -519,8 +536,6 @@ final class SocketServer: Sendable {
             socketMessage = .paneSplit(paneID: paneID, direction: dir, path: wire.path, name: wire.name, target: wire.target)
         case "pane-create":
             socketMessage = .paneCreate(paneID: paneID, path: wire.path, name: wire.name, target: wire.target)
-        case "pane-close":
-            socketMessage = .paneClose(paneID: paneID)
         case "pane-name":
             guard let name = wire.name, !name.isEmpty else { return nil }
             socketMessage = .paneName(paneID: paneID, name: name)

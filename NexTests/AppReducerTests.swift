@@ -1401,4 +1401,104 @@ struct AppReducerTests {
             #expect(state.lastSelectionAnchor == nil)
         }
     }
+
+    // MARK: - paneClose --target
+
+    /// `--target <label>` with no `pane_id` (CLI invoked outside Nex):
+    /// label resolves to the unique matching pane globally, and the
+    /// reducer routes the close to that pane's workspace.
+    @Test func closePaneByTargetLabelWithoutOrigin() async {
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
+        ws.panes[id: Self.paneID1]?.label = "worker"
+        ws.panes.append(Pane(id: Self.paneID2, label: "other"))
+        ws.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(Self.paneID1), second: .leaf(Self.paneID2)
+        )
+
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker"), reply: nil))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1, action: .closePane(Self.paneID1)
+        ))) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] == nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID2] != nil)
+        }
+    }
+
+    /// Label that matches panes in multiple workspaces with no origin
+    /// is ambiguous — `resolveTarget` returns nil so the reducer
+    /// no-ops rather than closing an arbitrary (state-order
+    /// dependent) pane.
+    @Test func closePaneByTargetAmbiguousLabelNoOps() async {
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
+        ws1.panes[id: Self.paneID1]?.label = "worker"
+        var ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)
+        ws2.panes[id: Self.paneID2]?.label = "worker"
+
+        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker"), reply: nil))
+        // No `.closePane` is dispatched — both panes survive.
+        #expect(store.state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
+        #expect(store.state.workspaces[id: Self.wsID2]?.panes[id: Self.paneID2] != nil)
+    }
+
+    /// Target doesn't match any UUID or label — reducer no-ops.
+    @Test func closePaneByTargetUnresolvedNoOps() async {
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "missing"), reply: nil))
+        #expect(store.state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
+    }
+
+    /// When both `pane_id` and `target` appear on the wire, the
+    /// reducer prefers `target`. The CLI only emits one in practice,
+    /// but the decoder preserves both and the contract documents the
+    /// precedence.
+    @Test func closePanePrefersTargetOverPaneID() async {
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
+        ws.panes[id: Self.paneID1]?.label = "origin"
+        ws.panes.append(Pane(id: Self.paneID2, label: "worker"))
+        ws.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(Self.paneID1), second: .leaf(Self.paneID2)
+        )
+
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneClose(
+            paneID: Self.paneID1, target: "worker"
+        ), reply: nil))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1, action: .closePane(Self.paneID2)
+        ))) { state in
+            // paneID2 (target "worker") closed; paneID1 (pane_id) survives.
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID2] == nil)
+        }
+    }
+
+    /// Closing the last pane via `--target` empties the workspace but
+    /// leaves the workspace itself in place. The socket path diverges
+    /// from the keybinding path (`NexCommands.handleClosePane` deletes
+    /// the workspace) — automation shouldn't silently vaporise a
+    /// workspace.
+    @Test func closeLastPaneByTargetLeavesWorkspaceEmpty() async {
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "Solo", paneID: Self.paneID1)
+        ws.panes[id: Self.paneID1]?.label = "only"
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneClose(paneID: nil, target: "only"), reply: nil))
+        await store.receive(.workspaces(.element(
+            id: Self.wsID1, action: .closePane(Self.paneID1)
+        ))) { state in
+            #expect(state.workspaces[id: Self.wsID1] != nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes.isEmpty == true)
+            #expect(state.workspaces[id: Self.wsID1]?.layout.isEmpty == true)
+            #expect(state.workspaces[id: Self.wsID1]?.focusedPaneID == nil)
+        }
+    }
 }

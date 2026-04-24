@@ -81,7 +81,7 @@ make check
 - **Name-or-ID resolution** (`State.resolveGroup` / `State.resolveWorkspace`): commands like `workspace-move`, `group-rename`, `group-delete` accept either a UUID string or a case-sensitive name. UUID wins when it matches; names must be unique to resolve (ambiguous → no-op).
 - `nex` CLI — standalone Swift CLI in `Tools/nex-cli/`. Compiled as a post-build script and bundled into `Contents/Helpers/`. Subcommand structure:
   - `nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]`
-  - `nex pane split|create|close|name|send|move|move-to-workspace [options]`
+  - `nex pane split|create|close|name|send|move|move-to-workspace [options]` — `split`, `create`, and `close` all accept `--target <name-or-uuid>` to address a specific pane; with `--target`, `close` works without `NEX_PANE_ID`
   - `nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]` — only command that returns data; prints a human-readable table by default, JSON array with `--json`
   - `nex pane id` — prints current `NEX_PANE_ID` (exit 0) or exits 1 if not set. Local only; doesn't touch the socket. Useful as a cheap in-Nex check
   - `nex workspace create [--name ...] [--path ...] [--color ...] [--group <name>]`

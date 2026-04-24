@@ -1961,10 +1961,19 @@ struct AppReducer {
                         action: .splitPane(direction: .horizontal, sourcePaneID: sourcePaneID, label: name)
                     )))
 
-                case .paneClose(let paneID):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
+                case .paneClose(let paneID, let target):
+                    // Resolve which pane to close: `--target` (name or UUID)
+                    // takes precedence over the caller's pane_id so commands
+                    // run from outside Nex still work.
+                    let resolvedID: UUID? = if let target {
+                        Self.resolveTarget(target, from: paneID, state: state)
+                    } else {
+                        paneID
+                    }
+                    guard let resolvedID,
+                          let workspace = state.workspaces.first(where: { $0.panes[id: resolvedID] != nil })
                     else { return .none }
-                    return .send(.workspaces(.element(id: workspace.id, action: .closePane(paneID))))
+                    return .send(.workspaces(.element(id: workspace.id, action: .closePane(resolvedID))))
 
                 case .paneName(let paneID, let name):
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
@@ -2614,18 +2623,29 @@ struct AppReducer {
 
     /// Resolve a target string (UUID or pane label) to a pane UUID.
     /// Searches by UUID first, then label in the originating pane's workspace,
-    /// then label across all workspaces.
+    /// then label across all workspaces. `originPaneID` is optional so
+    /// commands invoked from outside a Nex pane (e.g. `nex pane close
+    /// --target <label>`) can still resolve by label.
+    ///
+    /// The global fallback requires exactly one match — if a label
+    /// collides across workspaces the caller would otherwise mutate
+    /// an arbitrary pane (state-order dependent). Returning nil lets
+    /// the caller decide how to handle it: `paneClose` / `paneSend`
+    /// no-op, `paneSplit` / `paneCreate` fall back to the caller's
+    /// own pane via `?? paneID`.
     private static func resolveTarget(
         _ target: String?,
-        from originPaneID: UUID,
+        from originPaneID: UUID?,
         state: State
     ) -> UUID? {
         guard let target, !target.isEmpty else { return nil }
         if let uuid = UUID(uuidString: target) { return uuid }
-        let originWorkspace = state.workspaces.first { $0.panes[id: originPaneID] != nil }
-        if let match = originWorkspace?.panes.first(where: { $0.label == target }) {
+        if let originPaneID,
+           let originWorkspace = state.workspaces.first(where: { $0.panes[id: originPaneID] != nil }),
+           let match = originWorkspace.panes.first(where: { $0.label == target }) {
             return match.id
         }
-        return state.workspaces.flatMap(\.panes).first(where: { $0.label == target })?.id
+        let globalMatches = state.workspaces.flatMap(\.panes).filter { $0.label == target }
+        return globalMatches.count == 1 ? globalMatches[0].id : nil
     }
 }

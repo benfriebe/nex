@@ -7,7 +7,7 @@
 //   nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
 //   nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
-//   nex pane close
+//   nex pane close [--target <name-or-uuid>]
 //   nex pane name <name>
 //   nex pane send --to <name-or-uuid> <command...>
 //   nex pane move [left|right|up|down]
@@ -75,9 +75,9 @@ func printUsage() {
     Usage:
       nex --version
       nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
-      nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>]
-      nex pane create [--path /dir] [--name <label>]
-      nex pane close
+      nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
+      nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
+      nex pane close [--target <name-or-uuid>]
       nex pane name <name>
       nex pane send --to <name-or-uuid> <command...>
       nex pane move [left|right|up|down]
@@ -420,11 +420,17 @@ func handlePane(_ args: inout ArraySlice<String>) {
         sendJSON(payload)
 
     case "close":
-        let paneID = requirePaneID()
-        let payload: [String: String] = [
-            "command": "pane-close",
-            "pane_id": paneID
+        let target = parseFlag("--target", from: &args)
+        var payload = [
+            "command": "pane-close"
         ]
+        if let target {
+            // `--target` addresses a pane by label or UUID, so the
+            // caller doesn't need to be running inside a Nex pane.
+            payload["target"] = target
+        } else {
+            payload["pane_id"] = requirePaneID()
+        }
         sendJSON(payload)
 
     case "name":
