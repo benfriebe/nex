@@ -15,7 +15,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     func makeNSView(context: Context) -> PaneFocusView {
         let container = PaneFocusView(paneID: paneID)
 
-        let textView = NSTextView()
+        let textView = FocusNotifyingTextView()
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true

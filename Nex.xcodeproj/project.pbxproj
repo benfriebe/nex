@@ -61,6 +61,7 @@
 		8BACC3111C7193B1AC30B40B /* PaneLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30D306AA2907696B7A28F9DA /* PaneLayout.swift */; };
 		8E99D6024CA5451216D39602 /* PaneHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB94DA665D3B322A44251454 /* PaneHeaderView.swift */; };
 		8F5D3C9118D51569A13CB473 /* SurfaceContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */; };
+		9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */; };
 		A0056823B88DEBC5006159A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */; };
 		A0749EBDDCE764238315879A /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */; };
 		A15BBD1CFDB5E52E44B7ED59 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = A7AC116A099F0911E230E51F /* Markdown */; };
@@ -168,6 +169,7 @@
 		4F0D3AB3067CDBF5A490F532 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
 		523DE37561222E411737C3F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		57C59BDCBA03302FC7FDE16B /* WorkspaceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInspectorView.swift; sourceTree = "<group>"; };
+		5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusNotifyingTextView.swift; sourceTree = "<group>"; };
 		5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingTests.swift; sourceTree = "<group>"; };
 		61D6AE6635332105A3C18A03 /* VibrancyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibrancyView.swift; sourceTree = "<group>"; };
 		67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameWorkspaceSheet.swift; sourceTree = "<group>"; };
@@ -397,6 +399,7 @@
 		575CB385F691D30D4A449F9C /* PaneGrid */ = {
 			isa = PBXGroup;
 			children = (
+				5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */,
 				6FD9BCE4ABC267C7E34EAF09 /* PaneFocusView.swift */,
 				005B56542A2F5FD5D3BC588C /* PaneGridView.swift */,
 				BB94DA665D3B322A44251454 /* PaneHeaderView.swift */,
@@ -695,6 +698,7 @@
 				2061570DEABB0E43847DBB5D /* ContentView.swift in Sources */,
 				5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */,
 				A3B349AFCABD43FDC2F97A2A /* EditorService.swift in Sources */,
+				9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */,
 				2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */,
 				ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */,
 				C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */,
