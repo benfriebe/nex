@@ -50,6 +50,7 @@ struct NewWorkspaceSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focusedField, equals: .name)
                     .onSubmit(create)
+                    .onKeyPress(keys: [.tab]) { handleTab($0) }
 
                 HStack(spacing: 8) {
                     ForEach(WorkspaceColor.allCases) { c in
@@ -67,6 +68,7 @@ struct NewWorkspaceSheet: View {
                 .focused($focusedField, equals: .color)
                 .onKeyPress(.leftArrow) { cycleColor(-1) }
                 .onKeyPress(.rightArrow) { cycleColor(1) }
+                .onKeyPress(keys: [.tab]) { handleTab($0) }
 
                 if !store.groups.isEmpty {
                     HStack {
@@ -83,6 +85,7 @@ struct NewWorkspaceSheet: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .focused($focusedField, equals: .group)
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -102,14 +105,13 @@ struct NewWorkspaceSheet: View {
                                     Text(repo.name)
                                         .font(.system(size: 12))
                                     Spacer()
-                                    Button(action: {
-                                        selectedRepos.removeAll(where: { $0.id == repo.id })
-                                    }) {
+                                    Button(action: { removeRepo(repo.id) }) {
                                         Image(systemName: "xmark.circle.fill")
                                             .foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.plain)
                                     .focused($focusedField, equals: .removeRepo(repo.id))
+                                    .onKeyPress(keys: [.tab]) { handleTab($0) }
                                 }
                                 .padding(.vertical, 2)
                             }
@@ -121,6 +123,7 @@ struct NewWorkspaceSheet: View {
                         }
                         .buttonStyle(.borderless)
                         .focused($focusedField, equals: .addRepository)
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -131,13 +134,15 @@ struct NewWorkspaceSheet: View {
                     }
                     .keyboardShortcut(.cancelAction)
                     .focused($focusedField, equals: .cancel)
+                    .onKeyPress(keys: [.tab]) { handleTab($0) }
 
                     Spacer()
 
                     Button("Create", action: create)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(!isCreateEnabled)
                         .focused($focusedField, equals: .create)
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
                 }
             }
             .padding(20)
@@ -182,6 +187,62 @@ struct NewWorkspaceSheet: View {
         let count = cases.count
         let newIdx = (idx + delta + count) % count
         color = cases[newIdx]
+        return .handled
+    }
+
+    /// macOS's "Keyboard navigation" system setting gates whether Tab reaches
+    /// buttons/pickers. We bypass that by driving focus ourselves from a Tab
+    /// handler on every focusable control in the sheet (#64).
+    ///
+    /// `.create` is omitted while the button is disabled — AppKit refuses to
+    /// make a disabled button first responder, so including it would silently
+    /// break the cycle when the name field is empty.
+    private var visibleFields: [Field] {
+        var fields: [Field] = [.name, .color]
+        if !store.groups.isEmpty {
+            fields.append(.group)
+        }
+        if !store.repoRegistry.isEmpty {
+            fields.append(contentsOf: selectedRepos.map { Field.removeRepo($0.id) })
+            fields.append(.addRepository)
+        }
+        fields.append(.cancel)
+        if isCreateEnabled {
+            fields.append(.create)
+        }
+        return fields
+    }
+
+    private var isCreateEnabled: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Move focus off the row being deleted before mutating the array, so
+    /// `focusedField` never points at a removed case (which would strand the
+    /// tab loop until the user clicked somewhere). Prefer the next row, then
+    /// fall back to the Add Repository button.
+    private func removeRepo(_ id: UUID) {
+        guard let idx = selectedRepos.firstIndex(where: { $0.id == id }) else { return }
+        let wasFocused = focusedField == .removeRepo(id)
+        selectedRepos.remove(at: idx)
+        guard wasFocused else { return }
+        if idx < selectedRepos.count {
+            focusedField = .removeRepo(selectedRepos[idx].id)
+        } else {
+            focusedField = .addRepository
+        }
+    }
+
+    private func handleTab(_ press: KeyPress) -> KeyPress.Result {
+        advanceFocus(by: press.modifiers.contains(.shift) ? -1 : 1)
+    }
+
+    private func advanceFocus(by delta: Int) -> KeyPress.Result {
+        let fields = visibleFields
+        guard let current = focusedField,
+              let idx = fields.firstIndex(of: current) else { return .ignored }
+        let count = fields.count
+        focusedField = fields[(idx + delta + count) % count]
         return .handled
     }
 }
