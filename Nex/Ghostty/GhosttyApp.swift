@@ -201,7 +201,12 @@ final class GhosttyApp {
         case GHOSTTY_ACTION_OPEN_URL:
             let openUrl = action.action.open_url
             guard let urlPtr = openUrl.url else { return false }
-            var urlString = String(cString: urlPtr)
+            // Ghostty's URL regex includes trailing spaces that run to end-of-line
+            // (see ghostty/src/config/url.zig `trailing_spaces_at_eol`), so a path
+            // matched at the end of a terminal line arrives padded with spaces.
+            // Trim before the .md suffix check or we'd silently fall through to
+            // ghostty's default opener and `open(1)` would fail.
+            var urlString = String(cString: urlPtr).trimmingCharacters(in: .whitespacesAndNewlines)
             while urlString.hasSuffix(".") {
                 urlString.removeLast()
             }
