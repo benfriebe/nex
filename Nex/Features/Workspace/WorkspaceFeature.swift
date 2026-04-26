@@ -22,6 +22,11 @@ struct WorkspaceFeature {
         var panes: IdentifiedArrayOf<Pane>
         var layout: PaneLayout
         var focusedPaneID: UUID?
+        /// Per-session focus history, most-recent at end. Pushed on
+        /// every focus change via `setFocus`; popped on pane close so
+        /// focus returns to the previously-focused pane instead of an
+        /// adjacent one. Not persisted: resets across app restart.
+        var focusHistory: [UUID] = []
         var repoAssociations: IdentifiedArrayOf<RepoAssociation> = []
         var recentlyClosedPanes: [ClosedPaneSnapshot] = []
         /// Panes that are off-layout but whose ghostty surfaces/PTYs must
@@ -104,6 +109,33 @@ struct WorkspaceFeature {
                 body(&pane)
                 parkedPanes[id: paneID] = pane
             }
+        }
+
+        /// Update focused pane and push the previous focus onto
+        /// `focusHistory` (deduped, capped). Use for every focus
+        /// change EXCEPT pane-close: the closing pane is destroyed,
+        /// not "left", and shouldn't be pushed onto its own history.
+        mutating func setFocus(_ newID: UUID?) {
+            if let current = focusedPaneID, current != newID {
+                focusHistory.removeAll { $0 == current }
+                focusHistory.append(current)
+                if focusHistory.count > 8 {
+                    focusHistory.removeFirst(focusHistory.count - 8)
+                }
+            }
+            focusedPaneID = newID
+        }
+
+        /// Pop the most-recent live entry off `focusHistory`. Skips
+        /// entries whose panes no longer exist. Returns nil when
+        /// nothing live remains. `excluding` defends against returning
+        /// the pane being closed; callers should pre-scrub too.
+        mutating func popFocusFromHistory(excluding excludedID: UUID?) -> UUID? {
+            if let excludedID { focusHistory.removeAll { $0 == excludedID } }
+            while let candidate = focusHistory.popLast() {
+                if panes[id: candidate] != nil { return candidate }
+            }
+            return nil
         }
 
         /// Generate a filesystem-safe slug from a display name.
@@ -190,7 +222,7 @@ struct WorkspaceFeature {
                 let newPane = Pane(id: newPaneID)
                 state.panes.append(newPane)
                 state.layout = .leaf(newPaneID)
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 let opacity = ghosttyConfig.backgroundOpacity
                 return .run { _ in
                     await surfaceManager.createSurface(
@@ -219,7 +251,7 @@ struct WorkspaceFeature {
                 state.layout = newLayout
                 state.panes.append(newPane)
                 if let label { state.panes[id: newPaneID]?.label = label }
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
@@ -255,7 +287,7 @@ struct WorkspaceFeature {
                 state.layout = newLayout
                 state.panes.append(newPane)
                 if let label { state.panes[id: newPaneID]?.label = label }
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
@@ -309,7 +341,7 @@ struct WorkspaceFeature {
                     state.panes.remove(id: reusePaneID)
                     state.parkedPanes.append(oldPane)
                     state.panes.append(linkedPane)
-                    state.focusedPaneID = newPaneID
+                    state.setFocus(newPaneID)
                     state.currentLayoutIndex = nil
                     return branchEffect
                 }
@@ -325,7 +357,7 @@ struct WorkspaceFeature {
                     state.layout = .leaf(newPaneID)
                 }
                 state.panes.append(newPane)
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
                 return branchEffect
 
@@ -370,7 +402,7 @@ struct WorkspaceFeature {
                     state.panes.remove(id: reusePaneID)
                     state.parkedPanes.append(oldPane)
                     state.panes.append(linkedPane)
-                    state.focusedPaneID = newPaneID
+                    state.setFocus(newPaneID)
                     state.currentLayoutIndex = nil
                     return branchEffect
                 }
@@ -391,7 +423,7 @@ struct WorkspaceFeature {
                     state.layout = .leaf(newPaneID)
                 }
                 state.panes.append(newPane)
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
                 return branchEffect
 
@@ -422,7 +454,7 @@ struct WorkspaceFeature {
                     state.layout = .leaf(newPaneID)
                 }
                 state.panes.append(newPane)
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
                 return .none
 
@@ -460,6 +492,12 @@ struct WorkspaceFeature {
                     state.layout = state.layout.replacing(
                         paneID: paneID, with: .leaf(sourceID)
                     )
+                    // Direct assignment (not setFocus): the closing
+                    // pane is destroyed in the same tick, so it must
+                    // not be pushed onto its own history. Scrub stale
+                    // entries for both the closing pane and the
+                    // unparked source defensively.
+                    state.focusHistory.removeAll { $0 == paneID || $0 == sourceID }
                     state.focusedPaneID = sourceID
                     state.currentLayoutIndex = nil
                     if markdownHasSurface {
@@ -498,9 +536,19 @@ struct WorkspaceFeature {
                 state.layout = newLayout
                 state.currentLayoutIndex = nil
 
-                // Update focus
+                // Scrub the closing pane from history before any pop,
+                // even if it wasn't focused: leaving stale UUIDs in
+                // the stack works (popFocusFromHistory filters dead
+                // panes) but burns slots and obscures intent.
+                state.focusHistory.removeAll { $0 == paneID }
+
+                // Update focus. Direct assignment (not setFocus): the
+                // closing pane should not be pushed onto its own
+                // history. Walk the per-session focus stack first;
+                // fall back to layout-traversal order if it's empty.
                 if state.focusedPaneID == paneID {
-                    state.focusedPaneID = newLayout.allPaneIDs.first
+                    state.focusedPaneID = state.popFocusFromHistory(excluding: paneID)
+                        ?? newLayout.allPaneIDs.first
                 }
 
                 if hasBackingSurface {
@@ -511,19 +559,19 @@ struct WorkspaceFeature {
                 return .none
 
             case .focusPane(let paneID):
-                state.focusedPaneID = paneID
+                state.setFocus(paneID)
                 return .none
 
             case .focusNextPane:
                 guard let current = state.focusedPaneID,
                       let next = state.layout.nextPaneID(after: current) else { return .none }
-                state.focusedPaneID = next
+                state.setFocus(next)
                 return .none
 
             case .focusPreviousPane:
                 guard let current = state.focusedPaneID,
                       let prev = state.layout.previousPaneID(before: current) else { return .none }
-                state.focusedPaneID = prev
+                state.setFocus(prev)
                 return .none
 
             case .updateSplitRatio(let splitPath, let ratio):
@@ -589,7 +637,7 @@ struct WorkspaceFeature {
                 state.layout = state.layout.movingPane(
                     paneID, toAdjacentOf: targetPaneID, zone: zone
                 )
-                state.focusedPaneID = paneID
+                state.setFocus(paneID)
                 state.currentLayoutIndex = nil
                 return .none
 
@@ -878,7 +926,7 @@ struct WorkspaceFeature {
                 )
                 state.layout = newLayout
                 state.panes.append(newPane)
-                state.focusedPaneID = newPaneID
+                state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
 
                 // Markdown, scratchpad, and diff panes don't need a surface
