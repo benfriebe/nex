@@ -415,6 +415,7 @@ struct AutoDetectRepoTests {
             $0.surfaceManager = SurfaceManager()
             $0.uuid = .constant(assocID)
             $0.gitService.getStatus = { _ in .clean }
+            $0.gitService.getCurrentBranch = { _ in nil }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
