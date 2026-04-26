@@ -2826,6 +2826,12 @@ struct AppReducer {
                     for assoc in associations {
                         let status = await (try? gitService.getStatus(assoc.worktreePath)) ?? .unknown
                         await send(.gitStatusUpdated(associationID: assoc.id, status: status))
+                        let branch = try? await gitService.getCurrentBranch(assoc.worktreePath)
+                        await send(.repoAssociationBranchResolved(
+                            workspaceID: activeID,
+                            associationID: assoc.id,
+                            branch: branch
+                        ))
                     }
                 }
 
