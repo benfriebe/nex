@@ -1661,4 +1661,162 @@ struct WorkspaceFeatureTests {
         #expect(store.state.panes[id: markdownID]?.parkedSourcePaneID == nil)
         #expect(surfaceManager.activeSurfaceCount == 0)
     }
+
+    // MARK: - openDiffPane
+
+    @Test func openDiffPaneSplitsAndCreatesDiffPane() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let sourceID = workspace.panes.first!.id
+        workspace.layout = .leaf(sourceID)
+        workspace.focusedPaneID = sourceID
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000DDDDDD")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 3000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openDiffPane(repoPath: "/tmp/repo", targetPath: nil)) { state in
+            let created = state.panes[id: newPaneID]
+            #expect(created?.type == .diff)
+            #expect(created?.workingDirectory == "/tmp/repo")
+            #expect(created?.filePath == nil)
+            #expect(created?.label == "repo")
+            #expect(state.focusedPaneID == newPaneID)
+            // Layout split: source on one side, new diff pane on the other.
+            if case .split(_, _, .leaf(let first), .leaf(let second)) = state.layout {
+                #expect((first == sourceID && second == newPaneID)
+                    || (first == newPaneID && second == sourceID))
+            } else {
+                Issue.record("Expected split layout after openDiffPane")
+            }
+        }
+    }
+
+    @Test func reopenClosedDiffPaneDoesNotCreateSurface() async {
+        // Diff panes have no PTY — reopening one must not spin up a shell
+        // surface behind the WKWebView.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        workspace.recentlyClosedPanes = [
+            ClosedPaneSnapshot(
+                workingDirectory: "/tmp/repo",
+                label: "repo",
+                type: .diff,
+                filePath: nil,
+                claudeSessionID: nil
+            )
+        ]
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000DDDD01")!
+        let surfaceManager = SurfaceManager()
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = surfaceManager
+            $0.uuid = .constant(newPaneID)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.reopenClosedPane) { state in
+            #expect(state.recentlyClosedPanes.isEmpty)
+            #expect(state.panes[id: newPaneID]?.type == .diff)
+            #expect(state.panes[id: newPaneID]?.workingDirectory == "/tmp/repo")
+            #expect(state.focusedPaneID == newPaneID)
+            // Layout split horizontally with the original pane.
+            if case .split(_, _, .leaf(let first), .leaf(let second)) = state.layout {
+                #expect(first == firstID)
+                #expect(second == newPaneID)
+            } else {
+                Issue.record("Expected split layout after reopening diff pane")
+            }
+        }
+        await store.finish()
+
+        // Critical: no surface was created for the diff pane.
+        #expect(surfaceManager.activeSurfaceCount == 0)
+    }
+
+    @Test func openDiffPaneUnzoomsBeforeSplitting() async {
+        // Opening a diff while a pane is zoomed must restore the saved layout
+        // first; otherwise the diff pane gets spliced into the temporary
+        // single-pane layout and disappears on the next unzoom.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstID = workspace.panes.first!.id
+        let zoomedID = UUID()
+        workspace.panes.append(Pane(id: zoomedID))
+        let originalLayout = PaneLayout.split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstID),
+            second: .leaf(zoomedID)
+        )
+        workspace.layout = .leaf(zoomedID) // zoomed in
+        workspace.savedLayout = originalLayout // remembered for restore
+        workspace.zoomedPaneID = zoomedID
+        workspace.focusedPaneID = zoomedID
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000DDDD02")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 5000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openDiffPane(repoPath: "/tmp/repo", targetPath: nil)) { state in
+            // Zoom state cleared before splitting.
+            #expect(state.savedLayout == nil)
+            #expect(state.zoomedPaneID == nil)
+            // Layout was rebuilt from the originalLayout, then split off the
+            // focused (zoomed) pane — so the original sibling is preserved.
+            #expect(state.panes[id: newPaneID]?.type == .diff)
+            #expect(state.panes[id: firstID] != nil)
+            #expect(state.panes[id: zoomedID] != nil)
+            #expect(state.focusedPaneID == newPaneID)
+            // Diff pane must be reachable in the live layout (not orphaned).
+            #expect(state.layout.contains(paneID: newPaneID))
+            #expect(state.layout.contains(paneID: firstID))
+        }
+    }
+
+    @Test func openDiffPaneWithTargetPathUsesTargetAsLabel() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.focusedPaneID = workspace.panes.first?.id
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-0000000EEEEE")!
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 4000))
+            $0.uuid = .constant(newPaneID)
+            $0.gitService.getCurrentBranch = { _ in nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.openDiffPane(
+            repoPath: "/tmp/repo",
+            targetPath: "/tmp/repo/Sources/Foo.swift"
+        )) { state in
+            let created = state.panes[id: newPaneID]
+            #expect(created?.type == .diff)
+            #expect(created?.workingDirectory == "/tmp/repo")
+            #expect(created?.filePath == "/tmp/repo/Sources/Foo.swift")
+            #expect(created?.label == "Foo.swift")
+            #expect(created?.title == "diff: Foo.swift")
+        }
+    }
 }

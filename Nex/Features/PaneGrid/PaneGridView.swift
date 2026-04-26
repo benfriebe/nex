@@ -43,6 +43,7 @@ struct PaneGridView: View {
     @State private var isResizing = false
     @State private var resizeHideTask: Task<Void, Never>?
     @State private var focusHoverTask: Task<Void, Never>?
+    @State private var diffRefreshTokens: [UUID: UInt64] = [:]
 
     var body: some View {
         if layout.isEmpty {
@@ -103,6 +104,9 @@ struct PaneGridView: View {
                 onToggleZoom: onToggleZoom,
                 isEditing: pane.isEditing,
                 onToggleEdit: pane.type == .markdown ? { onToggleMarkdownEdit(pane.id) } : nil,
+                onRefreshDiff: pane.type == .diff
+                    ? { diffRefreshTokens[pane.id, default: 0] &+= 1 }
+                    : nil,
                 onDragChanged: { point in
                     dragSourcePaneID = pane.id
                     let bounds = CGRect(origin: .zero, size: gridSize)
@@ -190,6 +194,17 @@ struct PaneGridView: View {
                     backgroundOpacity: ghosttyConfig.backgroundOpacity
                 )
                 .clipped()
+            case .diff:
+                DiffPaneView(
+                    paneID: pane.id,
+                    repoPath: pane.workingDirectory,
+                    targetPath: pane.filePath,
+                    isFocused: pane.id == focusedPaneID,
+                    refreshToken: diffRefreshTokens[pane.id] ?? 0,
+                    backgroundColor: ghosttyConfig.backgroundColor,
+                    backgroundOpacity: ghosttyConfig.backgroundOpacity,
+                    fontSize: pane.markdownFontSize
+                )
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -208,7 +223,7 @@ struct PaneGridView: View {
             }
         }
         .background {
-            if pane.type == .markdown || pane.type == .scratchpad {
+            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }

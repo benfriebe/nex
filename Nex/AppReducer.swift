@@ -129,6 +129,7 @@ struct AppReducer {
                     case .shell: "terminal"
                     case .markdown: "doc.text"
                     case .scratchpad: "note.text"
+                    case .diff: "plusminus"
                     }
                     items.append(CommandPaletteItem(
                         id: "pane:\(paneID)",
@@ -370,6 +371,7 @@ struct AppReducer {
         // File Opening
         case openFile
         case openFileAtPath(String, fromPaneID: UUID?)
+        case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
 
         // Inspector + Git Status
         case toggleInspector
@@ -2109,6 +2111,36 @@ struct AppReducer {
                     action: .openMarkdownFile(filePath: resolvedPath)
                 )))
 
+            case .openDiffPath(let repoPath, let targetPath, let fromPaneID):
+                guard let activeID = state.activeWorkspaceID else { return .none }
+                let workspace = state.workspaces[id: activeID]
+                let resolvedTarget: String? = {
+                    guard let targetPath, !targetPath.isEmpty else { return nil }
+                    if targetPath.hasPrefix("/") { return targetPath }
+                    let cwd: String? = {
+                        if let fromPaneID, let pane = workspace?.panes.first(where: { $0.id == fromPaneID }) {
+                            return pane.workingDirectory
+                        }
+                        if let focusedID = workspace?.focusedPaneID,
+                           let pane = workspace?.panes.first(where: { $0.id == focusedID }) {
+                            return pane.workingDirectory
+                        }
+                        return nil
+                    }()
+                    if let cwd, !cwd.isEmpty {
+                        return (cwd as NSString).appendingPathComponent(targetPath)
+                    }
+                    return targetPath
+                }()
+                return .send(.workspaces(.element(
+                    id: activeID,
+                    action: .openDiffPane(
+                        repoPath: repoPath,
+                        targetPath: resolvedTarget,
+                        reusePaneID: nil
+                    )
+                )))
+
             // MARK: - Socket Messages
 
             case .socketMessage(let message, let reply):
@@ -2402,6 +2434,29 @@ struct AppReducer {
                     return .send(.workspaces(.element(
                         id: activeID,
                         action: .openMarkdownFile(filePath: path, reusePaneID: nil)
+                    )))
+
+                case .openDiff(let repoPath, let targetPath, let paneID):
+                    if let paneID,
+                       let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
+                        state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                        return .send(.workspaces(.element(
+                            id: workspace.id,
+                            action: .openDiffPane(
+                                repoPath: repoPath,
+                                targetPath: targetPath,
+                                reusePaneID: nil
+                            )
+                        )))
+                    }
+                    guard let activeID = state.activeWorkspaceID else { return .none }
+                    return .send(.workspaces(.element(
+                        id: activeID,
+                        action: .openDiffPane(
+                            repoPath: repoPath,
+                            targetPath: targetPath,
+                            reusePaneID: nil
+                        )
                     )))
 
                 // MARK: Layout commands

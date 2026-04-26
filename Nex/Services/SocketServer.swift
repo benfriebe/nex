@@ -38,6 +38,8 @@ enum SocketMessage: Equatable {
     /// File commands. `reuse` = replace the originating pane in place
     /// (`nex open --here`) instead of splitting off it.
     case openFile(path: String, paneID: UUID?, reuse: Bool)
+    /// `nex diff` — render git diff for `repoPath`, optionally scoped to `targetPath`.
+    case openDiff(repoPath: String, targetPath: String?, paneID: UUID?)
     /// Layout commands
     case layoutCycle(paneID: UUID)
     case layoutSelect(paneID: UUID, name: String)
@@ -434,6 +436,9 @@ final class SocketServer: Sendable {
         var scope: String?
         /// `nex open --here` → replace originating pane in place.
         var reuse: Bool?
+        /// `nex diff` — repo root and optional file/directory scope.
+        var repoPath: String?
+        var targetPath: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -445,6 +450,8 @@ final class SocketServer: Sendable {
             case cascade, index, group
             case workspace, scope
             case reuse
+            case repoPath = "repo_path"
+            case targetPath = "target_path"
         }
     }
 
@@ -496,6 +503,13 @@ final class SocketServer: Sendable {
             guard let path = wire.path, !path.isEmpty else { return nil }
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
             return (.openFile(path: path, paneID: paneID, reuse: wire.reuse ?? false), wire)
+        }
+
+        if wire.command == "diff" {
+            guard let repoPath = wire.repoPath, !repoPath.isEmpty else { return nil }
+            let targetPath = (wire.targetPath?.isEmpty == true) ? nil : wire.targetPath
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.openDiff(repoPath: repoPath, targetPath: targetPath, paneID: paneID), wire)
         }
 
         if wire.command == "pane-close" {

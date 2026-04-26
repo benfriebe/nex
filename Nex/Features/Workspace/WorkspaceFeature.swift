@@ -140,6 +140,7 @@ struct WorkspaceFeature {
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String, reusePaneID: UUID? = nil)
+        case openDiffPane(repoPath: String, targetPath: String?, reusePaneID: UUID? = nil)
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -314,6 +315,72 @@ struct WorkspaceFeature {
                 }
 
                 if let sourceID = state.focusedPaneID {
+                    let (newLayout, _) = state.layout.splitting(
+                        paneID: sourceID,
+                        direction: .horizontal,
+                        newPaneID: newPaneID
+                    )
+                    state.layout = newLayout
+                } else {
+                    state.layout = .leaf(newPaneID)
+                }
+                state.panes.append(newPane)
+                state.focusedPaneID = newPaneID
+                state.currentLayoutIndex = nil
+                return branchEffect
+
+            case .openDiffPane(let repoPath, let targetPath, let reusePaneID):
+                let newPaneID = uuid()
+                let scopeName: String = if let targetPath, !targetPath.isEmpty {
+                    (targetPath as NSString).lastPathComponent
+                } else {
+                    (repoPath as NSString).lastPathComponent
+                }
+                let newPane = Pane(
+                    id: newPaneID,
+                    label: scopeName,
+                    type: .diff,
+                    title: "diff: \(scopeName)",
+                    workingDirectory: repoPath,
+                    filePath: targetPath,
+                    createdAt: now,
+                    lastActivityAt: now
+                )
+
+                let branchEffect: Effect<Action> = .run { send in
+                    let branch = try? await gitService.getCurrentBranch(repoPath)
+                    await send(.paneBranchChanged(paneID: newPaneID, branch: branch))
+                }
+
+                if let reusePaneID, let oldPane = state.panes[id: reusePaneID] {
+                    if state.searchingPaneID == reusePaneID {
+                        state.searchingPaneID = nil
+                        state.searchNeedle = ""
+                        state.searchTotal = nil
+                        state.searchSelected = nil
+                    }
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    var linkedPane = newPane
+                    linkedPane.parkedSourcePaneID = reusePaneID
+                    state.layout = state.layout.replacing(paneID: reusePaneID, with: .leaf(newPaneID))
+                    state.panes.remove(id: reusePaneID)
+                    state.parkedPanes.append(oldPane)
+                    state.panes.append(linkedPane)
+                    state.focusedPaneID = newPaneID
+                    state.currentLayoutIndex = nil
+                    return branchEffect
+                }
+
+                if let sourceID = state.focusedPaneID {
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
                     let (newLayout, _) = state.layout.splitting(
                         paneID: sourceID,
                         direction: .horizontal,
@@ -814,8 +881,8 @@ struct WorkspaceFeature {
                 state.focusedPaneID = newPaneID
                 state.currentLayoutIndex = nil
 
-                // Markdown and scratchpad panes don't need a surface
-                if snapshot.type == .markdown || snapshot.type == .scratchpad {
+                // Markdown, scratchpad, and diff panes don't need a surface
+                if snapshot.type == .markdown || snapshot.type == .scratchpad || snapshot.type == .diff {
                     return .none
                 }
 

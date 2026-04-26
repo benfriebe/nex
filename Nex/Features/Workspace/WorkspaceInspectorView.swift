@@ -199,29 +199,37 @@ struct WorkspaceInspectorView: View {
                     Text(repo.name)
                         .font(.system(size: 12, weight: .medium))
                 }
-                if let branch = assoc.branchName {
-                    Text(branch)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let branch = assoc.branchName {
+                        Text(branch)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    diffStatsLabel(for: assoc.id)
                 }
             }
 
             Spacer()
 
-            Button(action: {
+            InspectorIconButton(icon: "plusminus", tooltip: "Show diff for this repo") {
+                store.send(.openDiffPath(
+                    repoPath: assoc.worktreePath,
+                    targetPath: nil,
+                    fromPaneID: nil
+                ))
+            }
+
+            InspectorIconButton(
+                icon: "terminal",
+                tooltip: "Open terminal at this path (Shift: split vertical)"
+            ) {
                 let direction: PaneLayout.SplitDirection =
                     NSEvent.modifierFlags.contains(.shift) ? .vertical : .horizontal
                 store.send(.workspaces(.element(
                     id: activeID,
                     action: .splitPaneAtPath(assoc.worktreePath, direction: direction)
                 )))
-            }) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .help("Open terminal at this path (Shift: split vertical)")
         }
         .contentShape(Rectangle())
         .contextMenu {
@@ -239,6 +247,23 @@ struct WorkspaceInspectorView: View {
                     deleteWorktree: true
                 ))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func diffStatsLabel(for associationID: UUID) -> some View {
+        if case .dirty(let files, let adds, let dels) = store.gitStatuses[associationID] ?? .unknown {
+            HStack(spacing: 4) {
+                Text("\(files) file\(files == 1 ? "" : "s")")
+                    .foregroundStyle(.secondary)
+                if adds > 0 {
+                    Text("+\(adds)").foregroundStyle(.green)
+                }
+                if dels > 0 {
+                    Text("-\(dels)").foregroundStyle(.red)
+                }
+            }
+            .font(.system(size: 10, design: .monospaced))
         }
     }
 
@@ -365,5 +390,42 @@ struct CreateWorktreeSheet: View {
         }
         .padding(20)
         .frame(width: 320)
+    }
+}
+
+/// Compact icon button used in the inspector for per-repo actions. Adds a
+/// hover background, brightened foreground, and pointing-hand cursor since
+/// `.buttonStyle(.plain)` provides none of these by default.
+private struct InspectorIconButton: View {
+    let icon: String
+    let tooltip: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(isHovered ? .primary : .secondary)
+                .frame(width: 20, height: 20)
+                .background {
+                    if isHovered {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.secondary.opacity(0.18))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 }

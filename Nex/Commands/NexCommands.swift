@@ -281,6 +281,9 @@ final class PaneShortcutMonitor {
             store.send(.beginRenameActiveWorkspace)
             return true
 
+        case .openDiff:
+            return handleOpenDiff(activeWorkspaceID: id)
+
         default:
             return false
         }
@@ -325,6 +328,19 @@ final class PaneShortcutMonitor {
             ? .increaseMarkdownFontSize(focusedID)
             : .decreaseMarkdownFontSize(focusedID)
         store.send(.workspaces(.element(id: id, action: action)))
+        return true
+    }
+
+    private func handleOpenDiff(activeWorkspaceID id: UUID) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID,
+              let pane = workspace.panes[id: focusedID]
+        else { return false }
+        store.send(.openDiffPath(
+            repoPath: pane.workingDirectory,
+            targetPath: nil,
+            fromPaneID: focusedID
+        ))
         return true
     }
 

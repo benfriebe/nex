@@ -22,6 +22,7 @@
 //   nex layout cycle
 //   nex layout select <name>
 //   nex open [--here] <filepath>
+//   nex diff [<path>]
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
 // Reads NEX_SOCKET from the environment to select transport:
@@ -92,6 +93,7 @@ func printUsage() {
       nex layout cycle
       nex layout select <name>
       nex open [--here] <filepath>
+      nex diff [<path>]
     \n
     """, stderr)
 }
@@ -848,6 +850,27 @@ func handleOpen(_ args: inout ArraySlice<String>) {
     sendJSONAny(payload)
 }
 
+func handleDiff(_ args: inout ArraySlice<String>) {
+    let cwd = FileManager.default.currentDirectoryPath
+    var payload: [String: Any] = [
+        "command": "diff",
+        "repo_path": cwd
+    ]
+
+    if let target = args.popFirst() {
+        let absolute = URL(fileURLWithPath: target, relativeTo: URL(fileURLWithPath: cwd))
+            .standardizedFileURL
+            .path
+        payload["target_path"] = absolute
+    }
+
+    if let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
+        payload["pane_id"] = paneID
+    }
+
+    sendJSONAny(payload)
+}
+
 // MARK: - Main
 
 var args = CommandLine.arguments.dropFirst()
@@ -875,6 +898,8 @@ case "layout":
     handleLayout(&args)
 case "open":
     handleOpen(&args)
+case "diff":
+    handleDiff(&args)
 default:
     fputs("Unknown command: \(subcommand)\n", stderr)
     printUsage()

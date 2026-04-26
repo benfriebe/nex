@@ -245,6 +245,7 @@ enum NexAction: String, CaseIterable {
     case createScratchpad = "create_scratchpad"
     case commandPalette = "command_palette"
     case newGroup = "new_group"
+    case openDiff = "open_diff"
     case unbind
 
     /// Actions handled by SwiftUI Commands (menu bar items).
@@ -301,6 +302,7 @@ enum NexAction: String, CaseIterable {
         case .createScratchpad: "New Scratchpad"
         case .commandPalette: "Command Palette"
         case .newGroup: "New Group"
+        case .openDiff: "Open Diff"
         case .unbind: "Unbind"
         }
     }
@@ -320,7 +322,7 @@ enum NexAction: String, CaseIterable {
             "Workspaces"
         case .toggleSidebar, .toggleInspector:
             "View"
-        case .openFile, .toggleMarkdownEdit, .increaseMarkdownFontSize, .decreaseMarkdownFontSize:
+        case .openFile, .toggleMarkdownEdit, .increaseMarkdownFontSize, .decreaseMarkdownFontSize, .openDiff:
             "Files"
         case .toggleSearch, .closeSearch:
             "Search"

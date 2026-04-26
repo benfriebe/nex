@@ -69,13 +69,20 @@ make check
 - **Background**: both views receive `ghosttyConfig.backgroundColor` / `backgroundOpacity` so they match terminal panes. The pane container also has a matching background fill for any gaps.
 - **Git branch**: detected at open time via `gitService.getCurrentBranch` on the file's parent directory.
 
+### Diff panes
+- **Entry points**: `nex diff [<path>]` from the CLI, the bindable `open_diff` action (default unbound), or the "plusminus" button next to a repo association in the workspace inspector. All route through `AppReducer.openDiffPath` → `WorkspaceFeature.openDiffPane`.
+- **Renderer** (`DiffHTMLRenderer`): pure-Swift line-by-line classifier — emits `<div class="line line-{add|del|hunk|context|file-header}">` with GitHub-style colors and the same dark-mode detection as `MarkdownHTMLRenderer`. Each `diff --git` opens a `<details class="file" open>` block with a sticky `<summary>` (the file path); clicking the summary toggles collapse, and `position: sticky` keeps the current file's header pinned while scrolling through its hunks. Empty diff → "No changes" placeholder.
+- **View** (`DiffPaneView`): `WKWebView` mirroring `MarkdownPaneView` minus edit mode and file watching. Refreshes when the pane regains focus and when the header refresh button (`arrow.clockwise`) bumps a per-pane `refreshToken` tracked in `PaneGridView`.
+- **Inputs**: `pane.workingDirectory` is the repo path; `pane.filePath` is the optional file/dir scope passed to `git diff -- <path>`. No `--staged` / ref-range support yet.
+- **Git invocation**: new `gitService.getDiff(repoPath:targetPath:)` shells out via the existing `runGit` helper. Errors render as a placeholder line in the pane.
+
 ### Persistence — GRDB
 - `DatabaseService` — manages SQLite via GRDB's `DatabasePool` (prod) or `DatabaseQueue` (tests, in-memory).
 - `PersistenceService` — debounced (500ms) full-state serialization. Clears and re-inserts all records on each save. Tables: `WorkspaceRecord`, `PaneRecord`, `RepoRecord`, `RepoAssociationRecord`, `AppStateRecord`.
 - DB location: `~/Library/Application Support/Nex/nex.db`
 
 ### Agent monitoring & CLI
-- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `pane-move`, `pane-move-to-workspace`, `pane-list`, `workspace-create`, `workspace-move`, `group-create`, `group-rename`, `group-delete`, `layout-cycle`, `layout-select`, `open`. Group icon management is deliberately UI-only (context menu); there is no `group-set-icon` wire command.
+- `SocketServer` — Unix domain socket at `/tmp/nex.sock` + optional TCP listener on `127.0.0.1:<port>`. Receives newline-delimited JSON from the `nex` CLI. Messages use `"command"` key. Commands: `start`, `stop`, `error`, `notification`, `session-start`, `pane-split`, `pane-create`, `pane-close`, `pane-name`, `pane-send`, `pane-move`, `pane-move-to-workspace`, `pane-list`, `workspace-create`, `workspace-move`, `group-create`, `group-rename`, `group-delete`, `layout-cycle`, `layout-select`, `open`, `diff`. Group icon management is deliberately UI-only (context menu); there is no `group-set-icon` wire command.
 - **Request/response framing**: most commands are fire-and-forget (server reads, acts, drops the FD). Commands in `replyCommandAllowlist` (currently `pane-list`, `pane-close`) return structured JSON — the server allocates a `SocketServer.ReplyHandle`, the reducer writes a single newline-terminated JSON line via `reply.send(...)`, then `reply.close()` cancels the client's dispatch source (EOF on the CLI side). Success payloads are `{"ok":true, ...}`; failures are `{"ok":false,"error":"<message>"}` and the CLI exits non-zero. Reply handlers must gracefully accept `reply: nil` for the legacy fire-and-forget path.
 - **TCP transport**: enabled via `tcp-port = <port>` in `~/.config/nex/config`. Binds to `127.0.0.1` only (no auth needed — SSH tunnels handle remote security). Use cases: dev containers connect via `host.docker.internal:<port>`, remote agents connect via SSH reverse tunnel (`ssh -R <port>:localhost:<port> remote`).
 - `SocketMessage` — enum representing all wire messages (agent lifecycle + pane commands + workspace + group commands).
@@ -93,6 +100,7 @@ make check
   - `nex group delete <name-or-id> [--cascade]` — without `--cascade`, children promote to top level
   - `nex layout cycle|select <name>`
   - `nex open <filepath>`
+  - `nex diff [<path>]` — opens a diff pane for the CLI's current working directory (or scoped to `<path>`). The diff pane refreshes on focus and via the header refresh button.
 - **CLI transport selection**: `NEX_SOCKET` env var selects transport. Absent = Unix socket (`/tmp/nex.sock`). `tcp:<host>:<port>` = TCP (e.g., `NEX_SOCKET=tcp:host.docker.internal:19400`).
 - `StatusBarController` — menu bar icon + popover showing running/waiting agents across workspaces.
 - `NotificationService` — desktop notifications with "Open"/"Dismiss" actions.

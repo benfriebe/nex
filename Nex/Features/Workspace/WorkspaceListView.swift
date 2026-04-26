@@ -1634,11 +1634,17 @@ struct WorkspaceListView: View {
         }
         if statuses.isEmpty { return .unknown }
         if statuses.contains(where: { if case .dirty = $0 { true } else { false } }) {
-            let totalChanged = statuses.reduce(0) { total, status in
-                if case .dirty(let count) = status { return total + count }
-                return total
+            var totalChanged = 0
+            var totalAdds = 0
+            var totalDels = 0
+            for status in statuses {
+                if case .dirty(let count, let adds, let dels) = status {
+                    totalChanged += count
+                    totalAdds += adds
+                    totalDels += dels
+                }
             }
-            return .dirty(changedFiles: totalChanged)
+            return .dirty(changedFiles: totalChanged, additions: totalAdds, deletions: totalDels)
         }
         if statuses.allSatisfy({ $0 == .clean }) {
             return .clean

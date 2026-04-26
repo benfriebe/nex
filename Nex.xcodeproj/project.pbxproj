@@ -16,6 +16,7 @@
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
+		149E80DD671127055EF67F7F /* DiffHTMLRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */; };
 		14C1E964B19A8C277D5EA5E4 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE56BB11F5C7C34821411297 /* QuartzCore.framework */; };
 		1569F35B72EC7C133643190E /* PaneType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377C07C6C4B00D0699682EA3 /* PaneType.swift */; };
 		1E6354C9BBDF122BF0FB255F /* WorktreeOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */; };
@@ -44,6 +45,7 @@
 		58B6A951A34B2ED1516194C4 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E08D39F8F87D7505CD32D25D /* WebKit.framework */; };
 		59239C7AD0D26E390C647C46 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 98CF017F4F26916F63300A33 /* Yams */; };
 		5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */; };
+		62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E820170ADF2ADB58B8079 /* GitServiceTests.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
 		696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */; };
 		6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */; };
@@ -54,6 +56,8 @@
 		75BECE7D63EF981C344D4902 /* SurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CA6C20BB3882E02348ADF4 /* SurfaceView.swift */; };
 		77C780C65EFA8114C681638B /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 8B14B7BF7BD4FCD61EBB97A9 /* ComposableArchitecture */; };
 		77CF808E3AF2C06BD12D11C0 /* SplitDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DED98594372C8E34542A5C2 /* SplitDividerView.swift */; };
+		77FB1142F26F5C33539E3F23 /* DiffHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */; };
+		7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */; };
 		7C49755ABEC49B51EC1333FB /* WorkspaceGroupCRUDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF88062F290789D98B545AC6 /* WorkspaceGroupCRUDTests.swift */; };
 		7C78EA65C2D22749546715A0 /* GhosttySurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD03468B083223FF50F68E0 /* GhosttySurface.swift */; };
 		7D1EEEBEE302F17F8CA2852D /* SocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309D0F6F13F12FDC350DE875 /* SocketServer.swift */; };
@@ -146,9 +150,11 @@
 		11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeOperationTests.swift; sourceTree = "<group>"; };
 		1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteItem.swift; sourceTree = "<group>"; };
 		191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenamePaneSheet.swift; sourceTree = "<group>"; };
+		191E820170ADF2ADB58B8079 /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		1A198A2F5EA992907A3031ED /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1BA6AA9E98405375983902BD /* WorkspaceFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFeature.swift; sourceTree = "<group>"; };
 		1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryTests.swift; sourceTree = "<group>"; };
+		1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPaneView.swift; sourceTree = "<group>"; };
 		1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLRenderer.swift; sourceTree = "<group>"; };
 		1F71D541343DA67CDCADA821 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
 		200EB2588E40ABB7C51E24E6 /* MarkdownHTMLRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLRendererTests.swift; sourceTree = "<group>"; };
@@ -165,6 +171,7 @@
 		3714AA1F15C85762BF36B1FE /* NexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexApp.swift; sourceTree = "<group>"; };
 		377C07C6C4B00D0699682EA3 /* PaneType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneType.swift; sourceTree = "<group>"; };
 		3879BA745F8737CA5872F80D /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
+		396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffHTMLRendererTests.swift; sourceTree = "<group>"; };
 		3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroup.swift; sourceTree = "<group>"; };
 		42A24C1FEC6EA31096603326 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
@@ -191,6 +198,7 @@
 		852AC6AE9B24B4528577F454 /* LineNumberRulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineNumberRulerView.swift; sourceTree = "<group>"; };
 		89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
 		8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsClient.swift; sourceTree = "<group>"; };
+		92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffHTMLRenderer.swift; sourceTree = "<group>"; };
 		933D5B5E664E30B2E88EE3C7 /* WorkspaceGroupPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupPersistenceTests.swift; sourceTree = "<group>"; };
 		93D45D65A66C475B0CEEC53C /* KeybindingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingService.swift; sourceTree = "<group>"; };
 		94CA6C20BB3882E02348ADF4 /* SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceView.swift; sourceTree = "<group>"; };
@@ -338,7 +346,9 @@
 				89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */,
 				309F641591BB580429299666 /* ConfigParserTests.swift */,
 				21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */,
+				396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */,
 				77FDA3FB200AA7846BCDC7A7 /* EditorServiceTests.swift */,
+				191E820170ADF2ADB58B8079 /* GitServiceTests.swift */,
 				B822ABF12B071E574E089BB4 /* GroupIconTests.swift */,
 				EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */,
 				5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */,
@@ -424,6 +434,7 @@
 			children = (
 				61D6AE6635332105A3C18A03 /* VibrancyView.swift */,
 				F09BE06FAA330721302E5EE2 /* CommandPalette */,
+				88A51E308F0A25C93CF584F1 /* DiffPane */,
 				DF5C0A1272DF055BCEA24B8E /* Help */,
 				B83E9D548B12F0748394A98C /* MarkdownPane */,
 				575CB385F691D30D4A449F9C /* PaneGrid */,
@@ -472,6 +483,15 @@
 				C58BE92A0878D9CCC786A657 /* WorkspaceRowView.swift */,
 			);
 			path = Workspace;
+			sourceTree = "<group>";
+		};
+		88A51E308F0A25C93CF584F1 /* DiffPane */ = {
+			isa = PBXGroup;
+			children = (
+				92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */,
+				1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */,
+			);
+			path = DiffPane;
 			sourceTree = "<group>";
 		};
 		A05FDE83E479F0CC46756554 /* Frameworks */ = {
@@ -670,7 +690,9 @@
 				FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */,
 				A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */,
 				B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */,
+				149E80DD671127055EF67F7F /* DiffHTMLRendererTests.swift in Sources */,
 				F9EF0D090461E0518C6EB23F /* EditorServiceTests.swift in Sources */,
+				62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */,
 				0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */,
 				EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */,
 				B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */,
@@ -708,6 +730,8 @@
 				2D8754E0B3E9AD185D7EB6B0 /* ConfigParser.swift in Sources */,
 				2061570DEABB0E43847DBB5D /* ContentView.swift in Sources */,
 				5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */,
+				77FB1142F26F5C33539E3F23 /* DiffHTMLRenderer.swift in Sources */,
+				7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */,
 				A3B349AFCABD43FDC2F97A2A /* EditorService.swift in Sources */,
 				9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */,
 				2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */,

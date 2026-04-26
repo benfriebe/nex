@@ -27,6 +27,7 @@ struct GitService {
     var listWorktrees: @Sendable (_ repoPath: String) async throws -> [WorktreeInfo]
     var pruneWorktrees: @Sendable (_ repoPath: String) async throws -> Void
     var resolveRepoRoot: @Sendable (_ path: String) async -> RepoRootInfo?
+    var getDiff: @Sendable (_ repoPath: String, _ targetPath: String?) async throws -> String
 }
 
 // MARK: - Live Implementation
@@ -86,7 +87,14 @@ extension GitService {
             if lines.isEmpty {
                 return .clean
             }
-            return .dirty(changedFiles: lines.count)
+            // `--shortstat HEAD` covers both staged and unstaged so the line
+            // counts match what `--porcelain` already reports as dirty (which
+            // also includes staged). Plain `--shortstat` would miss staged
+            // edits and produce +0/-0 for stage-only repos. Errors swallow
+            // (e.g. fresh repo with no HEAD yet) so the dirty count survives.
+            let shortstat = (try? runGit(args: ["diff", "--shortstat", "HEAD"], at: path)) ?? ""
+            let (additions, deletions) = parseShortstat(shortstat)
+            return .dirty(changedFiles: lines.count, additions: additions, deletions: deletions)
         },
 
         createWorktree: { repoPath, worktreePath, branchName in
@@ -204,6 +212,14 @@ extension GitService {
                 worktreeRoot: (worktreeRoot as NSString).standardizingPath,
                 parentRepoRoot: (parentRepoRoot as NSString).standardizingPath
             )
+        },
+
+        getDiff: { repoPath, targetPath in
+            var args = ["diff", "--no-color"]
+            if let targetPath, !targetPath.isEmpty {
+                args += ["--", targetPath]
+            }
+            return try runGit(args: args, at: repoPath)
         }
     )
 }
@@ -237,6 +253,25 @@ enum GitServiceError: Error, Equatable {
     case commandFailed(command: String, exitCode: Int)
 }
 
+/// Parse a `git diff --shortstat` summary line into (additions, deletions).
+/// Examples:
+///   " 3 files changed, 27 insertions(+), 12 deletions(-)"
+///   " 1 file changed, 5 insertions(+)"
+///   " 1 file changed, 3 deletions(-)"
+///   "" (no diff)
+func parseShortstat(_ text: String) -> (additions: Int, deletions: Int) {
+    var additions = 0
+    var deletions = 0
+    for part in text.split(separator: ",") {
+        let trimmed = part.trimmingCharacters(in: .whitespaces)
+        let tokens = trimmed.split(separator: " ", maxSplits: 1)
+        guard let first = tokens.first, let count = Int(first) else { continue }
+        if trimmed.contains("insertion") { additions = count }
+        if trimmed.contains("deletion") { deletions = count }
+    }
+    return (additions, deletions)
+}
+
 // MARK: - TCA Dependency
 
 extension GitService: DependencyKey {
@@ -252,7 +287,8 @@ extension GitService: DependencyKey {
             removeWorktree: unimplemented("GitService.removeWorktree"),
             listWorktrees: unimplemented("GitService.listWorktrees"),
             pruneWorktrees: unimplemented("GitService.pruneWorktrees"),
-            resolveRepoRoot: { _ in nil }
+            resolveRepoRoot: { _ in nil },
+            getDiff: { _, _ in "" }
         )
     }
 }

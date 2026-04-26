@@ -15,6 +15,7 @@ struct PaneHeaderView: View {
     var onToggleZoom: (() -> Void)?
     var isEditing: Bool = false
     var onToggleEdit: (() -> Void)?
+    var onRefreshDiff: (() -> Void)?
     var onDragChanged: ((CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
     var otherWorkspaces: [(id: UUID, name: String)] = []
@@ -32,6 +33,11 @@ struct PaneHeaderView: View {
                     .frame(width: 10, height: 10)
             } else if pane.type == .scratchpad {
                 Image(systemName: "note.text")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+            } else if pane.type == .diff {
+                Image(systemName: "plusminus")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .frame(width: 10, height: 10)
@@ -107,6 +113,19 @@ struct PaneHeaderView: View {
                 .buttonStyle(.plain)
                 .opacity(0.6)
                 .help(isEditing ? "Preview (⌘E)" : "Edit (⌘E)")
+            }
+
+            if pane.type == .diff, let onRefreshDiff {
+                Button(action: onRefreshDiff) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(0.6)
+                .help("Refresh diff")
             }
 
             Button(action: onSplitHorizontal) {
@@ -213,6 +232,8 @@ struct PaneHeaderView: View {
     private func openInFinder() {
         if pane.type == .markdown, let filePath = pane.filePath {
             NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
+        } else if pane.type == .diff, let filePath = pane.filePath, !filePath.isEmpty {
+            NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
         } else {
             NSWorkspace.shared.open(URL(fileURLWithPath: pane.workingDirectory))
         }
@@ -229,6 +250,13 @@ struct PaneHeaderView: View {
         }
         if pane.type == .markdown, let filePath = pane.filePath {
             return (filePath as NSString).lastPathComponent
+        }
+        if pane.type == .diff {
+            let target = pane.filePath ?? ""
+            let scope = target.isEmpty
+                ? (pane.workingDirectory as NSString).lastPathComponent
+                : (target as NSString).lastPathComponent
+            return "diff: \(scope)"
         }
         let path = pane.title ?? pane.workingDirectory
         if let home = ProcessInfo.processInfo.environment["HOME"],
