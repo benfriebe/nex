@@ -1910,6 +1910,23 @@ struct AppReducer {
                     .run { _ in notifService.removeNotification(for: paneID) }
                 )
 
+            case .workspaces(.element(id: let wsID, action: .addRepoAssociation(let assoc))):
+                return .merge(
+                    .send(.persistState),
+                    .send(.startHeadWatcher(
+                        workspaceID: wsID,
+                        associationID: assoc.id,
+                        worktreePath: assoc.worktreePath
+                    ))
+                )
+
+            case .workspaces(.element(_, action: .removeRepoAssociation(let associationID))):
+                state.gitStatuses.removeValue(forKey: associationID)
+                return .merge(
+                    .send(.stopHeadWatcher(associationID: associationID)),
+                    .send(.persistState)
+                )
+
             case .workspaces(.element(id: let wsID, action: .paneDirectoryChanged(let paneID, let directory))):
                 return .merge(
                     .send(.persistState),
@@ -2753,10 +2770,20 @@ struct AppReducer {
             case .removeRepo(let id):
                 state.repoRegistry.remove(id: id)
                 // Cascade-remove associations from all workspaces
+                var removedAssociationIDs: [UUID] = []
                 for wsIndex in state.workspaces.indices {
+                    removedAssociationIDs.append(contentsOf: state.workspaces[wsIndex].repoAssociations
+                        .filter { $0.repoID == id }
+                        .map(\.id))
                     state.workspaces[wsIndex].repoAssociations.removeAll(where: { $0.repoID == id })
                 }
-                return .send(.persistState)
+                for associationID in removedAssociationIDs {
+                    state.gitStatuses.removeValue(forKey: associationID)
+                }
+                let stopEffects = removedAssociationIDs.map {
+                    Effect.send(Action.stopHeadWatcher(associationID: $0))
+                }
+                return .merge(stopEffects + [.send(.persistState)])
 
             case .renameRepo(let id, let name):
                 state.repoRegistry[id: id]?.name = name
