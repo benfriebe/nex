@@ -13,6 +13,7 @@
 //   nex pane move [left|right|up|down]
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 //   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
+//   nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
 //   nex pane id
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
@@ -84,6 +85,7 @@ func printUsage() {
       nex pane move [left|right|up|down]
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
       nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
+      nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
       nex pane id
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
@@ -376,7 +378,7 @@ func handleEvent(_ args: inout ArraySlice<String>) {
 
 func handlePane(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex pane split|create|close|name|send|move|list|id [...]\n", stderr)
+        fputs("Usage: nex pane split|create|close|name|send|move|list|capture|id [...]\n", stderr)
         exit(1)
     }
 
@@ -542,9 +544,12 @@ func handlePane(_ args: inout ArraySlice<String>) {
     case "list":
         handlePaneList(&args)
 
+    case "capture":
+        handlePaneCapture(&args)
+
     default:
         fputs("Unknown pane action: \(action)\n", stderr)
-        fputs("Valid actions: split, create, close, name, send, move, move-to-workspace, list, id\n", stderr)
+        fputs("Valid actions: split, create, close, name, send, move, move-to-workspace, list, capture, id\n", stderr)
         exit(1)
     }
 }
@@ -679,6 +684,75 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     }
     for r in rows {
         print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.workspace, widths[2]))  \(pad(r.status, widths[3]))  \(r.cwd)")
+    }
+}
+
+// MARK: - pane capture
+
+func handlePaneCapture(_ args: inout ArraySlice<String>) {
+    let target = parseFlag("--target", from: &args)
+    let workspace = parseFlag("--workspace", from: &args)
+    let linesArg = parseFlag("--lines", from: &args)
+    let scrollback = popSwitch("--scrollback", from: &args)
+
+    var lines: Int?
+    if let linesArg {
+        guard let parsed = Int(linesArg), parsed > 0 else {
+            fputs("nex pane capture: --lines must be a positive integer\n", stderr)
+            exit(1)
+        }
+        lines = parsed
+    }
+
+    var payload: [String: Any] = [
+        "command": "pane-capture"
+    ]
+    if let target {
+        payload["target"] = target
+        // Include the origin pane id when running inside a Nex pane so
+        // the reducer can prefer the caller's workspace for label
+        // resolution (breaks duplicate-label collisions across
+        // workspaces). Outside a Nex pane this is just absent.
+        if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+           !originPaneID.isEmpty {
+            payload["pane_id"] = originPaneID
+        }
+    } else {
+        payload["pane_id"] = requirePaneID()
+    }
+    if let workspace {
+        payload["workspace"] = workspace
+    }
+    if let lines {
+        payload["lines"] = lines
+    }
+    if scrollback {
+        payload["scrollback"] = true
+    }
+
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        fputs("nex pane capture: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !replyData.isEmpty else {
+        fputs("nex pane capture: no response from Nex (upgrade required? need v0.21+)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex pane capture: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex pane capture: \(msg)\n", stderr)
+        exit(1)
+    }
+
+    let text = (json["text"] as? String) ?? ""
+    // Write raw text without an added trailing newline — the captured
+    // output usually already ends in one. Use FileHandle so binary-safe.
+    if let data = text.data(using: .utf8) {
+        FileHandle.standardOutput.write(data)
     }
 }
 

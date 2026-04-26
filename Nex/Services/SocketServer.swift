@@ -46,13 +46,21 @@ enum SocketMessage: Equatable {
     /// Request/response — first command that returns data.
     /// `scope` may be `"current"` (require `paneID`) or `"all"` (default).
     case paneList(paneID: UUID?, workspace: String?, scope: String?)
+    /// Read another pane's terminal contents as plain text. `paneID`
+    /// comes from `NEX_PANE_ID` (no-flag form); `target` carries
+    /// `--target <name-or-uuid>`. `workspace` narrows label resolution.
+    /// `lines` caps the output to the last N lines after read; `scrollback`
+    /// extends the read region from the visible viewport to the full screen.
+    /// Replies with `{"ok":true,"text":"..."}` or `{"ok":false,"error":...}`
+    /// (request/response — see `replyCommandAllowlist`).
+    case paneCapture(paneID: UUID?, target: String?, workspace: String?, lines: Int?, includeScrollback: Bool)
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
 /// command outside this allowlist the server does not allocate a
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
-private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close"]
+private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close", "pane-capture"]
 
 /// Unix domain socket server that listens for structured JSON messages
 /// from the `nex` CLI tool. Agent hooks (Claude Code, Codex)
@@ -63,6 +71,7 @@ private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close"]
 /// {"command":"stop","pane_id":"<uuid>"}\n
 /// {"command":"error","pane_id":"<uuid>","message":"..."}\n
 /// {"command":"pane-split","pane_id":"<uuid>","direction":"horizontal"}\n
+/// {"command":"pane-capture","target":"worker","lines":50}\n
 /// {"command":"workspace-create","name":"Test","color":"blue"}\n
 /// {"command":"layout-cycle","pane_id":"<uuid>"}\n
 /// {"command":"layout-select","pane_id":"<uuid>","name":"tiled"}\n
@@ -439,6 +448,9 @@ final class SocketServer: Sendable {
         /// `nex diff` — repo root and optional file/directory scope.
         var repoPath: String?
         var targetPath: String?
+        /// `pane-capture` filters
+        var lines: Int?
+        var scrollback: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -452,6 +464,7 @@ final class SocketServer: Sendable {
             case reuse
             case repoPath = "repo_path"
             case targetPath = "target_path"
+            case lines, scrollback
         }
     }
 
@@ -534,6 +547,22 @@ final class SocketServer: Sendable {
             let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
             let scope = (wire.scope?.isEmpty == true) ? nil : wire.scope
             return (.paneList(paneID: paneID, workspace: workspace, scope: scope), wire)
+        }
+
+        if wire.command == "pane-capture" {
+            // Mirrors `pane-close`: at least one of `pane_id` / `target` must
+            // be present; the reducer resolves `target` to a concrete pane.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard paneID != nil || target != nil else { return nil }
+            return (.paneCapture(
+                paneID: paneID,
+                target: target,
+                workspace: workspace,
+                lines: wire.lines,
+                includeScrollback: wire.scrollback ?? false
+            ), wire)
         }
 
         guard let paneIDString = wire.paneID,

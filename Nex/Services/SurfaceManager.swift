@@ -113,6 +113,15 @@ final class SurfaceManager: Sendable {
         surface.sendEnterKey()
     }
 
+    /// Read the terminal contents of a pane as plain text. Returns nil if no
+    /// surface is registered for the pane (e.g. it was destroyed concurrently).
+    /// When `includeScrollback` is false, returns just the visible viewport.
+    @MainActor
+    func captureContents(paneID: UUID, includeScrollback: Bool) -> String? {
+        let surfaceView = lock.withLock { surfaces[paneID] }
+        return surfaceView?.ghosttySurface?.readText(includeScrollback: includeScrollback)
+    }
+
     /// Grant keyboard focus to a pane's surface, overriding whatever
     /// currently holds first responder (e.g. the command palette's
     /// TextField editor). Unlike `SurfaceContainerView`'s passive focus

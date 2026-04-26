@@ -122,4 +122,21 @@ final class GhosttySurface {
     func destroy() {
         ghostty_surface_free(surface)
     }
+
+    /// Read the terminal contents as plain text. When `includeScrollback` is false,
+    /// returns just the visible viewport; when true, returns the full screen including scrollback.
+    /// Returns nil if libghostty cannot read the region (e.g. surface torn down mid-read).
+    func readText(includeScrollback: Bool) -> String? {
+        let tag: ghostty_point_tag_e = includeScrollback ? GHOSTTY_POINT_SCREEN : GHOSTTY_POINT_VIEWPORT
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+            bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+            rectangle: false
+        )
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let ptr = text.text else { return "" }
+        return String(cString: ptr)
+    }
 }

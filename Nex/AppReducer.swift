@@ -754,6 +754,109 @@ struct AppReducer {
         reply.close()
     }
 
+    /// Result of `resolvePaneTarget`. The error case carries a
+    /// human-readable string safe to surface in a `{ok:false,error:...}` reply.
+    enum PaneTargetResolution {
+        case found(paneID: UUID, workspace: WorkspaceFeature.State)
+        case error(String)
+    }
+
+    /// Resolve a pane-targeting request (paneID + target + workspace
+    /// filter) to a concrete pane and its containing workspace.
+    ///
+    /// Precedence: when both `paneID` and `target` are supplied, `target`
+    /// wins (documented contract). Label lookups prefer the origin
+    /// workspace (the caller's own) before falling back to a
+    /// globally-unique match.
+    func resolvePaneTarget(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?
+    ) -> PaneTargetResolution {
+        // If `--workspace` was supplied, resolve it up front so an
+        // unknown workspace returns a specific error rather than
+        // cascading into "unresolved target".
+        let scopedWorkspace: WorkspaceFeature.State?
+        if let filter = workspaceFilter {
+            guard let ws = state.resolveWorkspace(filter) else {
+                return .error("workspace not found: \(filter)")
+            }
+            scopedWorkspace = ws
+        } else {
+            scopedWorkspace = nil
+        }
+
+        let resolvedID: UUID
+        if let target {
+            if let uuid = UUID(uuidString: target) {
+                if let scopedWorkspace {
+                    guard scopedWorkspace.panes[id: uuid] != nil else {
+                        return .error("no pane with UUID '\(target)' in workspace '\(scopedWorkspace.name)'")
+                    }
+                } else {
+                    guard state.workspaces.contains(where: { $0.panes[id: uuid] != nil }) else {
+                        return .error("no pane with UUID '\(target)'")
+                    }
+                }
+                resolvedID = uuid
+            } else {
+                // Label lookup. Workspace scope wins when supplied;
+                // otherwise prefer the origin workspace before falling
+                // back to a globally-unique match.
+                let candidates: [Pane]
+                if let scopedWorkspace {
+                    candidates = Array(scopedWorkspace.panes.filter { $0.label == target })
+                } else if let paneID,
+                          let origin = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
+                    let local = origin.panes.filter { $0.label == target }
+                    if local.count == 1 {
+                        candidates = Array(local)
+                    } else if local.isEmpty {
+                        candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
+                    } else {
+                        // Ambiguous within origin workspace — surface
+                        // rather than picking arbitrarily.
+                        candidates = Array(local)
+                    }
+                } else {
+                    candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
+                }
+
+                switch candidates.count {
+                case 0:
+                    let scope = scopedWorkspace.map { " in workspace '\($0.name)'" } ?? ""
+                    return .error("no pane with label '\(target)'\(scope)")
+                case 1:
+                    resolvedID = candidates[0].id
+                default:
+                    return .error(
+                        "label '\(target)' is ambiguous (\(candidates.count) matches); " +
+                            "pass --workspace <name-or-id> to disambiguate"
+                    )
+                }
+            }
+        } else if let paneID {
+            guard state.workspaces.contains(where: { $0.panes[id: paneID] != nil }) else {
+                return .error("no pane with UUID '\(paneID.uuidString)'")
+            }
+            resolvedID = paneID
+        } else {
+            // The wire decoder rejects this case, so this is defensive.
+            return .error("missing pane_id and target")
+        }
+
+        guard let workspace = state.workspaces.first(where: { $0.panes[id: resolvedID] != nil }) else {
+            return .error("pane not found: \(resolvedID.uuidString)")
+        }
+
+        if let scopedWorkspace, scopedWorkspace.id != workspace.id {
+            return .error("pane '\(resolvedID.uuidString)' is not in workspace '\(scopedWorkspace.name)'")
+        }
+
+        return .found(paneID: resolvedID, workspace: workspace)
+    }
+
     /// Resolve + dispatch a `pane-close` request. `paneID` comes from
     /// `NEX_PANE_ID` (no-flag form); `target` is the `--target
     /// <name-or-uuid>` value; `workspaceFilter` optionally narrows
@@ -769,100 +872,16 @@ struct AppReducer {
         workspaceFilter: String?,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        func fail(_ error: String) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
             reply?.send(["ok": false, "error": error])
             reply?.close()
             return .none
-        }
-
-        // If `--workspace` was supplied, resolve it up front so an
-        // unknown workspace returns a specific error rather than
-        // cascading into "unresolved target".
-        let scopedWorkspace: WorkspaceFeature.State?
-        if let filter = workspaceFilter {
-            guard let ws = state.resolveWorkspace(filter) else {
-                return fail("workspace not found: \(filter)")
-            }
-            scopedWorkspace = ws
-        } else {
-            scopedWorkspace = nil
-        }
-
-        // Resolve the pane to close. `target` wins over `paneID` when
-        // both are present (documented precedence).
-        let resolvedID: UUID
-        if let target {
-            if let uuid = UUID(uuidString: target) {
-                if let scopedWorkspace {
-                    guard scopedWorkspace.panes[id: uuid] != nil else {
-                        return fail("no pane with UUID '\(target)' in workspace '\(scopedWorkspace.name)'")
-                    }
-                } else {
-                    guard state.workspaces.contains(where: { $0.panes[id: uuid] != nil }) else {
-                        return fail("no pane with UUID '\(target)'")
-                    }
-                }
-                resolvedID = uuid
-            } else {
-                // Label lookup. Workspace scope wins when supplied;
-                // otherwise prefer the origin workspace (caller's own)
-                // before falling back to a globally-unique match.
-                let candidates: [Pane]
-                if let scopedWorkspace {
-                    candidates = Array(scopedWorkspace.panes.filter { $0.label == target })
-                } else if let paneID,
-                          let origin = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
-                    let local = origin.panes.filter { $0.label == target }
-                    if local.count == 1 {
-                        candidates = Array(local)
-                    } else if local.isEmpty {
-                        candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
-                    } else {
-                        // Ambiguous within origin workspace — extremely
-                        // rare (label uniqueness isn't enforced) but
-                        // surface rather than closing an arbitrary one.
-                        candidates = Array(local)
-                    }
-                } else {
-                    candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
-                }
-
-                switch candidates.count {
-                case 0:
-                    let scope = scopedWorkspace.map { " in workspace '\($0.name)'" } ?? ""
-                    return fail("no pane with label '\(target)'\(scope)")
-                case 1:
-                    resolvedID = candidates[0].id
-                default:
-                    return fail(
-                        "label '\(target)' is ambiguous (\(candidates.count) matches); " +
-                            "pass --workspace <name-or-id> to disambiguate"
-                    )
-                }
-            }
-        } else if let paneID {
-            guard state.workspaces.contains(where: { $0.panes[id: paneID] != nil }) else {
-                return fail("no pane with UUID '\(paneID.uuidString)'")
-            }
-            resolvedID = paneID
-        } else {
-            // The wire decoder rejects this case, so it should never
-            // reach here in production — defensive fail keeps the
-            // contract honest.
-            return fail("missing pane_id and target")
-        }
-
-        guard let workspace = state.workspaces.first(where: { $0.panes[id: resolvedID] != nil }) else {
-            // Same defensive branch — resolution above already
-            // verified the pane exists.
-            return fail("pane not found: \(resolvedID.uuidString)")
-        }
-
-        // If `--workspace` was supplied, confirm the resolved pane
-        // actually lives there. UUID resolution already enforces this;
-        // the guard covers future paths that might bypass the check.
-        if let scopedWorkspace, scopedWorkspace.id != workspace.id {
-            return fail("pane '\(resolvedID.uuidString)' is not in workspace '\(scopedWorkspace.name)'")
         }
 
         var payload: [String: Any] = [
@@ -877,6 +896,89 @@ struct AppReducer {
         reply?.send(payload)
         reply?.close()
         return .send(.workspaces(.element(id: workspace.id, action: .closePane(resolvedID))))
+    }
+
+    /// Resolve + dispatch a `pane-capture` request. Reads the terminal
+    /// contents of the resolved pane and replies with a `{ok,text,...}`
+    /// payload. Rejects non-terminal panes (markdown / scratchpad / diff)
+    /// upfront with a typed error.
+    func handlePaneCapture(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        lines: Int?,
+        includeScrollback: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ error: String) -> Effect<Action> {
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        // The CLI rejects `--lines 0` upfront, but raw socket/TCP
+        // clients can send any int — guard here so invalid input
+        // gets a structured error rather than a silent empty success.
+        if let lines, lines <= 0 {
+            return fail("lines must be a positive integer (got \(lines))")
+        }
+
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            return fail(error)
+        }
+
+        guard let pane = workspace.panes[id: resolvedID] else {
+            return fail("pane not found: \(resolvedID.uuidString)")
+        }
+        guard pane.type == .shell else {
+            return fail("pane is not a terminal (type: \(pane.type.rawValue))")
+        }
+
+        let label = pane.label
+        let workspaceName = workspace.name
+        let workspaceID = workspace.id
+        let mgr = surfaceManager
+        return .run { _ in
+            let text = await mgr.captureContents(paneID: resolvedID, includeScrollback: includeScrollback)
+            guard let text else {
+                reply?.send(["ok": false, "error": "pane closed during capture"])
+                reply?.close()
+                return
+            }
+            let trimmed = lines.map { Self.tailLines(text, $0) } ?? text
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "workspace_name": workspaceName,
+                "text": trimmed
+            ]
+            if let label {
+                payload["label"] = label
+            }
+            reply?.send(payload)
+            reply?.close()
+        }
+    }
+
+    /// Returns the last `n` lines of `text`, joined by `\n`. Preserves
+    /// a real trailing newline if present (terminal viewport reads
+    /// typically end with `\n`); detected via `hasSuffix` so empty
+    /// input collapses to `""` rather than `"\n"`.
+    static func tailLines(_ text: String, _ n: Int) -> String {
+        guard n > 0, !text.isEmpty else { return "" }
+        let hasTrailingNewline = text.hasSuffix("\n")
+        let body = hasTrailingNewline ? String(text.dropLast()) : text
+        let parts = body.split(separator: "\n", omittingEmptySubsequences: false)
+        let tailed = parts.suffix(n).joined(separator: "\n")
+        return hasTrailingNewline ? tailed + "\n" : tailed
     }
 
     var body: some ReducerOf<Self> {
@@ -2490,6 +2592,17 @@ struct AppReducer {
                         reply: reply
                     )
                     return .none
+
+                case .paneCapture(let paneID, let target, let workspaceFilter, let lines, let includeScrollback):
+                    return handlePaneCapture(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        lines: lines,
+                        includeScrollback: includeScrollback,
+                        reply: reply
+                    )
                 }
 
             // MARK: - Cross-Workspace Surface Notifications
