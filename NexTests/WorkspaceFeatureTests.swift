@@ -125,6 +125,222 @@ struct WorkspaceFeatureTests {
         }
     }
 
+    // MARK: - Focus history (issue #56)
+
+    /// Reproduces the exact scenario from issue #56: A and B in a
+    /// split, focus walks A → B → A → B, close B → focus returns
+    /// to A even though tree-traversal order would have picked A
+    /// anyway here (the chain test below pins the non-trivial case).
+    @Test func closePaneRestoresPreviousFocus() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneA = workspace.panes.first!.id
+        let paneB = UUID()
+        workspace.panes.append(Pane(id: paneB))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(paneA),
+            second: .leaf(paneB)
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.focusPane(paneB))
+        await store.send(.focusPane(paneA))
+        await store.send(.focusPane(paneB))
+
+        #expect(store.state.focusedPaneID == paneB)
+        // History: A pushed, then B pushed (when re-focusing A),
+        // then A pushed again (when focusing B). Dedup means
+        // history is [B, A] at this point.
+        #expect(store.state.focusHistory == [paneB, paneA])
+
+        await store.send(.closePane(paneB))
+        #expect(store.state.focusedPaneID == paneA)
+    }
+
+    /// Three panes in focus order A → B → C. Closing C returns
+    /// to B; closing B returns to A. Without the focus stack, the
+    /// fallback would be `allPaneIDs.first` which depends on tree
+    /// shape, not user history.
+    @Test func closePaneFollowsHistoryChain() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneA = workspace.panes.first!.id
+        let paneB = UUID()
+        let paneC = UUID()
+        workspace.panes.append(Pane(id: paneB))
+        workspace.panes.append(Pane(id: paneC))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(paneA),
+            second: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(paneB),
+                second: .leaf(paneC)
+            )
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.focusPane(paneB))
+        await store.send(.focusPane(paneC))
+
+        await store.send(.closePane(paneC))
+        #expect(store.state.focusedPaneID == paneB)
+
+        await store.send(.closePane(paneB))
+        #expect(store.state.focusedPaneID == paneA)
+    }
+
+    /// When `focusHistory` is empty (e.g., focus was set directly
+    /// without going through the reducer), close falls back to the
+    /// existing `allPaneIDs.first` traversal. Pins the contract.
+    @Test func closePaneFallsBackToFirstWhenHistoryEmpty() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneA = workspace.panes.first!.id
+        let paneB = UUID()
+        let paneC = UUID()
+        workspace.panes.append(Pane(id: paneB))
+        workspace.panes.append(Pane(id: paneC))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(paneA),
+            second: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(paneB),
+                second: .leaf(paneC)
+            )
+        )
+        // Direct assignment, no setFocus — history stays empty.
+        workspace.focusedPaneID = paneB
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closePane(paneB))
+        // Fallback: layout traversal yields paneA before paneC.
+        #expect(store.state.focusedPaneID == paneA)
+        #expect(store.state.focusHistory.isEmpty)
+    }
+
+    /// Closing a non-focused pane removes it from the history so
+    /// later pops can't return it. Without the scrub, `popFocus...`
+    /// would still skip it (the pane is gone), but we'd waste a
+    /// slot and obscure intent.
+    @Test func closeNonFocusedPaneRemovesItFromHistory() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneA = workspace.panes.first!.id
+        let paneB = UUID()
+        let paneC = UUID()
+        workspace.panes.append(Pane(id: paneB))
+        workspace.panes.append(Pane(id: paneC))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(paneA),
+            second: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(paneB),
+                second: .leaf(paneC)
+            )
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Focus order A → B → C. History at end: [A, B], focused on C.
+        await store.send(.focusPane(paneB))
+        await store.send(.focusPane(paneC))
+        #expect(store.state.focusHistory == [paneA, paneB])
+
+        // Close B (not focused). B leaves history.
+        await store.send(.closePane(paneB))
+        #expect(store.state.focusedPaneID == paneC)
+        #expect(store.state.focusHistory == [paneA])
+
+        // Close C → A, not B (B was scrubbed).
+        await store.send(.closePane(paneC))
+        #expect(store.state.focusedPaneID == paneA)
+    }
+
+    /// `paneProcessTerminated` for a shell pane forwards to
+    /// `closePane`, so the focus stack should drive its refocus too.
+    @Test func paneProcessTerminatedRestoresPreviousFocus() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneA = workspace.panes.first!.id
+        let paneB = UUID()
+        workspace.panes.append(Pane(id: paneB))
+        workspace.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(paneA),
+            second: .leaf(paneB)
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.focusPane(paneB))
+        await store.send(.paneProcessTerminated(paneID: paneB))
+        await store.receive(\.closePane)
+
+        #expect(store.state.focusedPaneID == paneA)
+    }
+
+    /// A workspace restored from persistence starts with an empty
+    /// `focusHistory` (it's per-session, not persisted). Closing
+    /// the restored pane should fall back to layout traversal
+    /// without crashing or chasing stale UUIDs.
+    @Test func restoredWorkspaceStartsWithEmptyHistory() async {
+        let paneA = UUID()
+        let paneB = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: UUID(),
+            name: "Restored",
+            slug: "restored",
+            color: .blue,
+            panes: [Pane(id: paneA), Pane(id: paneB)],
+            layout: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(paneA),
+                second: .leaf(paneB)
+            ),
+            focusedPaneID: paneB,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 1000)
+        )
+        #expect(workspace.focusHistory.isEmpty)
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closePane(paneB))
+        #expect(store.state.focusedPaneID == paneA)
+    }
+
     @Test func focusNextCycles() async {
         var workspace = WorkspaceFeature.State(name: "Test")
         let firstID = workspace.panes.first!.id
@@ -146,10 +362,12 @@ struct WorkspaceFeatureTests {
 
         await store.send(.focusNextPane) { state in
             state.focusedPaneID = secondID
+            state.focusHistory = [firstID]
         }
 
         await store.send(.focusNextPane) { state in
             state.focusedPaneID = firstID
+            state.focusHistory = [firstID, secondID]
         }
     }
 
@@ -599,6 +817,7 @@ struct WorkspaceFeatureTests {
                 second: .leaf(newPaneID)
             )
             state.focusedPaneID = newPaneID
+            state.focusHistory = [originalPaneID]
         }
     }
 

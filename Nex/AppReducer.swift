@@ -2256,7 +2256,7 @@ struct AppReducer {
                     let sourcePaneID = Self.resolveTarget(target, from: paneID, state: state) ?? paneID
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: sourcePaneID] != nil })
                     else { return .none }
-                    state.workspaces[id: workspace.id]?.focusedPaneID = sourcePaneID
+                    state.workspaces[id: workspace.id]?.setFocus(sourcePaneID)
                     if let path {
                         return .send(.workspaces(.element(
                             id: workspace.id,
@@ -2272,7 +2272,7 @@ struct AppReducer {
                     let sourcePaneID = Self.resolveTarget(target, from: paneID, state: state) ?? paneID
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: sourcePaneID] != nil })
                     else { return .none }
-                    state.workspaces[id: workspace.id]?.focusedPaneID = sourcePaneID
+                    state.workspaces[id: workspace.id]?.setFocus(sourcePaneID)
                     if let path {
                         return .send(.workspaces(.element(
                             id: workspace.id, action: .splitPaneAtPath(path, label: name)
@@ -2313,7 +2313,7 @@ struct AppReducer {
                 case .paneMove(let paneID, let direction):
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
                     else { return .none }
-                    state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                    state.workspaces[id: workspace.id]?.setFocus(paneID)
                     return .send(.workspaces(.element(
                         id: workspace.id, action: .movePaneInDirection(direction)
                     )))
@@ -2351,8 +2351,15 @@ struct AppReducer {
                     state.workspaces[id: sourceWSID]?.layout = newSourceLayout
                     state.workspaces[id: sourceWSID]?.currentLayoutIndex = nil
 
+                    // Source-side close-like refocus: walk the per-session
+                    // focus stack first so the user lands on whatever they
+                    // had focused before the moved pane, not the layout's
+                    // first leaf. Mirrors the WorkspaceFeature.closePane
+                    // contract.
+                    state.workspaces[id: sourceWSID]?.focusHistory.removeAll { $0 == paneID }
                     if state.workspaces[id: sourceWSID]?.focusedPaneID == paneID {
-                        state.workspaces[id: sourceWSID]?.focusedPaneID = newSourceLayout.allPaneIDs.first
+                        let popped = state.workspaces[id: sourceWSID]?.popFocusFromHistory(excluding: paneID) ?? nil
+                        state.workspaces[id: sourceWSID]?.focusedPaneID = popped ?? newSourceLayout.allPaneIDs.first
                     }
                     if state.workspaces[id: sourceWSID]?.searchingPaneID == paneID {
                         state.workspaces[id: sourceWSID]?.searchingPaneID = nil
@@ -2383,7 +2390,7 @@ struct AppReducer {
                         }
                     }
 
-                    state.workspaces[id: targetWSID]?.focusedPaneID = paneID
+                    state.workspaces[id: targetWSID]?.setFocus(paneID)
                     state.workspaces[id: targetWSID]?.currentLayoutIndex = nil
                     state.activeWorkspaceID = targetWSID
 
@@ -2424,7 +2431,7 @@ struct AppReducer {
                 case .openFile(let path, let paneID, let reuse):
                     if let paneID,
                        let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
-                        state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                        state.workspaces[id: workspace.id]?.setFocus(paneID)
                         return .send(.workspaces(.element(
                             id: workspace.id,
                             action: .openMarkdownFile(filePath: path, reusePaneID: reuse ? paneID : nil)
@@ -2439,7 +2446,7 @@ struct AppReducer {
                 case .openDiff(let repoPath, let targetPath, let paneID):
                     if let paneID,
                        let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
-                        state.workspaces[id: workspace.id]?.focusedPaneID = paneID
+                        state.workspaces[id: workspace.id]?.setFocus(paneID)
                         return .send(.workspaces(.element(
                             id: workspace.id,
                             action: .openDiffPane(

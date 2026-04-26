@@ -908,6 +908,61 @@ struct AppReducerTests {
         }
     }
 
+    /// When moving the source workspace's currently-focused pane out,
+    /// the source's new focus should walk its focus history (mirroring
+    /// closePane), not fall back to the layout's first leaf.
+    @Test func movePaneToWorkspaceUsesSourceFocusHistory() async {
+        let extraPaneID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "Source", paneID: Self.paneID1)
+        ws1.panes.append(Pane(id: Self.paneID2))
+        ws1.panes.append(Pane(id: extraPaneID))
+        // Layout: paneID1 | paneID2 | extraPaneID. allPaneIDs.first == paneID1.
+        ws1.layout = .split(
+            .horizontal, ratio: 0.5,
+            first: .leaf(Self.paneID1),
+            second: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(Self.paneID2),
+                second: .leaf(extraPaneID)
+            )
+        )
+        // Focus walked paneID1 -> paneID2 -> extraPaneID, so stack
+        // contains [paneID1, paneID2] with extraPaneID currently focused.
+        ws1.focusedPaneID = extraPaneID
+        ws1.focusHistory = [Self.paneID1, Self.paneID2]
+
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "Target", paneID: UUID())
+
+        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneMoveToWorkspace(
+            paneID: extraPaneID, toWorkspace: "Target", create: false
+        ), reply: nil)) { state in
+            // Without focus history, source would fall back to paneID1
+            // (layout's first leaf). With history, it pops paneID2.
+            #expect(state.workspaces[id: Self.wsID1]?.focusedPaneID == Self.paneID2)
+            #expect(state.workspaces[id: Self.wsID1]?.focusHistory == [Self.paneID1])
+        }
+    }
+
+    /// Moving a pane into a target workspace should push the target's
+    /// previous focus onto its history, so closing the moved pane in
+    /// the target later returns focus to the prior target pane.
+    @Test func movePaneToWorkspacePushesTargetFocusHistory() async {
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "Source", paneID: Self.paneID1)
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "Target", paneID: Self.paneID2)
+
+        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.socketMessage(.paneMoveToWorkspace(
+            paneID: Self.paneID1, toWorkspace: "Target", create: false
+        ), reply: nil)) { state in
+            #expect(state.workspaces[id: Self.wsID2]?.focusedPaneID == Self.paneID1)
+            // The target's prior focus (paneID2) is on the history stack.
+            #expect(state.workspaces[id: Self.wsID2]?.focusHistory == [Self.paneID2])
+        }
+    }
+
     // MARK: - refreshGitStatus
 
     @Test func refreshGitStatusQueriesAssociations() async {
