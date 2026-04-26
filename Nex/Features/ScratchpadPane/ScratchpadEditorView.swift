@@ -85,6 +85,11 @@ struct ScratchpadEditorView: NSViewRepresentable {
         if isFocused, !context.coordinator.lastIsFocused, !sidebarTextEditingActive {
             claimFirstResponder(textView)
         }
+        // Explicit handoff on true→false so the next pane's focus claim isn't
+        // blocked by SurfaceContainerView's `firstResponder is NSText` guard.
+        if !isFocused, context.coordinator.lastIsFocused {
+            releaseFirstResponderIfHeld(textView)
+        }
         context.coordinator.lastIsFocused = isFocused
     }
 
@@ -94,6 +99,11 @@ struct ScratchpadEditorView: NSViewRepresentable {
             if window.firstResponder === textView { return }
             window.makeFirstResponder(textView)
         }
+    }
+
+    private func releaseFirstResponderIfHeld(_ textView: NSTextView) {
+        guard let window = textView.window, window.firstResponder === textView else { return }
+        window.makeFirstResponder(nil)
     }
 
     // MARK: - Coordinator
