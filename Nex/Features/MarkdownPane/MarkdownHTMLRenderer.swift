@@ -6,7 +6,20 @@ import Markdown
 struct MarkdownHTMLRenderer: MarkupVisitor {
     typealias Result = String
 
+    private static let urlDetector: NSDataDetector? =
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Only auto-link matches whose source text starts with one of these
+    /// schemes. NSDataDetector also matches schemeless domains like
+    /// `example.com` and bare emails like `foo@example.com`, which we
+    /// deliberately leave as plain text — terminal-style "make pasted
+    /// URLs clickable" behaviour, not GitHub-style fuzzy linkification.
+    private static let allowedSchemePrefixes: [String] = [
+        "http://", "https://", "ftp://", "file://", "mailto:"
+    ]
+
     private var isInTableHead = false
+    private var skipAutolinkDepth = 0
 
     mutating func defaultVisit(_ markup: any Markup) -> String {
         markup.children.map { visit($0) }.joined()
@@ -27,7 +40,10 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
     }
 
     mutating func visitText(_ text: Text) -> String {
-        escapeHTML(text.string)
+        if skipAutolinkDepth > 0 {
+            return escapeHTML(text.string)
+        }
+        return autolinkText(text.string)
     }
 
     mutating func visitEmphasis(_ emphasis: Emphasis) -> String {
@@ -78,13 +94,17 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
     }
 
     mutating func visitLink(_ link: Link) -> String {
+        skipAutolinkDepth += 1
         let content = link.children.map { visit($0) }.joined()
+        skipAutolinkDepth -= 1
         let dest = escapeHTML(link.destination ?? "")
         return "<a href=\"\(dest)\">\(content)</a>"
     }
 
     mutating func visitImage(_ image: Image) -> String {
+        skipAutolinkDepth += 1
         let alt = image.children.map { visit($0) }.joined()
+        skipAutolinkDepth -= 1
         let src = escapeHTML(image.source ?? "")
         let titleAttr = image.title.map { " title=\"\(escapeHTML($0))\"" } ?? ""
         return "<img src=\"\(src)\" alt=\"\(alt)\"\(titleAttr)>"
@@ -152,6 +172,44 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// Wrap any URLs detected in plain text with `<a>` tags so bare links
+    /// (e.g. `https://example.com`) are clickable, matching terminal behaviour.
+    /// swift-markdown only auto-detects `<>`-wrapped URLs and `[text](url)`
+    /// syntax — bare URLs in text reach us as plain `Text` nodes.
+    private func autolinkText(_ text: String) -> String {
+        guard let detector = Self.urlDetector else {
+            return escapeHTML(text)
+        }
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let matches = detector.matches(in: text, options: [], range: fullRange)
+        guard !matches.isEmpty else {
+            return escapeHTML(text)
+        }
+        var result = ""
+        var cursor = 0
+        for match in matches {
+            let urlText = nsText.substring(with: match.range)
+            let lower = urlText.lowercased()
+            let hasAllowedScheme = Self.allowedSchemePrefixes.contains(where: lower.hasPrefix)
+            // Skip schemeless domains and bare emails — let them render as
+            // plain text so they fall through into the surrounding escape.
+            guard hasAllowedScheme else { continue }
+            if match.range.location > cursor {
+                let preLen = match.range.location - cursor
+                result += escapeHTML(nsText.substring(with: NSRange(location: cursor, length: preLen)))
+            }
+            let href = match.url?.absoluteString ?? urlText
+            result += "<a href=\"\(escapeHTML(href))\">\(escapeHTML(urlText))</a>"
+            cursor = match.range.location + match.range.length
+        }
+        if cursor < nsText.length {
+            let tailLen = nsText.length - cursor
+            result += escapeHTML(nsText.substring(with: NSRange(location: cursor, length: tailLen)))
+        }
+        return result
     }
 }
 

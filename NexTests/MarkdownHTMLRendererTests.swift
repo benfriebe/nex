@@ -26,6 +26,110 @@ struct MarkdownHTMLRendererTests {
         #expect(html.contains("@claude"))
     }
 
+    // MARK: - Bare URL autolinking
+
+    @Test func bareHTTPSURLAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("See https://example.com for details.")
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test func bareURLAtStartOfLineAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("https://example.com is the home page")
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test func bareURLAtEndOfLineAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("Visit us at https://example.com")
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test func multipleBareURLsAllAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("See https://a.com and https://b.com today.")
+        #expect(html.contains("<a href=\"https://a.com\">https://a.com</a>"))
+        #expect(html.contains("<a href=\"https://b.com\">https://b.com</a>"))
+    }
+
+    @Test func bareURLInListItemAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("- See https://example.com for details")
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test func explicitMarkdownLinkNotDoubleWrapped() {
+        // [text](url) must produce exactly one <a> tag — no nested anchor from autolinking the visible text.
+        let html = MarkdownRenderer.renderToHTML("[https://example.com](https://example.com)")
+        let anchorCount = html.components(separatedBy: "<a ").count - 1
+        #expect(anchorCount == 1)
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test func bareURLInImageAltNotAutolinked() {
+        // The alt text becomes an HTML attribute; injecting <a> there would break the tag.
+        let html = MarkdownRenderer.renderToHTML("![see https://example.com](pic.png)")
+        #expect(!html.contains("alt=\"see <a"))
+    }
+
+    @Test func plainTextWithoutURLUnchanged() {
+        let html = MarkdownRenderer.renderToHTML("Just some plain text with no links.")
+        #expect(!html.contains("<a "))
+        #expect(html.contains("<p>Just some plain text with no links.</p>"))
+    }
+
+    @Test func trailingPunctuationNotPartOfURL() {
+        // NSDataDetector strips trailing sentence punctuation so the period stays as text.
+        let html = MarkdownRenderer.renderToHTML("Visit https://example.com.")
+        #expect(html.contains("<a href=\"https://example.com\">https://example.com</a>."))
+    }
+
+    @Test func bareURLInsideInlineCodeNotAutolinked() {
+        // Inline code goes through a different path and must remain literal.
+        let html = MarkdownRenderer.renderToHTML("Use `https://example.com` literally.")
+        #expect(html.contains("<code>https://example.com</code>"))
+    }
+
+    @Test func schemelessDomainNotAutolinked() {
+        // NSDataDetector matches `example.com` as a link, but we deliberately
+        // require an explicit scheme so prose mentions of a domain stay text.
+        let html = MarkdownRenderer.renderToHTML("Visit example.com today.")
+        #expect(!html.contains("<a "))
+        #expect(html.contains("Visit example.com today."))
+    }
+
+    @Test func schemelessWWWDomainNotAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("Try www.example.com.")
+        #expect(!html.contains("<a "))
+        #expect(html.contains("Try www.example.com."))
+    }
+
+    @Test func bareEmailNotAutolinked() {
+        // NSDataDetector turns `foo@example.com` into a `mailto:` URL, but
+        // the source text has no scheme so it should render as plain text.
+        let html = MarkdownRenderer.renderToHTML("Email foo@example.com please.")
+        #expect(!html.contains("<a "))
+        #expect(html.contains("Email foo@example.com please."))
+    }
+
+    @Test func explicitMailtoSchemeAutolinked() {
+        // `mailto:` prefix is in the allowed list, so it links.
+        let html = MarkdownRenderer.renderToHTML("Reach mailto:foo@example.com.")
+        #expect(html.contains("<a href=\"mailto:foo@example.com\">mailto:foo@example.com</a>"))
+    }
+
+    @Test func ftpAndFileSchemesAutolinked() {
+        let html = MarkdownRenderer.renderToHTML("ftp://x.example/y and file:///etc/hosts")
+        #expect(html.contains("<a href=\"ftp://x.example/y\">ftp://x.example/y</a>"))
+        #expect(html.contains("<a href=\"file:///etc/hosts\">file:///etc/hosts</a>"))
+    }
+
+    @Test func mixedSchemedAndBareURLsAutolinkOnlyTheSchemed() {
+        let html = MarkdownRenderer.renderToHTML("See example.com and https://anthropic.com.")
+        // Schemed URL becomes a link; schemeless one stays text.
+        #expect(html.contains("<a href=\"https://anthropic.com\">https://anthropic.com</a>"))
+        #expect(html.contains("example.com and "))
+        // Exactly one anchor.
+        let anchorCount = html.components(separatedBy: "<a ").count - 1
+        #expect(anchorCount == 1)
+    }
+
     // MARK: - Basic rendering sanity
 
     @Test func headingRendered() {
