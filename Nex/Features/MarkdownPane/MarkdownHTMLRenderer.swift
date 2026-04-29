@@ -87,8 +87,10 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
     mutating func visitListItem(_ item: ListItem) -> String {
         let content = item.children.map { visit($0) }.joined()
         if let checkbox = item.checkbox {
-            let checked = checkbox == .checked ? " checked disabled" : " disabled"
-            return "<li><input type=\"checkbox\"\(checked)> \(content)</li>\n"
+            let attrs = checkbox == .checked ? " checked disabled" : " disabled"
+            return "<li class=\"task-list-item\">"
+                + "<input type=\"checkbox\" class=\"task-list-item-checkbox\"\(attrs)> "
+                + "\(content)</li>\n"
         }
         return "<li>\(content)</li>\n"
     }
@@ -346,7 +348,37 @@ enum MarkdownRenderer {
         .dark th { background: #161b22; }
         ul, ol { padding-left: 2em; margin: 0.5em 0; }
         li { margin: 0.25em 0; }
-        li > input[type="checkbox"] { margin-right: 0.5em; }
+        li.task-list-item { list-style-type: none; }
+        /* -1.4em pulls the checkbox into the bullet column. Assumes
+           `ul, ol { padding-left: 2em }` above. Native disabled checkboxes
+           render very faintly, so we draw our own GitHub-style box. */
+        li.task-list-item > input.task-list-item-checkbox {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #8c959f;
+            border-radius: 3px;
+            background: transparent;
+            margin: 0 0.4em 0.15em -1.4em;
+            vertical-align: middle;
+            cursor: default;
+        }
+        .dark li.task-list-item > input.task-list-item-checkbox {
+            border-color: #7d8590;
+        }
+        li.task-list-item > input.task-list-item-checkbox:checked {
+            background-color: #1f6feb;
+            border-color: #1f6feb;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8l3 3 7-7' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: 12px 12px;
+        }
+        /* Inline the leading paragraph so it sits beside the checkbox.
+           Vertical margins drop on inline elements, so trailing block <p>s
+           in loose lists still get their own top margin. */
+        li.task-list-item > p:first-of-type { display: inline; }
         hr {
             border: none;
             border-top: 1px solid #d1d9e0;

@@ -13,6 +13,7 @@
 		0A339E290783C7347081E4FC /* GlobalHotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8340B6640D25908803B93C2A /* GlobalHotkeyService.swift */; };
 		0A3E7A2B0CB52F2FE791A2B5 /* GroupCustomEmojiSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD30BE0FDF3CC57813A5DB46 /* GroupCustomEmojiSheet.swift */; };
 		0CB9F718A5EF25AF73DED570 /* WorkspaceGroupRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */; };
+		0D23E37D86270E1BAADFF549 /* MarkdownCheckboxRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */; };
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
@@ -179,6 +180,7 @@
 		3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroup.swift; sourceTree = "<group>"; };
 		42A24C1FEC6EA31096603326 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
+		4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCheckboxRenderingTests.swift; sourceTree = "<group>"; };
 		4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
 		4F0D3AB3067CDBF5A490F532 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
 		523DE37561222E411737C3F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -359,6 +361,7 @@
 				B822ABF12B071E574E089BB4 /* GroupIconTests.swift */,
 				EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */,
 				5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */,
+				4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */,
 				200EB2588E40ABB7C51E24E6 /* MarkdownHTMLRendererTests.swift */,
 				8344DA5EFC15BF047C2003A4 /* PaneCaptureReplyTests.swift */,
 				F5CE8D708EEECA4A82BE0AC1 /* PaneCloseReplyTests.swift */,
@@ -706,6 +709,7 @@
 				0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */,
 				EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */,
 				B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */,
+				0D23E37D86270E1BAADFF549 /* MarkdownCheckboxRenderingTests.swift in Sources */,
 				EA22F9720B68648A78D237E3 /* MarkdownHTMLRendererTests.swift in Sources */,
 				7CFCDB77693B32481C402E8E /* PaneCaptureReplyTests.swift in Sources */,
 				3EB758164265D71D08B0156C /* PaneCloseReplyTests.swift in Sources */,

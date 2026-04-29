@@ -26,6 +26,8 @@ Package.resolved
 
 # Claude
 .claude/
+.nex-tasks/
+.nex-results/
 
 # Python
 __pycache__/
