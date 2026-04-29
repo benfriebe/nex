@@ -81,6 +81,8 @@ struct PaneCaptureReplyTests {
     // MARK: - Resolution errors (synchronous)
 
     @Test func captureMarkdownPaneFailsWithTypeError() async {
+        // `--workspace alpha` provides explicit scope so resolution
+        // succeeds and the type-check fires.
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
             panes: [Pane(id: Self.pane1, label: "notes", type: .markdown)]
@@ -89,7 +91,7 @@ struct PaneCaptureReplyTests {
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .paneCapture(paneID: nil, target: "notes", workspace: nil, lines: nil, includeScrollback: false),
+            .paneCapture(paneID: nil, target: "notes", workspace: "alpha", lines: nil, includeScrollback: false),
             reply: makeCaptureHandle(sink)
         ))
 
@@ -102,6 +104,7 @@ struct PaneCaptureReplyTests {
     }
 
     @Test func captureUnknownLabelFails() async {
+        // Origin pane in alpha; label doesn't exist there.
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
             panes: [Pane(id: Self.pane1, label: "worker")]
@@ -110,7 +113,7 @@ struct PaneCaptureReplyTests {
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .paneCapture(paneID: nil, target: "ghost", workspace: nil, lines: nil, includeScrollback: false),
+            .paneCapture(paneID: Self.pane1, target: "ghost", workspace: nil, lines: nil, includeScrollback: false),
             reply: makeCaptureHandle(sink)
         ))
 
@@ -119,15 +122,37 @@ struct PaneCaptureReplyTests {
     }
 
     @Test func captureAmbiguousLabelFailsWithAdvice() async {
-        let ws1 = makeWorkspace(
+        // Two panes with the same label inside the `--workspace` scope
+        // — the resolver can't pick one, so it should advise the user
+        // to disambiguate.
+        let ws = makeWorkspace(
+            id: Self.ws1ID, name: "alpha",
+            panes: [
+                Pane(id: Self.pane1, label: "worker"),
+                Pane(id: Self.pane2, label: "worker")
+            ]
+        )
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.ws1ID)
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .paneCapture(paneID: nil, target: "worker", workspace: "alpha", lines: nil, includeScrollback: false),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        let error = sink.payloads[0]["error"] as? String ?? ""
+        #expect(error.contains("ambiguous"))
+    }
+
+    @Test func captureByLabelOutsideNexRequiresWorkspaceFlag() async {
+        // No origin paneID and no --workspace → bare label resolution
+        // is rejected.
+        let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
             panes: [Pane(id: Self.pane1, label: "worker")]
         )
-        let ws2 = makeWorkspace(
-            id: Self.ws2ID, name: "beta",
-            panes: [Pane(id: Self.pane2, label: "worker")]
-        )
-        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.ws1ID)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.ws1ID)
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
@@ -136,9 +161,7 @@ struct PaneCaptureReplyTests {
         ))
 
         #expect(sink.payloads[0]["ok"] as? Bool == false)
-        let error = sink.payloads[0]["error"] as? String ?? ""
-        #expect(error.contains("ambiguous"))
-        #expect(error.contains("--workspace"))
+        #expect((sink.payloads[0]["error"] as? String)?.contains("--workspace") == true)
     }
 
     @Test func captureRejectsNonPositiveLines() async {

@@ -82,6 +82,8 @@ struct PaneCloseReplyTests {
     // MARK: - Success paths
 
     @Test func closeByTargetLabelRepliesOkAndClosesPane() async {
+        // Caller is inside `pane2` (origin) and closes `pane1` by
+        // label. Origin scope is implicit via paneID.
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
             panes: [Pane(id: Self.pane1, label: "worker"), Pane(id: Self.pane2, label: "other")]
@@ -90,7 +92,7 @@ struct PaneCloseReplyTests {
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .paneClose(paneID: nil, target: "worker", workspace: nil),
+            .paneClose(paneID: Self.pane2, target: "worker", workspace: nil),
             reply: makeCaptureHandle(sink)
         ))
         await store.receive(.workspaces(.element(
@@ -104,6 +106,28 @@ struct PaneCloseReplyTests {
         #expect(sink.payloads[0]["workspace_id"] as? String == Self.ws1ID.uuidString)
         #expect(sink.payloads[0]["workspace_name"] as? String == "alpha")
         #expect(sink.payloads[0]["label"] as? String == "worker")
+    }
+
+    @Test func closeByLabelOutsideNexRequiresWorkspaceFlag() async {
+        // `paneID == nil` simulates a caller without NEX_PANE_ID set.
+        // A bare label has no implicit scope and no global fallback —
+        // the request must specify `--workspace`.
+        let ws = makeWorkspace(
+            id: Self.ws1ID, name: "alpha",
+            panes: [Pane(id: Self.pane1, label: "worker")]
+        )
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.ws1ID)
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .paneClose(paneID: nil, target: "worker", workspace: nil),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        #expect((sink.payloads[0]["error"] as? String)?.contains("--workspace") == true)
+        // Pane untouched.
+        #expect(store.state.workspaces[id: Self.ws1ID]?.panes[id: Self.pane1] != nil)
     }
 
     @Test func closeByPaneIDRepliesOk() async {
@@ -226,22 +250,22 @@ struct PaneCloseReplyTests {
     // MARK: - Error paths
 
     @Test func closeByAmbiguousLabelFailsWithAdvice() async {
-        // Two workspaces with the same label, no origin pane — the
-        // error should mention `--workspace` so users know how to
-        // disambiguate.
-        let ws1 = makeWorkspace(
+        // Two panes with the same label in the origin workspace —
+        // origin scope can't disambiguate, so the error should mention
+        // `--workspace`.
+        let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
-            panes: [Pane(id: Self.pane1, label: "worker")]
+            panes: [
+                Pane(id: Self.pane1, label: "worker"),
+                Pane(id: Self.pane2, label: "worker"),
+                Pane(id: Self.pane3)
+            ]
         )
-        let ws2 = makeWorkspace(
-            id: Self.ws2ID, name: "beta",
-            panes: [Pane(id: Self.pane2, label: "worker")]
-        )
-        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.ws1ID)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.ws1ID)
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .paneClose(paneID: nil, target: "worker", workspace: nil),
+            .paneClose(paneID: Self.pane3, target: "worker", workspace: nil),
             reply: makeCaptureHandle(sink)
         ))
 
@@ -249,12 +273,13 @@ struct PaneCloseReplyTests {
         let error = sink.payloads[0]["error"] as? String ?? ""
         #expect(error.contains("ambiguous"))
         #expect(error.contains("--workspace"))
-        // Both panes still there.
+        // Both labelled panes still there.
         #expect(store.state.workspaces[id: Self.ws1ID]?.panes[id: Self.pane1] != nil)
-        #expect(store.state.workspaces[id: Self.ws2ID]?.panes[id: Self.pane2] != nil)
+        #expect(store.state.workspaces[id: Self.ws1ID]?.panes[id: Self.pane2] != nil)
     }
 
     @Test func closeByUnknownLabelFails() async {
+        // Origin pane in alpha; label doesn't exist there.
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
             panes: [Pane(id: Self.pane1, label: "worker")]
@@ -263,7 +288,7 @@ struct PaneCloseReplyTests {
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .paneClose(paneID: nil, target: "ghost", workspace: nil),
+            .paneClose(paneID: Self.pane1, target: "ghost", workspace: nil),
             reply: makeCaptureHandle(sink)
         ))
 

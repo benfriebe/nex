@@ -1637,9 +1637,9 @@ struct AppReducerTests {
 
     // MARK: - paneClose --target
 
-    /// `--target <label>` with no `pane_id` (CLI invoked outside Nex):
-    /// label resolves to the unique matching pane globally, and the
-    /// reducer routes the close to that pane's workspace.
+    /// `--target <label>` outside a Nex pane (no `pane_id`) requires
+    /// `--workspace` for explicit scope (issue #92). Without it the
+    /// reducer rejects the request rather than guessing.
     @Test func closePaneByTargetLabelWithoutOrigin() async {
         var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
         ws.panes[id: Self.paneID1]?.label = "worker"
@@ -1651,7 +1651,10 @@ struct AppReducerTests {
 
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "worker", workspace: nil), reply: nil))
+        await store.send(.socketMessage(
+            .paneClose(paneID: nil, target: "worker", workspace: "WS"),
+            reply: nil
+        ))
         await store.receive(.workspaces(.element(
             id: Self.wsID1, action: .closePane(Self.paneID1)
         ))) { state in
@@ -1660,10 +1663,9 @@ struct AppReducerTests {
         }
     }
 
-    /// Label that matches panes in multiple workspaces with no origin
-    /// is ambiguous — `resolveTarget` returns nil so the reducer
-    /// no-ops rather than closing an arbitrary (state-order
-    /// dependent) pane.
+    /// Bare label outside a Nex pane is rejected by the reducer.
+    /// Reply is nil (legacy fire-and-forget) so the close is silently
+    /// dropped — no `.closePane` is dispatched.
     @Test func closePaneByTargetAmbiguousLabelNoOps() async {
         var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
         ws1.panes[id: Self.paneID1]?.label = "worker"
@@ -1683,7 +1685,10 @@ struct AppReducerTests {
         let ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "missing", workspace: nil), reply: nil))
+        await store.send(.socketMessage(
+            .paneClose(paneID: Self.paneID1, target: "missing", workspace: nil),
+            reply: nil
+        ))
         #expect(store.state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1] != nil)
     }
 
@@ -1724,7 +1729,10 @@ struct AppReducerTests {
         ws.panes[id: Self.paneID1]?.label = "only"
         let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
 
-        await store.send(.socketMessage(.paneClose(paneID: nil, target: "only", workspace: nil), reply: nil))
+        await store.send(.socketMessage(
+            .paneClose(paneID: nil, target: "only", workspace: "Solo"),
+            reply: nil
+        ))
         await store.receive(.workspaces(.element(
             id: Self.wsID1, action: .closePane(Self.paneID1)
         ))) { state in

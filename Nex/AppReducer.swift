@@ -813,30 +813,15 @@ struct AppReducer {
                 }
                 resolvedID = uuid
             } else {
-                // Label lookup. Workspace scope wins when supplied.
-                // Otherwise, when the caller is inside a Nex pane
-                // (`paneID` set) we restrict the search to the caller's
-                // own workspace — the global fallback would silently
-                // route commands across workspaces, which is the bug
-                // tracked in #92. Callers that genuinely want to
-                // address a pane elsewhere must pass `--workspace`.
-                // Outside-Nex callers (`paneID == nil`) keep the global
-                // lookup since they have no implicit workspace context.
-                // A `paneID` from the wire that doesn't exist in any
-                // workspace means the sender's NEX_PANE_ID is stale
-                // (origin pane was closed but the env var lives on in
-                // the surviving shell). Falling through to the global
-                // lookup here would re-introduce the silent
-                // cross-workspace routing the fix is meant to prevent,
-                // so surface it explicitly.
-                if let paneID, scopedWorkspace == nil,
-                   !state.workspaces.contains(where: { $0.panes[id: paneID] != nil }) {
-                    return .error(
-                        "origin pane '\(paneID.uuidString)' no longer exists; " +
-                            "pass --workspace <name-or-id> to address a pane in another workspace"
-                    )
-                }
-
+                // Label lookup. We require an explicit workspace
+                // scope: either `--workspace <name-or-id>` (highest
+                // precedence) or an origin pane via `NEX_PANE_ID`
+                // (implicit — the caller's own workspace). A bare
+                // label with neither would have to fall back to a
+                // global match, which is the silent-routing class of
+                // bug tracked in #92 — refuse rather than guess.
+                // UUID targets are unaffected since UUIDs are unique
+                // and always resolve globally.
                 let candidates: [Pane]
                 let originWorkspaceName: String?
                 if let scopedWorkspace {
@@ -846,9 +831,20 @@ struct AppReducer {
                           let origin = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
                     candidates = Array(origin.panes.filter { $0.label == target })
                     originWorkspaceName = origin.name
+                } else if let paneID {
+                    // `paneID` came from the wire but no workspace
+                    // contains it — the sender's NEX_PANE_ID is stale
+                    // (origin pane was closed but the env var lives
+                    // on). Treat the caller as if they had no implicit
+                    // workspace context.
+                    return .error(
+                        "origin pane '\(paneID.uuidString)' no longer exists; " +
+                            "pass --workspace <name-or-id> to address a pane in another workspace"
+                    )
                 } else {
-                    candidates = state.workspaces.flatMap(\.panes).filter { $0.label == target }
-                    originWorkspaceName = nil
+                    return .error(
+                        "label '\(target)' requires --workspace <name-or-id> when called from outside a Nex pane"
+                    )
                 }
 
                 switch candidates.count {
