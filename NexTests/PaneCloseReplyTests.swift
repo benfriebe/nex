@@ -289,6 +289,34 @@ struct PaneCloseReplyTests {
         #expect((sink.payloads[0]["error"] as? String)?.contains("UUID") == true)
     }
 
+    @Test func closeFromOriginInOtherWorkspaceFailsWithAdvice() async {
+        // Issue #92 contract: when an origin pane is set, label lookup
+        // is scoped to the origin's workspace by default. A label that
+        // exists only in another workspace must NOT silently route.
+        let ws1 = makeWorkspace(
+            id: Self.ws1ID, name: "alpha",
+            panes: [Pane(id: Self.pane1)]
+        )
+        let ws2 = makeWorkspace(
+            id: Self.ws2ID, name: "beta",
+            panes: [Pane(id: Self.pane2, label: "worker")]
+        )
+        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.ws1ID)
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .paneClose(paneID: Self.pane1, target: "worker", workspace: nil),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        let error = sink.payloads[0]["error"] as? String ?? ""
+        #expect(error.contains("alpha"))
+        #expect(error.contains("--workspace"))
+        // Beta's pane is untouched.
+        #expect(store.state.workspaces[id: Self.ws2ID]?.panes[id: Self.pane2] != nil)
+    }
+
     @Test func closeWithPaneIDOnlyUnknownFails() async {
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",

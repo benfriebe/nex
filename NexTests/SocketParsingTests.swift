@@ -212,7 +212,25 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .paneSend(paneID: Self.paneUUID, target: "build", text: "make test"))
+        #expect(result?.0 == .paneSend(paneID: Self.paneUUID, target: "build", text: "make test", workspace: nil))
+    }
+
+    @Test func parsePaneSendWithWorkspace() {
+        let data = jsonData("""
+        {"command":"pane-send","pane_id":"\(Self.paneIDString)","target":"worker","text":"echo","workspace":"beta"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .paneSend(paneID: Self.paneUUID, target: "worker", text: "echo", workspace: "beta"))
+    }
+
+    @Test func parsePaneSendEmptyWorkspaceNormalisedToNil() {
+        let data = jsonData("""
+        {"command":"pane-send","pane_id":"\(Self.paneIDString)","target":"worker","text":"echo","workspace":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .paneSend(paneID: Self.paneUUID, target: "worker", text: "echo", workspace: nil))
     }
 
     @Test func parsePaneSendMissingTarget() {

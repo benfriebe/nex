@@ -24,7 +24,13 @@ enum SocketMessage: Equatable {
     /// (request/response — see `replyCommandAllowlist`).
     case paneClose(paneID: UUID?, target: String?, workspace: String?)
     case paneName(paneID: UUID, name: String)
-    case paneSend(paneID: UUID, target: String, text: String)
+    /// Send keystrokes to a pane resolved by `target` (label or UUID).
+    /// Label lookups default to the sender's own workspace; pass
+    /// `workspace` (name-or-UUID) to address a pane in another workspace
+    /// or to disambiguate when the same label is reused across
+    /// workspaces. The reducer replies with a structured success/error
+    /// payload (request/response — see `replyCommandAllowlist`).
+    case paneSend(paneID: UUID, target: String, text: String, workspace: String?)
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
@@ -60,7 +66,7 @@ enum SocketMessage: Equatable {
 /// command outside this allowlist the server does not allocate a
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
-private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close", "pane-capture"]
+private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close", "pane-capture", "pane-send"]
 
 /// Unix domain socket server that listens for structured JSON messages
 /// from the `nex` CLI tool. Agent hooks (Claude Code, Codex)
@@ -596,7 +602,8 @@ final class SocketServer: Sendable {
         case "pane-send":
             guard let target = wire.target, !target.isEmpty,
                   let text = wire.text, !text.isEmpty else { return nil }
-            socketMessage = .paneSend(paneID: paneID, target: target, text: text)
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            socketMessage = .paneSend(paneID: paneID, target: target, text: text, workspace: workspace)
         case "pane-move":
             guard let dirString = wire.direction,
                   let dir = PaneLayout.Direction(rawValue: dirString) else { return nil }

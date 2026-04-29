@@ -165,6 +165,33 @@ struct PaneCaptureReplyTests {
         }
     }
 
+    @Test func captureFromOriginInOtherWorkspaceFailsWithAdvice() async {
+        // Issue #92 contract: with an origin pane set, label lookup is
+        // scoped to the origin's workspace. A label that exists only
+        // in another workspace must fail with --workspace advice
+        // rather than silently capturing the other workspace's pane.
+        let ws1 = makeWorkspace(
+            id: Self.ws1ID, name: "alpha",
+            panes: [Pane(id: Self.pane1)]
+        )
+        let ws2 = makeWorkspace(
+            id: Self.ws2ID, name: "beta",
+            panes: [Pane(id: Self.pane2, label: "worker")]
+        )
+        let store = makeStore(workspaces: [ws1, ws2], activeWorkspaceID: Self.ws1ID)
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .paneCapture(paneID: Self.pane1, target: "worker", workspace: nil, lines: nil, includeScrollback: false),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        let error = sink.payloads[0]["error"] as? String ?? ""
+        #expect(error.contains("alpha"))
+        #expect(error.contains("--workspace"))
+    }
+
     @Test func captureUnknownWorkspaceFails() async {
         let ws = makeWorkspace(
             id: Self.ws1ID, name: "alpha",
