@@ -433,6 +433,15 @@ func handlePane(_ args: inout ArraySlice<String>) {
             // `--target` addresses a pane by label or UUID, so the
             // caller doesn't need to be running inside a Nex pane.
             payload["target"] = target
+            // When running inside a Nex pane, also forward the origin
+            // pane id so the reducer can scope label resolution to the
+            // caller's own workspace (issue #92). Without this the
+            // server falls back to a global lookup and silently
+            // routes to a label match in another workspace.
+            if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+               !originPaneID.isEmpty {
+                payload["pane_id"] = originPaneID
+            }
         } else {
             payload["pane_id"] = requirePaneID()
         }
