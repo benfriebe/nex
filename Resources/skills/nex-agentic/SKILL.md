@@ -60,12 +60,12 @@ Once chosen, the worker-start command shape is:
 
 ```bash
 # Headless
-nex pane send --to worker-1 claude -p --permission-mode <mode> "<prompt>"
+nex pane send --target worker-1 claude -p --permission-mode <mode> "<prompt>"
 
 # Interactive
-nex pane send --to worker-1 claude --permission-mode <mode>
+nex pane send --target worker-1 claude --permission-mode <mode>
 sleep 2
-nex pane send --to worker-1 "<prompt>"
+nex pane send --target worker-1 "<prompt>"
 ```
 
 ## Nex CLI Reference
@@ -88,7 +88,10 @@ nex pane close
 nex pane name <label>
 
 # Send text to another pane (typed into its PTY + Enter)
-nex pane send --to <label-or-uuid> <command...>
+# Label resolution is scoped to the sender's own workspace by default
+# (issue #92). Pass --workspace <name-or-id> to target another workspace
+# or to disambiguate a label collision; UUID targets are always global.
+nex pane send --target <label-or-uuid> [--workspace <name-or-uuid>] <command...>
 
 # List panes (only command that returns data — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
@@ -101,9 +104,10 @@ nex pane id
 
 `pane list` is the only Nex command that returns data. Use it whenever a
 coordinator needs to know what panes actually exist right now — panes can
-be closed by the user, crash, or be moved between workspaces, and
-`pane send` silently no-ops against a missing target. Always check the
-list before assuming a worker is still alive.
+be closed by the user, crash, or be moved between workspaces. `pane send`
+exits non-zero with a structured error on a missing/ambiguous target
+(issue #92), but checking `pane list` first lets a coordinator skip
+sends to dead workers and surface a clearer message.
 
 ```bash
 # Human-readable (default)
@@ -167,8 +171,12 @@ nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow
 
 ### Key Behaviors
 
-- **Target resolution** for `pane send`: tries UUID first, then label in same
-  workspace, then label across all workspaces.
+- **Target resolution** for `pane send` / `pane close` / `pane capture`:
+  UUIDs are matched globally. Labels are scoped to the sender's own
+  workspace (via `NEX_PANE_ID`) unless `--workspace <name-or-id>` is
+  passed; a bare label without either explicit or implicit scope is
+  rejected (issue #92), so coordinators can't silently route into the
+  wrong workspace.
 - **`--name` flag**: names the new pane at creation time so it can be
   immediately targeted by `pane send`.
 - **`--target` flag**: on `split`/`create`, specifies which existing pane to
@@ -232,11 +240,11 @@ each surface to initialize before sending commands.
 ```bash
 # Send Claude commands to each worker
 sleep 2
-nex pane send --to worker-1 claude -p "Read .nex-tasks/worker-1.md and complete the task described. Write your results to .nex-results/worker-1.md"
+nex pane send --target worker-1 claude -p "Read .nex-tasks/worker-1.md and complete the task described. Write your results to .nex-results/worker-1.md"
 sleep 1
-nex pane send --to worker-2 claude -p "Read .nex-tasks/worker-2.md and complete the task described. Write your results to .nex-results/worker-2.md"
+nex pane send --target worker-2 claude -p "Read .nex-tasks/worker-2.md and complete the task described. Write your results to .nex-results/worker-2.md"
 sleep 1
-nex pane send --to worker-3 claude -p "Read .nex-tasks/worker-3.md and complete the task described. Write your results to .nex-results/worker-3.md"
+nex pane send --target worker-3 claude -p "Read .nex-tasks/worker-3.md and complete the task described. Write your results to .nex-results/worker-3.md"
 ```
 
 #### Step 5: Poll for results
@@ -271,9 +279,9 @@ Then read each result file and synthesize.
 
 ```bash
 # Close worker panes when done
-nex pane send --to worker-1 exit
-nex pane send --to worker-2 exit
-nex pane send --to worker-3 exit
+nex pane send --target worker-1 exit
+nex pane send --target worker-2 exit
+nex pane send --target worker-3 exit
 ```
 
 ### Pattern 2: Direct Messaging Between Panes
@@ -285,12 +293,12 @@ files. Best for short, one-off commands.
 # From coordinator, run a build in a named pane
 nex pane split --name build
 sleep 2
-nex pane send --to build make build
+nex pane send --target build make build
 
 # Run tests in another pane
 nex pane split --name test
 sleep 2
-nex pane send --to test make test
+nex pane send --target test make test
 ```
 
 ### Pattern 3: Interactive Agent Swarm
@@ -305,13 +313,13 @@ nex pane split --name coder --direction horizontal
 sleep 2
 
 # Start Claude in each with role context
-nex pane send --to reviewer claude
+nex pane send --target reviewer claude
 sleep 2
-nex pane send --to reviewer "You are a code reviewer. Review any code written to .nex-results/code.md and write your review to .nex-results/review.md"
+nex pane send --target reviewer "You are a code reviewer. Review any code written to .nex-results/code.md and write your review to .nex-results/review.md"
 
-nex pane send --to coder claude
+nex pane send --target coder claude
 sleep 2
-nex pane send --to coder "You are a coder. Write code for the task in .nex-tasks/feature.md and save it to .nex-results/code.md"
+nex pane send --target coder "You are a coder. Write code for the task in .nex-tasks/feature.md and save it to .nex-results/code.md"
 ```
 
 ## Task File Format
@@ -419,7 +427,7 @@ done
 
 # Start agents
 for worker in "${WORKERS[@]}"; do
-  nex pane send --to "$worker" "cd $PROJECT_DIR && claude -p 'Read $TASK_DIR/$worker.md and complete the task. Write results to $RESULT_DIR/$worker.md'"
+  nex pane send --target "$worker" "cd $PROJECT_DIR && claude -p 'Read $TASK_DIR/$worker.md and complete the task. Write results to $RESULT_DIR/$worker.md'"
   sleep 1
 done
 
