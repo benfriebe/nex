@@ -541,6 +541,16 @@ func handlePane(_ args: inout ArraySlice<String>) {
             fputs("nex pane send: \(msg)\n", stderr)
             exit(1)
         }
+        // Success ack — print the resolved pane id (and label/workspace
+        // when known) so humans see clear confirmation and scripts can
+        // chain on the id. Mirrors the `pane close` ack format.
+        let resolvedID = (json["pane_id"] as? String) ?? "?"
+        let resolvedLabel = json["label"] as? String
+        let resolvedWS = json["workspace_name"] as? String
+        var ack = "sent to \(resolvedID)"
+        if let resolvedLabel { ack += " (\(resolvedLabel))" }
+        if let resolvedWS { ack += " in workspace \(resolvedWS)" }
+        print(ack)
 
     case "move":
         let paneID = requirePaneID()
