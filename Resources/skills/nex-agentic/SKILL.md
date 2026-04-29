@@ -49,8 +49,17 @@ Otherwise ask via `AskUserQuestion` — do not assume defaults.
      babysit each worker)
    - `acceptEdits` — auto-accept file edits, still prompt on Bash/other
    - `plan` — planning only, no writes
+   - `auto` — auto-approves all tool calls with background safety
+     checks. Covers Bash/Edit/Read/web, unlike `acceptEdits` which is
+     file-writes only. Good middle ground for trusted fan-outs that
+     still want some guardrails
    - `bypassPermissions` (aka `--dangerously-skip-permissions`) — full
-     autonomy, no prompts. Common for trusted fan-outs in worktrees.
+     autonomy, no prompts, no checks. Common for trusted fan-outs in
+     worktrees or sandboxed VMs
+   - `dontAsk` — auto-denies any tool not pre-approved via
+     `/permissions` or an allowlist. Strictest mode for unattended
+     orchestration with an explicit whitelist; non-whitelisted calls
+     silently fail
 
 Ask both in a single `AskUserQuestion` call with two questions. Record
 the answers and reuse them for every worker spawn in the session unless
