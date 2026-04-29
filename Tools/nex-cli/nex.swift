@@ -9,7 +9,7 @@
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
 //   nex pane name <name>
-//   nex pane send --to <name-or-uuid> [--workspace <name-or-uuid>] <command...>
+//   nex pane send --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
 //   nex pane move [left|right|up|down]
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 //   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
@@ -81,7 +81,7 @@ func printUsage() {
       nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex pane name <name>
-      nex pane send --to <name-or-uuid> [--workspace <name-or-uuid>] <command...>
+      nex pane send --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
       nex pane move [left|right|up|down]
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
       nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
@@ -496,8 +496,12 @@ func handlePane(_ args: inout ArraySlice<String>) {
 
     case "send":
         let paneID = requirePaneID()
-        guard let target = parseFlag("--to", from: &args) else {
-            fputs("Usage: nex pane send --to <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
+        // `--target` matches the rest of the pane subcommands; `--to`
+        // is the original flag and remains supported as a quiet alias
+        // for any scripts that already use it.
+        let target = parseFlag("--target", from: &args) ?? parseFlag("--to", from: &args)
+        guard let target else {
+            fputs("Usage: nex pane send --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
             exit(1)
         }
         // `--workspace <name-or-id>` scopes label resolution. Without
@@ -508,7 +512,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
 
         let text = args.joined(separator: " ")
         guard !text.isEmpty else {
-            fputs("Usage: nex pane send --to <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
+            fputs("Usage: nex pane send --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
             exit(1)
         }
 
