@@ -124,6 +124,88 @@ struct WorkspaceListView: View {
                     filteredListBody
                 }
             }
+            // Bulk-action dialogs and sheets are attached at the body
+            // level (not inside `mainListBody`) so they remain mounted
+            // while the filter is active. Otherwise a "Delete N
+            // Workspaces..." invoked from a filtered-list context menu
+            // would set the confirmation state but have no presenter,
+            // leaving a stale destructive prompt that fires the
+            // moment the filter is cleared.
+            .confirmationDialog(
+                bulkDeleteTitle,
+                isPresented: Binding(
+                    get: { store.bulkDeleteConfirmationIDs != nil },
+                    set: { if !$0 { store.send(.cancelBulkDelete) } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { store.send(.confirmBulkDelete) }
+                Button("Cancel", role: .cancel) { store.send(.cancelBulkDelete) }
+            } message: {
+                Text("This cannot be undone. Panes and surfaces in these workspaces will be closed.")
+            }
+            .confirmationDialog(
+                groupDeleteTitle,
+                isPresented: Binding(
+                    get: { store.groupDeleteConfirmation != nil },
+                    set: { if !$0 { store.send(.cancelGroupDelete) } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let confirmation = store.groupDeleteConfirmation {
+                    if confirmation.workspaceCount == 0 {
+                        Button("Delete Group", role: .destructive) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
+                        }
+                    } else {
+                        Button("Move Workspaces to Top Level", role: .destructive) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
+                        }
+                        Button(
+                            "Delete Group and \(confirmation.workspaceCount) Workspace\(confirmation.workspaceCount == 1 ? "" : "s")",
+                            role: .destructive
+                        ) {
+                            store.send(.deleteGroup(id: confirmation.groupID, cascade: true))
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { store.send(.cancelGroupDelete) }
+                }
+            } message: {
+                if let confirmation = store.groupDeleteConfirmation, confirmation.workspaceCount > 0 {
+                    Text("Choose whether to also delete the \(confirmation.workspaceCount) workspace\(confirmation.workspaceCount == 1 ? "" : "s") inside this group. Moving them to the top level is the safer option.")
+                } else {
+                    Text("This group is empty and will be removed.")
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.groupBulkCreatePrompt != nil },
+                set: { if !$0 { store.send(.cancelBulkCreateGroup) } }
+            )) {
+                if let prompt = store.groupBulkCreatePrompt {
+                    NewGroupSheet(
+                        workspaceCount: prompt.workspaceIDs.count,
+                        defaultName: defaultGroupName(existing: store.groups),
+                        onCreate: { name, color in
+                            store.send(.confirmBulkCreateGroup(name: name, color: color))
+                        },
+                        onCancel: { store.send(.cancelBulkCreateGroup) }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.groupCustomEmojiPrompt != nil },
+                set: { if !$0 { store.send(.cancelGroupCustomEmoji) } }
+            )) {
+                if let prompt = store.groupCustomEmojiPrompt {
+                    GroupCustomEmojiSheet(
+                        groupName: prompt.groupName,
+                        onConfirm: { emoji in
+                            store.send(.confirmGroupCustomEmoji(emoji))
+                        },
+                        onCancel: { store.send(.cancelGroupCustomEmoji) }
+                    )
+                }
+            }
         }
     }
 
@@ -232,83 +314,6 @@ struct WorkspaceListView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .padding(12)
-            }
-            .confirmationDialog(
-                bulkDeleteTitle,
-                isPresented: Binding(
-                    get: { store.bulkDeleteConfirmationIDs != nil },
-                    set: { if !$0 { store.send(.cancelBulkDelete) } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) { store.send(.confirmBulkDelete) }
-                Button("Cancel", role: .cancel) { store.send(.cancelBulkDelete) }
-            } message: {
-                Text("This cannot be undone. Panes and surfaces in these workspaces will be closed.")
-            }
-            .confirmationDialog(
-                groupDeleteTitle,
-                isPresented: Binding(
-                    get: { store.groupDeleteConfirmation != nil },
-                    set: { if !$0 { store.send(.cancelGroupDelete) } }
-                ),
-                titleVisibility: .visible
-            ) {
-                if let confirmation = store.groupDeleteConfirmation {
-                    if confirmation.workspaceCount == 0 {
-                        // Empty group: no workspaces to move or cascade.
-                        // A single "Delete Group" is the only meaningful action.
-                        Button("Delete Group", role: .destructive) {
-                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
-                        }
-                    } else {
-                        Button("Move Workspaces to Top Level", role: .destructive) {
-                            store.send(.deleteGroup(id: confirmation.groupID, cascade: false))
-                        }
-                        Button(
-                            "Delete Group and \(confirmation.workspaceCount) Workspace\(confirmation.workspaceCount == 1 ? "" : "s")",
-                            role: .destructive
-                        ) {
-                            store.send(.deleteGroup(id: confirmation.groupID, cascade: true))
-                        }
-                    }
-                    Button("Cancel", role: .cancel) { store.send(.cancelGroupDelete) }
-                }
-            } message: {
-                if let confirmation = store.groupDeleteConfirmation, confirmation.workspaceCount > 0 {
-                    Text("Choose whether to also delete the \(confirmation.workspaceCount) workspace\(confirmation.workspaceCount == 1 ? "" : "s") inside this group. Moving them to the top level is the safer option.")
-                } else {
-                    Text("This group is empty and will be removed.")
-                }
-            }
-            .sheet(isPresented: Binding(
-                get: { store.groupBulkCreatePrompt != nil },
-                set: { if !$0 { store.send(.cancelBulkCreateGroup) } }
-            )) {
-                if let prompt = store.groupBulkCreatePrompt {
-                    NewGroupSheet(
-                        workspaceCount: prompt.workspaceIDs.count,
-                        defaultName: defaultGroupName(existing: store.groups),
-                        onCreate: { name, color in
-                            store.send(.confirmBulkCreateGroup(name: name, color: color))
-                        },
-                        onCancel: { store.send(.cancelBulkCreateGroup) }
-                    )
-                }
-            }
-            .sheet(isPresented: Binding(
-                get: { store.groupCustomEmojiPrompt != nil },
-                set: { if !$0 { store.send(.cancelGroupCustomEmoji) } }
-            )) {
-                if let prompt = store.groupCustomEmojiPrompt {
-                    GroupCustomEmojiSheet(
-                        groupName: prompt.groupName,
-                        onConfirm: { emoji in
-                            store.send(.confirmGroupCustomEmoji(emoji))
-                        },
-                        onCancel: { store.send(.cancelGroupCustomEmoji) }
-                    )
-                }
             }
         }
     }
@@ -662,10 +667,18 @@ struct WorkspaceListView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 let modifiers = NSEvent.modifierFlags
-                if modifiers.contains(.command) {
+                if modifiers.contains(.command) || modifiers.contains(.shift) {
+                    // In the filtered view, both Cmd+click and
+                    // Shift+click toggle the row's selection. The
+                    // unfiltered list uses Shift for range select, but
+                    // the underlying `.rangeSelectWorkspace` reducer
+                    // builds its range from `state.visibleWorkspaceOrder`
+                    // — which skips collapsed groups and includes
+                    // workspaces not in the filter. Reusing it here
+                    // would select rows the user can't see and miss
+                    // rows in collapsed groups. Treat Shift as toggle
+                    // until a filter-aware range action exists.
                     store.send(.toggleWorkspaceSelection(workspaceID))
-                } else if modifiers.contains(.shift) {
-                    store.send(.rangeSelectWorkspace(workspaceID))
                 } else {
                     store.send(.clearWorkspaceSelection)
                     store.send(.setActiveWorkspace(workspaceID))
