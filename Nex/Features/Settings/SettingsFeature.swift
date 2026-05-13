@@ -33,6 +33,7 @@ struct SettingsFeature {
         var expandGroupOnWorkspaceDrop: Bool = true
         var newGroupPlacement: SidebarPlacement = .endOfList
         var newWorkspacePlacement: SidebarPlacement = .endOfList
+        var confirmQuitWhenActive: Bool = true
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -61,6 +62,8 @@ struct SettingsFeature {
         case setExpandGroupOnWorkspaceDrop(Bool)
         case setNewGroupPlacement(SidebarPlacement)
         case setNewWorkspacePlacement(SidebarPlacement)
+        case setConfirmQuitWhenActive(Bool)
+        case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
     }
@@ -79,6 +82,7 @@ struct SettingsFeature {
     static let defaultsKeyExpandGroupOnWorkspaceDrop = "settings.expandGroupOnWorkspaceDrop"
     static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
+    static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -109,6 +113,9 @@ struct SettingsFeature {
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyNewWorkspacePlacement),
                    let placement = SidebarPlacement(rawValue: raw) {
                     state.newWorkspacePlacement = placement
+                }
+                if userDefaults.hasKey(Self.defaultsKeyConfirmQuitWhenActive) {
+                    state.confirmQuitWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmQuitWhenActive)
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -187,6 +194,22 @@ struct SettingsFeature {
             case .setNewWorkspacePlacement(let placement):
                 state.newWorkspacePlacement = placement
                 userDefaults.setString(placement.rawValue, Self.defaultsKeyNewWorkspacePlacement)
+                return .none
+
+            case .setConfirmQuitWhenActive(let enabled):
+                state.confirmQuitWhenActive = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyConfirmQuitWhenActive)
+                return .none
+
+            case .refreshConfirmQuitWhenActive:
+                // Triggered when the dialog's "Don't ask again" checkbox
+                // writes UserDefaults from outside the reducer. Re-read
+                // so the Settings toggle doesn't go stale (issue #129).
+                if userDefaults.hasKey(Self.defaultsKeyConfirmQuitWhenActive) {
+                    state.confirmQuitWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmQuitWhenActive)
+                } else {
+                    state.confirmQuitWhenActive = true
+                }
                 return .none
 
             case .selectTheme(let theme):

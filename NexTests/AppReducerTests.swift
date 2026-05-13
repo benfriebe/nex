@@ -763,6 +763,28 @@ struct AppReducerTests {
         }
     }
 
+    @Test func stateLoadedResetsRunningStatusEvenWithoutClaudeSession() async {
+        // A pane that was .running without a Claude session ID (e.g. a
+        // non-Claude agent that emitted `nex event start`) used to keep
+        // its status across restart and falsely trigger the quit dialog
+        // on next launch. The reset is now unconditional (issue #129).
+        var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
+        ws.panes[id: Self.paneID1]?.status = .waitingForInput
+
+        let store = makeStore()
+
+        await store.send(.stateLoaded(
+            [ws],
+            groups: [],
+            topLevelOrder: [],
+            activeWorkspaceID: Self.wsID1,
+            repoRegistry: []
+        )) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.claudeSessionID == nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.status == .idle)
+        }
+    }
+
     @Test func stateLoadedHonoursPersistedTopLevelOrder() async {
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "A", paneID: Self.paneID1)
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "B", paneID: Self.paneID2)

@@ -59,6 +59,34 @@ struct AppReducer {
             return workspaces[id: id]
         }
 
+        /// Summary of in-progress agents across all workspaces, used by
+        /// the quit-confirmation dialog (issue #129). An "active agent"
+        /// is any pane whose status is `.running` or `.waitingForInput`.
+        /// Idle panes, markdown previews, scratchpads, and diff panes
+        /// always have `.idle` status and so are never counted.
+        ///
+        /// Parked panes (source shells hidden by `nex open --here`) are
+        /// included: their PTYs and agents are still alive and would be
+        /// terminated alongside the visible panes.
+        var activeAgentSummary: ActivitySummary {
+            var agentCount = 0
+            var workspaceCount = 0
+            for workspace in workspaces {
+                let visible = workspace.panes.reduce(into: 0) { acc, pane in
+                    if pane.status != .idle { acc += 1 }
+                }
+                let parked = workspace.parkedPanes.reduce(into: 0) { acc, pane in
+                    if pane.status != .idle { acc += 1 }
+                }
+                let count = visible + parked
+                if count > 0 {
+                    agentCount += count
+                    workspaceCount += 1
+                }
+            }
+            return ActivitySummary(agentCount: agentCount, workspaceCount: workspaceCount)
+        }
+
         /// Sidebar entry that the active workspace occupies, used as an
         /// insertion anchor for `.nearSelection` group placement. Returns
         /// the workspace's own entry when it's top-level, or its parent
@@ -1958,11 +1986,18 @@ struct AppReducer {
                     }
                 }
 
-                // Clear session IDs and reset status to prevent stale resumes on next restart
+                // Clear session IDs and reset status to prevent stale
+                // resumes on next restart. Status is tied to a live PTY,
+                // which never survives a restart, so reset all non-idle
+                // panes regardless of session — otherwise a persisted
+                // `.running` falsely triggers the quit dialog at the
+                // next Cmd+Q with no real agents in flight (issue #129).
                 for workspace in state.workspaces {
                     for pane in workspace.panes {
                         if pane.claudeSessionID != nil {
                             state.workspaces[id: workspace.id]?.panes[id: pane.id]?.claudeSessionID = nil
+                        }
+                        if pane.status != .idle {
                             state.workspaces[id: workspace.id]?.panes[id: pane.id]?.status = .idle
                         }
                     }

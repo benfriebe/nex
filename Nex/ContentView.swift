@@ -211,6 +211,9 @@ struct ContentView: View {
                     )
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: QuitGate.confirmQuitChangedNotification)) { _ in
+                store.send(.settings(.refreshConfirmQuitWhenActive))
+            }
             .onReceive(NotificationCenter.default.publisher(for: SurfaceView.paneFocusedNotification)) { notification in
                 guard let paneID = notification.userInfo?["paneID"] as? UUID,
                       let activeID = store.activeWorkspaceID,

@@ -153,6 +153,16 @@ private struct GeneralSettingsView: View {
                     }
                 }
 
+                Section("Quit") {
+                    Toggle("Confirm before quitting", isOn: Binding(
+                        get: { settingsStore.confirmQuitWhenActive },
+                        set: { settingsStore.send(.setConfirmQuitWhenActive($0)) }
+                    ))
+                    Text("Show a confirmation dialog on Cmd+Q. When agents are running or waiting for input, the dialog calls them out so an accidental quit doesn't lose work.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Network") {
                     Toggle("TCP listener", isOn: Binding(
                         get: { appStore.tcpPort > 0 },

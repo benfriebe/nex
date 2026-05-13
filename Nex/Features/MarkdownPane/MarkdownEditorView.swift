@@ -120,6 +120,11 @@ struct MarkdownEditorView: NSViewRepresentable {
         var lastIsFocused: Bool = false
         private var saveTask: Task<Void, Never>?
 
+        override init() {
+            super.init()
+            MarkdownEditorRegistry.shared.register(self)
+        }
+
         func loadFile() {
             guard !filePath.isEmpty else { return }
             do {
@@ -169,6 +174,16 @@ struct MarkdownEditorView: NSViewRepresentable {
             }
         }
 
+        /// Synchronously flush any pending debounced save. Called from
+        /// the quit gate so unsaved edits don't get truncated at the
+        /// 500ms debounce boundary when the user hits Cmd+Q (issue #129).
+        func flushPendingSave() {
+            guard let task = saveTask else { return }
+            saveTask = nil
+            task.cancel()
+            writeToDisk()
+        }
+
         private func writeToDisk() {
             guard !filePath.isEmpty, let content = textView?.string else { return }
             do {
@@ -180,6 +195,38 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         deinit {
             NotificationCenter.default.removeObserver(self)
+            // No registry deregister here — deinit is non-isolated and
+            // the registry is @MainActor. Stale weak boxes are pruned
+            // lazily by `MarkdownEditorRegistry.register` / `flushAll`.
+        }
+    }
+}
+
+/// Weak registry of live `MarkdownEditorView.Coordinator` instances.
+/// `QuitGate.shared.flushPendingSaves` is wired to `flushAll()` at app
+/// launch so the AppDelegate can synchronously drain in-flight saves
+/// before letting the process exit (issue #129).
+@MainActor
+final class MarkdownEditorRegistry {
+    static let shared = MarkdownEditorRegistry()
+
+    private var coordinators: [WeakBox] = []
+
+    private struct WeakBox {
+        weak var value: MarkdownEditorView.Coordinator?
+    }
+
+    private init() {}
+
+    func register(_ coordinator: MarkdownEditorView.Coordinator) {
+        coordinators.removeAll { $0.value == nil }
+        coordinators.append(WeakBox(value: coordinator))
+    }
+
+    func flushAll() {
+        coordinators.removeAll { $0.value == nil }
+        for box in coordinators {
+            box.value?.flushPendingSave()
         }
     }
 }

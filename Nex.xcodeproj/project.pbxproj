@@ -18,6 +18,7 @@
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
+		1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */; };
 		13CFD579791838D9D23C9613 /* WorkspaceLabelViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */; };
 		149E80DD671127055EF67F7F /* DiffHTMLRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */; };
 		14C1E964B19A8C277D5EA5E4 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE56BB11F5C7C34821411297 /* QuartzCore.framework */; };
@@ -49,6 +50,7 @@
 		58D251ED7E3B564C9BA3AD91 /* NexGhosttyDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935FE280F97CB5A1DBD31113 /* NexGhosttyDefaults.swift */; };
 		59239C7AD0D26E390C647C46 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 98CF017F4F26916F63300A33 /* Yams */; };
 		5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */; };
+		5CFC8C5F96B371044A5ABE91 /* QuitConfirmationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD202733564AC92AEC00A0C /* QuitConfirmationTests.swift */; };
 		62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E820170ADF2ADB58B8079 /* GitServiceTests.swift */; };
 		62BC1CC522515C8E6A99F508 /* GitHeadWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
@@ -138,6 +140,7 @@
 		FB45777E3BD181F04B322F93 /* ScratchpadEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */; };
 		FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */; };
 		FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBEA23E4C37CB5B7A6F4963C /* PersistenceService.swift */; };
+		FF3255F9A9213474DC14A2A0 /* QuitGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B504C980131A9A777767EEB1 /* QuitGate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -206,8 +209,10 @@
 		6B4B95F852C737F18989F8FA /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		6BB526BDDE50E6C7948EE832 /* NexTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexTheme.swift; sourceTree = "<group>"; };
 		6BB83805BDFAC2F7DB8FF064 /* GroupHeaderRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupHeaderRow.swift; sourceTree = "<group>"; };
+		6CD202733564AC92AEC00A0C /* QuitConfirmationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitConfirmationTests.swift; sourceTree = "<group>"; };
 		6FD9BCE4ABC267C7E34EAF09 /* PaneFocusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneFocusView.swift; sourceTree = "<group>"; };
 		75DCD589969583F84BFCE38B /* NexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		77FDA3FB200AA7846BCDC7A7 /* EditorServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorServiceTests.swift; sourceTree = "<group>"; };
 		7DED98594372C8E34542A5C2 /* SplitDividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDividerView.swift; sourceTree = "<group>"; };
 		7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
@@ -236,6 +241,7 @@
 		ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureTests.swift; sourceTree = "<group>"; };
 		B02A888F436610636F5A4D55 /* MarkdownPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPaneView.swift; sourceTree = "<group>"; };
 		B0F76E0BE2C08C77C58B1278 /* SidebarID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarID.swift; sourceTree = "<group>"; };
+		B504C980131A9A777767EEB1 /* QuitGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitGate.swift; sourceTree = "<group>"; };
 		B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B822ABF12B071E574E089BB4 /* GroupIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIconTests.swift; sourceTree = "<group>"; };
 		BB94DA665D3B322A44251454 /* PaneHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHeaderView.swift; sourceTree = "<group>"; };
@@ -389,6 +395,7 @@
 				C4D5453E5B7EB4E8E7F11453 /* PaneSendReplyTests.swift */,
 				CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */,
 				4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */,
+				6CD202733564AC92AEC00A0C /* QuitConfirmationTests.swift */,
 				1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */,
 				ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */,
 				AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */,
@@ -432,12 +439,14 @@
 		517D1FAA0B3B717E85EFDA2D /* Nex */ = {
 			isa = PBXGroup;
 			children = (
+				76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */,
 				D9335AE3C92A37DD50A5715A /* AppReducer.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
 				BECB2222837AC350E94222BB /* Info.plist */,
 				F1A8D5B3446F6056F443CDB8 /* Nex.entitlements */,
 				3714AA1F15C85762BF36B1FE /* NexApp.swift */,
+				B504C980131A9A777767EEB1 /* QuitGate.swift */,
 				477C757108CEE52846121B1E /* Commands */,
 				5F485357D29F2C092501D735 /* Features */,
 				4FF05F1CABA6C0F391FCBFCF /* Ghostty */,
@@ -746,6 +755,7 @@
 				0A70A24697C96E83D6A201CE /* PaneSendReplyTests.swift in Sources */,
 				F6B537768D81B028C1B484B2 /* PaneShortcutMonitorTests.swift in Sources */,
 				B3FBC9276113E015DA08D41A /* PersistenceTests.swift in Sources */,
+				5CFC8C5F96B371044A5ABE91 /* QuitConfirmationTests.swift in Sources */,
 				B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */,
 				EAF43DC55C5612F3AE83BF02 /* SettingsFeatureTests.swift in Sources */,
 				2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */,
@@ -767,6 +777,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				759B67A4E8D35868EC6E2295 /* AppActivation.swift in Sources */,
+				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,
 				B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */,
@@ -817,6 +828,7 @@
 				5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */,
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
+				FF3255F9A9213474DC14A2A0 /* QuitGate.swift in Sources */,
 				C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */,
 				0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */,
 				550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */,

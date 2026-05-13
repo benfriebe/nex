@@ -4,6 +4,8 @@ import SwiftUI
 
 @main
 struct NexApp: App {
+    @NSApplicationDelegateAdaptor(NexAppDelegate.self) private var appDelegate
+
     @State private var store = Store(initialState: AppReducer.State()) {
         AppReducer()
     }
@@ -100,6 +102,19 @@ struct NexApp: App {
                     }
 
                     store.send(.appLaunched)
+
+                    // Wire the quit-confirmation summary + the markdown save
+                    // flush. NexAppDelegate's applicationShouldTerminate calls
+                    // both synchronously to (a) decide whether to show the
+                    // dialog and (b) drain any in-flight debounced markdown
+                    // writes so the 500ms autosave window can't drop edits
+                    // when the user hits Cmd+Q (issue #129).
+                    QuitGate.shared.summarize = {
+                        store.withState { $0.activeAgentSummary }
+                    }
+                    QuitGate.shared.flushPendingSaves = {
+                        MarkdownEditorRegistry.shared.flushAll()
+                    }
 
                     let monitor = PaneShortcutMonitor(store: store)
                     monitor.start()
