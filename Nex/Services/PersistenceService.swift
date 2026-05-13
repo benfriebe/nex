@@ -167,6 +167,10 @@ actor PersistenceService {
                         ? WorkspaceFeature.State.makeSlug(from: record.name, id: wsID)
                         : record.slug
 
+                    let labels: [String] = (record.labelsJSON.data(using: .utf8))
+                        .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
+                        ?? []
+
                     let workspace = WorkspaceFeature.State(
                         id: wsID,
                         name: record.name,
@@ -177,7 +181,8 @@ actor PersistenceService {
                         focusedPaneID: focusedID,
                         repoAssociations: repoAssociations,
                         createdAt: Date(timeIntervalSince1970: record.createdAt),
-                        lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt)
+                        lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
+                        labels: labels
                     )
                     workspaces.append(workspace)
                 }
@@ -271,6 +276,8 @@ struct PersistenceSnapshot {
             let layoutToSave = workspace.savedLayout ?? workspace.layout
             let layoutData = (try? JSONEncoder().encode(layoutToSave)) ?? Data()
             let layoutJSON = String(data: layoutData, encoding: .utf8) ?? "null"
+            let labelsData = (try? JSONEncoder().encode(workspace.labels)) ?? Data()
+            let labelsJSON = String(data: labelsData, encoding: .utf8) ?? "[]"
             return WorkspaceRecord(
                 id: workspace.id.uuidString,
                 name: workspace.name,
@@ -280,7 +287,8 @@ struct PersistenceSnapshot {
                 focusedPaneID: workspace.focusedPaneID?.uuidString,
                 createdAt: workspace.createdAt.timeIntervalSince1970,
                 lastAccessedAt: workspace.lastAccessedAt.timeIntervalSince1970,
-                sortOrder: index
+                sortOrder: index,
+                labelsJSON: labelsJSON
             )
         }
 

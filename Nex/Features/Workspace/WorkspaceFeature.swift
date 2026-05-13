@@ -44,6 +44,11 @@ struct WorkspaceFeature {
         var currentLayoutIndex: Int?
         var createdAt: Date
         var lastAccessedAt: Date
+        /// Free-form tags attached to this workspace. Ordered (preserves
+        /// add order), deduplicated case-sensitively. Empty by default.
+        /// Drives the sidebar filter — see `WorkspaceListView` filter
+        /// field and `WorkspaceInspectorView` label editor.
+        var labels: [String] = []
 
         init(
             id: UUID = UUID(),
@@ -76,7 +81,8 @@ struct WorkspaceFeature {
             focusedPaneID: UUID?,
             repoAssociations: IdentifiedArrayOf<RepoAssociation> = [],
             createdAt: Date,
-            lastAccessedAt: Date
+            lastAccessedAt: Date,
+            labels: [String] = []
         ) {
             self.id = id
             self.name = name
@@ -88,6 +94,7 @@ struct WorkspaceFeature {
             self.repoAssociations = repoAssociations
             self.createdAt = createdAt
             self.lastAccessedAt = lastAccessedAt
+            self.labels = labels
         }
 
         /// Read a pane wherever it lives — visible layout or the
@@ -153,6 +160,9 @@ struct WorkspaceFeature {
     enum Action: Equatable {
         case rename(String)
         case setColor(WorkspaceColor)
+        case addLabel(String)
+        case removeLabel(String)
+        case setLabels([String])
         case createPane
         case splitPaneAtPath(String, label: String? = nil, direction: PaneLayout.SplitDirection = .horizontal)
         case splitPane(direction: PaneLayout.SplitDirection, sourcePaneID: UUID?, label: String? = nil)
@@ -199,6 +209,20 @@ struct WorkspaceFeature {
 
     private enum SearchDebounceID: Hashable { case debounce }
 
+    /// Maximum label length after trimming. Generous enough for any
+    /// reasonable status/tag string while preventing a multi-KB paste
+    /// from blowing up row/inspector layout.
+    static let maxLabelLength = 64
+
+    /// Trim whitespace and clamp to `maxLabelLength`. Returns `""` for
+    /// labels that are empty after trimming; callers should treat an
+    /// empty result as "ignore".
+    static func normalizeLabel(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= maxLabelLength { return trimmed }
+        return String(trimmed.prefix(maxLabelLength))
+    }
+
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.ghosttyConfig) var ghosttyConfig
     @Dependency(\.gitService) var gitService
@@ -216,6 +240,29 @@ struct WorkspaceFeature {
 
             case .setColor(let color):
                 state.color = color
+                return .none
+
+            case .addLabel(let raw):
+                let normalized = WorkspaceFeature.normalizeLabel(raw)
+                guard !normalized.isEmpty else { return .none }
+                if !state.labels.contains(normalized) {
+                    state.labels.append(normalized)
+                }
+                return .none
+
+            case .removeLabel(let label):
+                state.labels.removeAll { $0 == label }
+                return .none
+
+            case .setLabels(let raw):
+                var seen = Set<String>()
+                var deduped: [String] = []
+                for entry in raw {
+                    let normalized = WorkspaceFeature.normalizeLabel(entry)
+                    guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+                    deduped.append(normalized)
+                }
+                state.labels = deduped
                 return .none
 
             case .createPane:

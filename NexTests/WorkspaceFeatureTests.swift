@@ -2170,4 +2170,97 @@ struct WorkspaceFeatureTests {
             #expect(created?.title == "diff: Foo.swift")
         }
     }
+
+    // MARK: - Labels
+
+    @Test func addLabelAppendsAndDedupes() async {
+        let workspace = WorkspaceFeature.State(name: "Labelled")
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.addLabel("backend")) { state in
+            #expect(state.labels == ["backend"])
+        }
+        await store.send(.addLabel("priority")) { state in
+            #expect(state.labels == ["backend", "priority"])
+        }
+        // Duplicate: no change.
+        await store.send(.addLabel("backend"))
+        #expect(store.state.labels == ["backend", "priority"])
+    }
+
+    @Test func addLabelTrimsAndRejectsEmpty() async {
+        let workspace = WorkspaceFeature.State(name: "Labelled")
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.addLabel("  blocked  ")) { state in
+            #expect(state.labels == ["blocked"])
+        }
+        await store.send(.addLabel("   "))
+        #expect(store.state.labels == ["blocked"])
+        await store.send(.addLabel(""))
+        #expect(store.state.labels == ["blocked"])
+    }
+
+    @Test func removeLabelDropsMatch() async {
+        var workspace = WorkspaceFeature.State(name: "Labelled")
+        workspace.labels = ["a", "b", "c"]
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.removeLabel("b")) { state in
+            #expect(state.labels == ["a", "c"])
+        }
+        // Removing a missing label is a no-op.
+        await store.send(.removeLabel("z"))
+        #expect(store.state.labels == ["a", "c"])
+    }
+
+    @Test func setLabelsReplacesAndDedupes() async {
+        var workspace = WorkspaceFeature.State(name: "Labelled")
+        workspace.labels = ["old"]
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setLabels(["one", " two ", "one", "", "three"])) { state in
+            #expect(state.labels == ["one", "two", "three"])
+        }
+    }
+
+    @Test func setLabelsWithAllEmptyClearsAllLabels() async {
+        var workspace = WorkspaceFeature.State(name: "Labelled")
+        workspace.labels = ["alpha", "beta"]
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setLabels(["", "  ", "\n"])) { state in
+            #expect(state.labels == [])
+        }
+    }
+
+    @Test func addLabelClampsLengthToMax() async {
+        let workspace = WorkspaceFeature.State(name: "Labelled")
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let oversized = String(repeating: "x", count: 500)
+        await store.send(.addLabel(oversized)) { state in
+            #expect(state.labels.count == 1)
+            #expect(state.labels.first?.count == WorkspaceFeature.maxLabelLength)
+        }
+    }
+
+    @Test func addLabelTreatsCaseAsDistinct() async {
+        let workspace = WorkspaceFeature.State(name: "Labelled")
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.addLabel("Backend")) { state in
+            #expect(state.labels == ["Backend"])
+        }
+        await store.send(.addLabel("backend")) { state in
+            #expect(state.labels == ["Backend", "backend"])
+        }
+    }
 }

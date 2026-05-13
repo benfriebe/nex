@@ -18,6 +18,7 @@
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
+		13CFD579791838D9D23C9613 /* WorkspaceLabelViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */; };
 		149E80DD671127055EF67F7F /* DiffHTMLRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */; };
 		14C1E964B19A8C277D5EA5E4 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE56BB11F5C7C34821411297 /* QuartzCore.framework */; };
 		1569F35B72EC7C133643190E /* PaneType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377C07C6C4B00D0699682EA3 /* PaneType.swift */; };
@@ -201,6 +202,7 @@
 		5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingTests.swift; sourceTree = "<group>"; };
 		61D6AE6635332105A3C18A03 /* VibrancyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibrancyView.swift; sourceTree = "<group>"; };
 		67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameWorkspaceSheet.swift; sourceTree = "<group>"; };
+		684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLabelViews.swift; sourceTree = "<group>"; };
 		6B4B95F852C737F18989F8FA /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		6BB526BDDE50E6C7948EE832 /* NexTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexTheme.swift; sourceTree = "<group>"; };
 		6BB83805BDFAC2F7DB8FF064 /* GroupHeaderRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupHeaderRow.swift; sourceTree = "<group>"; };
@@ -513,6 +515,7 @@
 				0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */,
 				1BA6AA9E98405375983902BD /* WorkspaceFeature.swift */,
 				57C59BDCBA03302FC7FDE16B /* WorkspaceInspectorView.swift */,
+				684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */,
 				F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */,
 				C58BE92A0878D9CCC786A657 /* WorkspaceRowView.swift */,
 			);
@@ -841,6 +844,7 @@
 				E62618BAC6927017CC4ECC44 /* WorkspaceFeature.swift in Sources */,
 				A33EF4059D3F3479ED5C9EE2 /* WorkspaceGroup.swift in Sources */,
 				E89E89193A52010164900B00 /* WorkspaceInspectorView.swift in Sources */,
+				13CFD579791838D9D23C9613 /* WorkspaceLabelViews.swift in Sources */,
 				3B60C0FC48A2AAF6282CAB40 /* WorkspaceListView.swift in Sources */,
 				8043643CBDD85AF3315BBFE2 /* WorkspaceRowView.swift in Sources */,
 			);

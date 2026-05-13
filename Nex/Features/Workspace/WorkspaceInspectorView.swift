@@ -13,6 +13,8 @@ struct WorkspaceInspectorView: View {
     @State private var worktreeRepoID: UUID?
     @State private var worktreeName = ""
     @State private var worktreeBranchName = ""
+    @State private var newLabelText = ""
+    @FocusState private var isLabelFieldFocused: Bool
 
     var body: some View {
         WithPerceptionTracking {
@@ -38,6 +40,11 @@ struct WorkspaceInspectorView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             // Workspace metadata
                             workspaceSection(workspace)
+
+                            Divider()
+
+                            // Labels
+                            labelsSection(workspace, activeID: activeID)
 
                             Divider()
 
@@ -139,6 +146,67 @@ struct WorkspaceInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    private func labelsSection(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Labels", systemImage: "tag")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("inspector.labels.heading")
+
+            if !workspace.labels.isEmpty {
+                LabelFlowLayout(spacing: 4) {
+                    ForEach(workspace.labels, id: \.self) { label in
+                        LabelChip(text: label) {
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .removeLabel(label)
+                            )))
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("Add label", text: $newLabelText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .focused($isLabelFieldFocused)
+                    .accessibilityIdentifier("inspector.labels.field")
+                    .onSubmit { commitNewLabel(activeID: activeID) }
+
+                let isEmpty = newLabelText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button {
+                    commitNewLabel(activeID: activeID)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("inspector.labels.add")
+                .disabled(isEmpty)
+            }
+        }
+    }
+
+    private func commitNewLabel(activeID: UUID) {
+        // Split on commas/newlines so users can paste comma-separated
+        // tags ("backend, priority, blocked") in one shot. Single
+        // entries (no separator) still flow through unchanged.
+        let parts = newLabelText
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { String($0) }
+        var sentAny = false
+        for part in parts {
+            let normalized = WorkspaceFeature.normalizeLabel(part)
+            guard !normalized.isEmpty else { continue }
+            store.send(.workspaces(.element(id: activeID, action: .addLabel(normalized))))
+            sentAny = true
+        }
+        guard sentAny else { return }
+        newLabelText = ""
+        isLabelFieldFocused = true
     }
 
     private func repoSection(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {

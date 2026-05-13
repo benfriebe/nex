@@ -100,7 +100,8 @@ struct DatabaseMigrationTests {
                 focusedPaneID: nil,
                 createdAt: 1000,
                 lastAccessedAt: 1000,
-                sortOrder: 0
+                sortOrder: 0,
+                labelsJSON: "[]"
             )
             try ws.insert(db)
 
@@ -214,7 +215,8 @@ struct DatabaseMigrationTests {
                 focusedPaneID: nil,
                 createdAt: 1000,
                 lastAccessedAt: 1000,
-                sortOrder: 0
+                sortOrder: 0,
+                labelsJSON: "[]"
             )
             try ws.insert(db)
 

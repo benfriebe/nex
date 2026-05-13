@@ -32,12 +32,18 @@ struct WorkspaceRowView: View {
     var hasRunningPanes: Bool = false
     var isSelected: Bool = false
     var leadingInset: CGFloat = 0
+    var labels: [String] = []
+
+    /// Maximum chips rendered inline before collapsing into a `+N` more
+    /// indicator. Three keeps rows visually compact in the narrow
+    /// sidebar; the inspector shows the full set.
+    private static let maxInlineLabels = 3
 
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 3)
                 .fill(color.color)
-                .frame(width: 4, height: 24)
+                .frame(width: 4, height: rowAccentHeight)
 
             VStack(alignment: .leading, spacing: 1) {
                 // Always semibold so a long name doesn't re-wrap when
@@ -63,6 +69,20 @@ struct WorkspaceRowView: View {
                         }
                     }
                 }
+
+                if !labels.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(Array(labels.prefix(Self.maxInlineLabels)), id: \.self) { label in
+                            RowLabelChip(text: label)
+                        }
+                        if labels.count > Self.maxInlineLabels {
+                            Text("+\(labels.count - Self.maxInlineLabels)")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.top, 1)
+                }
             }
 
             Spacer()
@@ -73,7 +93,10 @@ struct WorkspaceRowView: View {
                 AgentStatusDot(color: .green)
             }
 
-            if index < 9 {
+            // Negative indices opt out of the badge entirely. Used by
+            // the filtered sidebar where workspace indices into
+            // `visibleWorkspaceOrder` are either wrong or meaningless.
+            if index >= 0, index < 9 {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -105,6 +128,12 @@ struct WorkspaceRowView: View {
         // spanning the full width.
         .padding(.leading, leadingInset)
         .contentShape(Rectangle())
+    }
+
+    /// The color bar grows when label chips are visible so it stays
+    /// roughly aligned with the row's full content height.
+    private var rowAccentHeight: CGFloat {
+        labels.isEmpty ? 24 : 36
     }
 
     @ViewBuilder

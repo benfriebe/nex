@@ -171,6 +171,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v11_workspace_labels") { db in
+            let columns = try db.columns(in: "workspace").map(\.name)
+            if !columns.contains("labelsJSON") {
+                try db.alter(table: "workspace") { t in
+                    t.add(column: "labelsJSON", .text).notNull().defaults(to: "[]")
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -189,6 +198,7 @@ struct WorkspaceRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Double
     var lastAccessedAt: Double
     var sortOrder: Int
+    var labelsJSON: String
 }
 
 struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
