@@ -2671,9 +2671,17 @@ struct AppReducer {
                         let popped = state.workspaces[id: sourceWSID]?.popFocusFromHistory(excluding: paneID) ?? nil
                         state.workspaces[id: sourceWSID]?.focusedPaneID = popped ?? newSourceLayout.allPaneIDs.first
                     }
+                    var dropMarkdownFind = false
                     if state.workspaces[id: sourceWSID]?.searchingPaneID == paneID {
                         state.workspaces[id: sourceWSID]?.searchingPaneID = nil
                         state.workspaces[id: sourceWSID]?.searchNeedle = ""
+                        state.workspaces[id: sourceWSID]?.searchTotal = nil
+                        state.workspaces[id: sourceWSID]?.searchSelected = nil
+                        // Drop any in-DOM find marks on a markdown pane being
+                        // moved across workspaces (the WKWebView/coordinator
+                        // travels with the pane, but its workspace-level
+                        // search context does not).
+                        dropMarkdownFind = pane.type == .markdown
                     }
                     if state.workspaces[id: sourceWSID]?.zoomedPaneID == paneID {
                         if let saved = state.workspaces[id: sourceWSID]?.savedLayout {
@@ -2704,6 +2712,16 @@ struct AppReducer {
                     state.workspaces[id: targetWSID]?.currentLayoutIndex = nil
                     state.activeWorkspaceID = targetWSID
 
+                    if dropMarkdownFind {
+                        return .merge(
+                            .run { _ in
+                                await MainActor.run {
+                                    MarkdownFindController.shared.close(paneID: paneID)
+                                }
+                            },
+                            .send(.persistState)
+                        )
+                    }
                     return .send(.persistState)
 
                 // MARK: Workspace commands

@@ -294,6 +294,16 @@ struct ContentView: View {
                       let paneID = surfaceManager.paneID(for: surface) else { return }
                 store.send(.searchSelectedUpdated(paneID: paneID, selected: selected))
             }
+            .onReceive(NotificationCenter.default.publisher(for: .markdownFindResult)) { notification in
+                guard let paneID = notification.userInfo?["paneID"] as? UUID,
+                      let total = notification.userInfo?["total"] as? Int,
+                      let current = notification.userInfo?["current"] as? Int else { return }
+                store.send(.searchTotalUpdated(paneID: paneID, total: total))
+                // current is -1 when there are no matches; only forward a real index.
+                if current >= 0 {
+                    store.send(.searchSelectedUpdated(paneID: paneID, selected: current))
+                }
+            }
             .onAppear {
                 // The xcodebuild test host instantiates ContentView; skip the
                 // socket listener so `xcodebuild test` never touches

@@ -28,6 +28,7 @@ struct NexApp: App {
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
                 .environment(\.ghosttyConfig, .liveValue)
+                .background(SpacesBindingAttacher())
                 .frame(minWidth: 600, minHeight: 400)
                 .onAppear {
                     guard !Self.isTestMode else { return }
@@ -123,5 +124,38 @@ struct NexApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+    }
+}
+
+/// Attaches the user's macOS Dock Spaces binding to the main window
+/// (issue #102). SwiftUI's WindowGroup creates the window early, before
+/// WindowServer applies the per-bundle binding after a system restart;
+/// reading it from `com.apple.spaces` and applying it ourselves makes
+/// "Assign To: All Desktops" survive reboots.
+///
+/// The hosting view's `viewDidMoveToWindow` is the only deterministic
+/// hook for "this view is now parented in a real NSWindow". `.onAppear`
+/// fires later and `makeNSView` fires earlier (when `view.window` is
+/// still nil). Each WindowGroup instance gets its own attacher, which
+/// is the right behaviour if SwiftUI ever opens multiple main windows.
+private struct SpacesBindingAttacher: NSViewRepresentable {
+    func makeNSView(context _: Context) -> SpacesBindingView {
+        SpacesBindingView()
+    }
+
+    func updateNSView(_: SpacesBindingView, context _: Context) {
+        // No-op: SpacesBindingView applies the binding once in
+        // viewDidMoveToWindow. Re-renders are intentionally ignored.
+    }
+}
+
+private final class SpacesBindingView: NSView {
+    private var didApply = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard !didApply, let window else { return }
+        didApply = true
+        WindowSpacesBinding.applyIfNeeded(to: window)
     }
 }

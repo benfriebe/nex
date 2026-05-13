@@ -1373,6 +1373,78 @@ struct WorkspaceFeatureTests {
         }
     }
 
+    @Test func toggleSearchOpensForMarkdownPaneInViewMode() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(id: paneID, type: .markdown, workingDirectory: "/tmp", filePath: "/tmp/x.md")
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.toggleSearch) { state in
+            state.searchingPaneID = paneID
+            state.searchNeedle = ""
+            state.searchTotal = nil
+            state.searchSelected = nil
+        }
+    }
+
+    @Test func toggleSearchIgnoredOnMarkdownPaneInEditMode() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(
+                id: paneID,
+                type: .markdown,
+                workingDirectory: "/tmp",
+                filePath: "/tmp/x.md",
+                isEditing: true
+            )
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.toggleSearch)
+        // No state change asserted: state.searchingPaneID stays nil.
+    }
+
+    @Test func toggleMarkdownEditDismissesActiveSearch() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [
+            Pane(id: paneID, type: .markdown, workingDirectory: "/tmp", filePath: nil)
+        ]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+        workspace.searchingPaneID = paneID
+        workspace.searchNeedle = "foo"
+        workspace.searchTotal = 3
+        workspace.searchSelected = 1
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.editorService = stubbedEditorService(command: "nvim ''")
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleMarkdownEdit(paneID)) { state in
+            state.panes[id: paneID]?.isEditing = true
+            state.searchingPaneID = nil
+            state.searchNeedle = ""
+            state.searchTotal = nil
+            state.searchSelected = nil
+        }
+    }
+
     @Test func toggleMarkdownEditExitingExternalModeClearsCommand() async {
         let paneID = UUID()
         var workspace = WorkspaceFeature.State(name: "Test")

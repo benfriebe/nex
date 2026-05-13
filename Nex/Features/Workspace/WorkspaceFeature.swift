@@ -697,6 +697,18 @@ struct WorkspaceFeature {
                     return .none
                 }
 
+                // Entering edit mode: dismiss any active find on this pane.
+                // The MarkdownPaneView is about to be replaced by the editor,
+                // so the overlay would otherwise float over a non-functional
+                // host (no coordinator → typed needles silently no-op).
+                let wasSearching = state.searchingPaneID == paneID
+                if wasSearching {
+                    state.searchingPaneID = nil
+                    state.searchNeedle = ""
+                    state.searchTotal = nil
+                    state.searchSelected = nil
+                }
+
                 // If we can resolve the user's $EDITOR, host it inside a
                 // ghostty surface bound to this pane; otherwise fall back to
                 // the built-in NSTextView editor.
@@ -707,6 +719,11 @@ struct WorkspaceFeature {
                     let opacity = ghosttyConfig.backgroundOpacity
                     let cwd = pane.workingDirectory
                     return .run { _ in
+                        if wasSearching {
+                            await MainActor.run {
+                                MarkdownFindController.shared.close(paneID: paneID)
+                            }
+                        }
                         await surfaceManager.createSurface(
                             paneID: paneID,
                             workingDirectory: cwd,
@@ -718,6 +735,13 @@ struct WorkspaceFeature {
 
                 state.panes[id: paneID]?.isEditing = true
                 state.panes[id: paneID]?.externalEditorCommand = nil
+                if wasSearching {
+                    return .run { _ in
+                        await MainActor.run {
+                            MarkdownFindController.shared.close(paneID: paneID)
+                        }
+                    }
+                }
                 return .none
 
             case .increaseMarkdownFontSize(let paneID):
@@ -827,7 +851,9 @@ struct WorkspaceFeature {
 
             case .toggleSearch:
                 guard let focusedID = state.focusedPaneID,
-                      state.panes[id: focusedID]?.type == .shell else { return .none }
+                      let pane = state.panes[id: focusedID],
+                      pane.type == .shell || (pane.type == .markdown && !pane.isEditing)
+                else { return .none }
                 if state.searchingPaneID != nil {
                     return .send(.searchClose)
                 }
@@ -857,6 +883,17 @@ struct WorkspaceFeature {
                 state.searchNeedle = needle
                 state.searchSelected = nil
                 guard let paneID = state.searchingPaneID else { return .none }
+                let isMarkdown = state.panes[id: paneID]?.type == .markdown
+                if isMarkdown {
+                    // WKWebView find runs locally in JS; no backend round-trip
+                    // to debounce. Drive it directly so typing feels responsive.
+                    return .run { _ in
+                        await MainActor.run {
+                            MarkdownFindController.shared.update(paneID: paneID, needle: needle)
+                        }
+                    }
+                    .cancellable(id: SearchDebounceID.debounce, cancelInFlight: true)
+                }
                 let mgr = surfaceManager
                 if needle.isEmpty {
                     return .run { _ in
@@ -878,6 +915,13 @@ struct WorkspaceFeature {
 
             case .searchNavigateNext:
                 guard let paneID = state.searchingPaneID else { return .none }
+                if state.panes[id: paneID]?.type == .markdown {
+                    return .run { _ in
+                        await MainActor.run {
+                            MarkdownFindController.shared.navigateNext(paneID: paneID)
+                        }
+                    }
+                }
                 let mgr = surfaceManager
                 return .run { _ in
                     await mgr.performBindingAction(on: paneID, action: "navigate_search:next")
@@ -885,6 +929,13 @@ struct WorkspaceFeature {
 
             case .searchNavigatePrevious:
                 guard let paneID = state.searchingPaneID else { return .none }
+                if state.panes[id: paneID]?.type == .markdown {
+                    return .run { _ in
+                        await MainActor.run {
+                            MarkdownFindController.shared.navigatePrevious(paneID: paneID)
+                        }
+                    }
+                }
                 let mgr = surfaceManager
                 return .run { _ in
                     await mgr.performBindingAction(on: paneID, action: "navigate_search:previous")
@@ -892,10 +943,18 @@ struct WorkspaceFeature {
 
             case .searchClose:
                 guard let paneID = state.searchingPaneID else { return .none }
+                let isMarkdown = state.panes[id: paneID]?.type == .markdown
                 state.searchingPaneID = nil
                 state.searchNeedle = ""
                 state.searchTotal = nil
                 state.searchSelected = nil
+                if isMarkdown {
+                    return .run { _ in
+                        await MainActor.run {
+                            MarkdownFindController.shared.close(paneID: paneID)
+                        }
+                    }
+                }
                 let mgr = surfaceManager
                 return .run { _ in
                     await mgr.performBindingAction(on: paneID, action: "end_search")
@@ -904,6 +963,11 @@ struct WorkspaceFeature {
             case .searchTotalUpdated(let paneID, let total):
                 guard state.searchingPaneID == paneID else { return .none }
                 state.searchTotal = total
+                // Drop any stale selection when matches go to zero (e.g.
+                // a markdown live-reload turns a doc with hits into one
+                // without). Otherwise the overlay would render a count
+                // like "3/0".
+                if total == 0 { state.searchSelected = nil }
                 return .none
 
             case .searchSelectedUpdated(let paneID, let selected):
