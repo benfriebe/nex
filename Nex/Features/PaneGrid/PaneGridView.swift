@@ -104,6 +104,12 @@ struct PaneGridView: View {
                 onToggleZoom: onToggleZoom,
                 isEditing: pane.isEditing,
                 onToggleEdit: pane.type == .markdown ? { onToggleMarkdownEdit(pane.id) } : nil,
+                onCopyMarkdown: pane.type == .markdown
+                    ? { postMarkdownCopy(pane.id, kind: .markdown) }
+                    : nil,
+                onCopyRichText: pane.type == .markdown
+                    ? { postMarkdownCopy(pane.id, kind: .richText) }
+                    : nil,
                 onRefreshDiff: pane.type == .diff
                     ? { diffRefreshTokens[pane.id, default: 0] &+= 1 }
                     : nil,
@@ -303,6 +309,14 @@ struct PaneGridView: View {
             .frame(width: overlayRect.width, height: overlayRect.height)
             .offset(x: overlayRect.origin.x, y: overlayRect.origin.y)
             .allowsHitTesting(false)
+    }
+
+    private func postMarkdownCopy(_ paneID: UUID, kind: MarkdownCopyKind) {
+        NotificationCenter.default.post(
+            name: MarkdownPaneView.copyRequestNotification,
+            object: nil,
+            userInfo: ["paneID": paneID, "kind": kind.rawValue]
+        )
     }
 
     private var emptyView: some View {

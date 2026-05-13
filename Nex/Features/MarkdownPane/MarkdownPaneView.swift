@@ -2,8 +2,23 @@ import AppKit
 import SwiftUI
 import WebKit
 
+/// `userInfo` keys for `MarkdownPaneView.copyRequestNotification`:
+/// `paneID` (UUID) identifies the target pane and `kind`
+/// (`MarkdownPaneView.CopyKind` raw value) selects markdown vs. rich.
+enum MarkdownCopyKind: String {
+    case markdown
+    case richText
+}
+
 /// Renders a markdown file in a WKWebView with live file watching.
 struct MarkdownPaneView: NSViewRepresentable {
+    /// Posted by the pane header's Copy button to ask the matching
+    /// Coordinator to write the file's contents to the pasteboard.
+    /// userInfo: `{"paneID": UUID, "kind": MarkdownCopyKind.rawValue}`.
+    static let copyRequestNotification = Notification.Name(
+        "MarkdownPaneView.copyRequest"
+    )
+
     let paneID: UUID
     let filePath: String
     let isFocused: Bool
@@ -34,7 +49,8 @@ struct MarkdownPaneView: NSViewRepresentable {
             forMainFrameOnly: true
         ))
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = MarkdownPreviewWebView(frame: .zero, configuration: config)
+        webView.coordinator = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = .clear
         webView.navigationDelegate = context.coordinator
@@ -48,6 +64,7 @@ struct MarkdownPaneView: NSViewRepresentable {
         context.coordinator.fontSize = fontSize
         context.coordinator.loadFile()
         context.coordinator.startWatching()
+        context.coordinator.startObservingCopyRequests()
 
         container.embed(webView)
 
@@ -89,6 +106,7 @@ struct MarkdownPaneView: NSViewRepresentable {
 
     static func dismantleNSView(_: PaneFocusView, coordinator: Coordinator) {
         coordinator.stopWatching()
+        coordinator.stopObservingCopyRequests()
         coordinator.webView = nil
     }
 
@@ -104,6 +122,10 @@ struct MarkdownPaneView: NSViewRepresentable {
         var fontSize: Double = Pane.defaultMarkdownFontSize
         var lastIsFocused: Bool = false
         private var currentContent: String = ""
+        /// Tracks whether the last `loadFile` actually read the file. When
+        /// false, `currentContent` is the synthetic "Failed to load…"
+        /// blockquote and the copy actions should bail.
+        private var didLoadSuccessfully: Bool = false
         /// Monotonic token: incremented before each render, checked after
         /// the async `window.scrollY` round-trip to drop stale reloads when
         /// the user holds Cmd+= / Cmd+- and multiple renders are in flight.
@@ -111,17 +133,26 @@ struct MarkdownPaneView: NSViewRepresentable {
         var pendingScrollFraction: CGFloat?
         nonisolated(unsafe) var fileWatcher: DispatchSourceFileSystemObject?
         nonisolated(unsafe) var fileDescriptor: Int32 = -1
+        private var copyObserver: NSObjectProtocol?
 
         func loadFile() {
             guard !filePath.isEmpty else { return }
 
             let content: String
+            let loaded: Bool
             do {
                 content = try String(contentsOfFile: filePath, encoding: .utf8)
+                loaded = true
             } catch {
                 content = "> Failed to load file: \(filePath)\n>\n> \(error.localizedDescription)"
+                loaded = false
             }
 
+            // Set the load-success flag before the unchanged-content
+            // guard so an initially-empty file (where content == "" ==
+            // currentContent) is still marked loaded — otherwise the
+            // copy actions would silently bail.
+            didLoadSuccessfully = loaded
             guard content != currentContent else { return }
             currentContent = content
             renderAndReload(content: content)
@@ -228,6 +259,38 @@ struct MarkdownPaneView: NSViewRepresentable {
             fileDescriptor = -1
         }
 
+        // MARK: - Copy request observer
+
+        func startObservingCopyRequests() {
+            copyObserver = NotificationCenter.default.addObserver(
+                forName: MarkdownPaneView.copyRequestNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let target = note.userInfo?["paneID"] as? UUID,
+                      target == paneID,
+                      let raw = note.userInfo?["kind"] as? String,
+                      let kind = MarkdownCopyKind(rawValue: raw)
+                else { return }
+                MainActor.assumeIsolated {
+                    switch kind {
+                    case .markdown:
+                        self.copyAsMarkdown()
+                    case .richText:
+                        self.copyAsRichText()
+                    }
+                }
+            }
+        }
+
+        func stopObservingCopyRequests() {
+            if let copyObserver {
+                NotificationCenter.default.removeObserver(copyObserver)
+            }
+            copyObserver = nil
+        }
+
         // MARK: - WKNavigationDelegate
 
         /// Intercept link clicks — open in default browser instead of navigating in-place.
@@ -245,5 +308,117 @@ struct MarkdownPaneView: NSViewRepresentable {
             }
             decisionHandler(.allow)
         }
+
+        // MARK: - Copy actions
+
+        /// Copy the whole document's source markdown (front-matter
+        /// stripped) to the pasteboard. Selection-aware copy was
+        /// abandoned — the block-level source map couldn't represent
+        /// partial-block selections faithfully, and the resulting
+        /// behaviour was inconsistent enough that the simpler
+        /// whole-file contract is preferable.
+        func copyAsMarkdown() {
+            guard didLoadSuccessfully else { return }
+            let body = FrontMatterExtractor.extract(currentContent).body
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(body, forType: .string)
+        }
+
+        /// Copy the whole rendered document as rich text. Front-matter
+        /// is stripped (its table makes `NSAttributedString.rtf(from:)`
+        /// return nil, which silently drops RTF from the pasteboard).
+        ///
+        /// Relative URLs in the rendered HTML (e.g. `src="diagram.png"`
+        /// for an inline image alongside the markdown file) are
+        /// resolved against the file's parent directory before the
+        /// HTML→RTF import, so the resulting rich-text paste keeps
+        /// working image and link references. Without this rewrite,
+        /// AppKit's HTML importer treats relative paths as relative to
+        /// nothing and the resources disappear in the paste target.
+        func copyAsRichText() {
+            guard didLoadSuccessfully else { return }
+            let baseURL = filePath.isEmpty
+                ? nil
+                : URL(fileURLWithPath: filePath).deletingLastPathComponent()
+            let js = """
+            (function() {
+                var content = document.getElementById('content');
+                if (!content) { return document.body.innerHTML; }
+                var clone = content.cloneNode(true);
+                var fm = clone.querySelectorAll(
+                    '.frontmatter, .frontmatter-raw, .frontmatter-nested'
+                );
+                for (var i = 0; i < fm.length; i++) {
+                    fm[i].parentNode.removeChild(fm[i]);
+                }
+                return clone.innerHTML;
+            })();
+            """
+            webView?.evaluateJavaScript(js) { result, _ in
+                guard let html = result as? String, !html.isEmpty,
+                      let data = html.data(using: .utf8) else { return }
+                var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+                    .documentType: NSAttributedString.DocumentType.html,
+                    .characterEncoding: String.Encoding.utf8.rawValue
+                ]
+                if let baseURL {
+                    options[.baseURL] = baseURL
+                }
+                guard let attr = try? NSAttributedString(
+                    data: data, options: options, documentAttributes: nil
+                ) else { return }
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(attr.string, forType: .string)
+                if let rtf = attr.rtf(from: NSRange(location: 0, length: attr.length)) {
+                    pasteboard.setData(rtf, forType: .rtf)
+                }
+                pasteboard.setString(html, forType: .html)
+            }
+        }
+    }
+}
+
+// MARK: - MarkdownPreviewWebView
+
+/// `WKWebView` subclass that augments the macOS context menu with
+/// "Copy as Markdown" and "Copy as Rich Text" entries at the top.
+final class MarkdownPreviewWebView: WKWebView {
+    weak var coordinator: MarkdownPaneView.Coordinator?
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+
+        // Defensive: WKWebView is expected to hand us a fresh menu per
+        // invocation, but if the same NSMenu is ever reused across openings
+        // we don't want our items duplicated on each right-click.
+        if menu.item(withTitle: "Copy as Markdown") != nil { return }
+
+        let copyMd = NSMenuItem(
+            title: "Copy as Markdown",
+            action: #selector(copyAsMarkdownAction(_:)),
+            keyEquivalent: ""
+        )
+        copyMd.target = self
+
+        let copyRtf = NSMenuItem(
+            title: "Copy as Rich Text",
+            action: #selector(copyAsRichTextAction(_:)),
+            keyEquivalent: ""
+        )
+        copyRtf.target = self
+
+        menu.insertItem(copyMd, at: 0)
+        menu.insertItem(copyRtf, at: 1)
+        menu.insertItem(NSMenuItem.separator(), at: 2)
+    }
+
+    @objc private func copyAsMarkdownAction(_: Any?) {
+        coordinator?.copyAsMarkdown()
+    }
+
+    @objc private func copyAsRichTextAction(_: Any?) {
+        coordinator?.copyAsRichText()
     }
 }

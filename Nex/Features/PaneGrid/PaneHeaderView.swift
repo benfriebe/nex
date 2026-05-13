@@ -15,6 +15,8 @@ struct PaneHeaderView: View {
     var onToggleZoom: (() -> Void)?
     var isEditing: Bool = false
     var onToggleEdit: (() -> Void)?
+    var onCopyMarkdown: (() -> Void)?
+    var onCopyRichText: (() -> Void)?
     var onRefreshDiff: (() -> Void)?
     var onDragChanged: ((CGPoint) -> Void)?
     var onDragEnded: (() -> Void)?
@@ -100,6 +102,25 @@ struct PaneHeaderView: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+            }
+
+            if pane.type == .markdown, !isEditing,
+               let onCopyMarkdown, let onCopyRichText {
+                Button(action: {
+                    showCopyMenu(
+                        onCopyMarkdown: onCopyMarkdown,
+                        onCopyRichText: onCopyRichText
+                    )
+                }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(0.6)
+                .help("Copy whole file")
             }
 
             if pane.type == .markdown, let onToggleEdit {
@@ -244,6 +265,55 @@ struct PaneHeaderView: View {
         NSPasteboard.general.setString(pane.workingDirectory, forType: .string)
     }
 
+    /// Show a popup menu at the current mouse location. Using an
+    /// NSMenu rather than SwiftUI's `Menu` lets the button match the
+    /// visual size of the surrounding plain Buttons — `Menu` adds
+    /// chrome padding that makes its hit target taller than its peers.
+    ///
+    /// `popUp(positioning:at:in:)` is used instead of
+    /// `popUpContextMenu(_:with:for:)` because the latter relies on
+    /// `NSApp.currentEvent`, which by the time SwiftUI's button action
+    /// fires is no longer the originating click — that produced a
+    /// noticeable (~1 second) delay before the menu appeared.
+    private func showCopyMenu(
+        onCopyMarkdown: @escaping () -> Void,
+        onCopyRichText: @escaping () -> Void
+    ) {
+        let menu = NSMenu()
+        let mdItem = NSMenuItem(
+            title: "Copy as Markdown",
+            action: nil,
+            keyEquivalent: ""
+        )
+        mdItem.representedObject = ClosureBox(onCopyMarkdown)
+        mdItem.target = MenuActionTarget.shared
+        mdItem.action = #selector(MenuActionTarget.invoke(_:))
+
+        let rtfItem = NSMenuItem(
+            title: "Copy as Rich Text",
+            action: nil,
+            keyEquivalent: ""
+        )
+        rtfItem.representedObject = ClosureBox(onCopyRichText)
+        rtfItem.target = MenuActionTarget.shared
+        rtfItem.action = #selector(MenuActionTarget.invoke(_:))
+
+        menu.addItem(mdItem)
+        menu.addItem(rtfItem)
+
+        // Position the menu under the cursor in view-local coordinates.
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView
+        else {
+            menu.popUp(positioning: nil, at: .zero, in: nil)
+            return
+        }
+        let screenPoint = NSEvent.mouseLocation
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let viewPoint = contentView.convert(windowPoint, from: nil)
+        menu.popUp(positioning: nil, at: viewPoint, in: contentView)
+    }
+
     private var displayPath: String {
         if pane.type == .scratchpad {
             return "Scratchpad"
@@ -264,5 +334,27 @@ struct PaneHeaderView: View {
             return "~" + path.dropFirst(home.count)
         }
         return path
+    }
+}
+
+// MARK: - NSMenu closure dispatch
+
+/// Box for invoking a `() -> Void` closure from an NSMenuItem's
+/// `representedObject`. NSMenuItem.action needs an @objc target, so we
+/// route through a shared dispatcher that pulls the closure off the
+/// menu item that fired the action.
+private final class ClosureBox {
+    let closure: () -> Void
+    init(_ closure: @escaping () -> Void) {
+        self.closure = closure
+    }
+}
+
+@MainActor
+private final class MenuActionTarget: NSObject {
+    static let shared = MenuActionTarget()
+
+    @objc func invoke(_ sender: NSMenuItem) {
+        (sender.representedObject as? ClosureBox)?.closure()
     }
 }
