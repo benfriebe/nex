@@ -526,44 +526,84 @@ struct WorkspaceListView: View {
         let isBulkTarget = selection.contains(workspaceID) && selection.count > 1
         if isBulkTarget {
             Text("\(selection.count) workspaces selected")
-            Menu("Color All Selected") {
+            Menu("Color \(selection.count) Workspaces") {
                 ForEach(WorkspaceColor.allCases) { color in
                     Button(color.displayName) {
                         store.send(.setBulkColor(color))
                     }
                 }
             }
-            Button("Group Selected Workspaces...") {
+            Button("Group \(selection.count) Workspaces...") {
                 store.send(.requestBulkCreateGroup)
             }
+            moveToGroupBulkMenu(selection: selection)
+            Divider()
+            Button("Select All Workspaces") { store.send(.selectAllWorkspaces) }
+                .disabled(store.selectedWorkspaceIDs.count >= store.workspaces.count)
+            Button("Deselect All") { store.send(.clearWorkspaceSelection) }
+            Divider()
             Button("Delete \(selection.count) Workspaces...", role: .destructive) {
                 store.send(.requestBulkDelete)
             }
             .disabled(selection.count >= store.workspaces.count)
+        } else {
+            Button("Rename...") {
+                store.send(.setRenamingWorkspaceID(workspaceID))
+            }
+            Menu("Color") {
+                ForEach(WorkspaceColor.allCases) { color in
+                    Button(color.displayName) {
+                        workspaceStore.send(.setColor(color))
+                    }
+                }
+            }
+            moveToGroupMenu(workspaceID: workspaceID)
             Divider()
+            Button("Select All Workspaces") { store.send(.selectAllWorkspaces) }
+                .disabled(store.selectedWorkspaceIDs.count >= store.workspaces.count)
+            if !store.selectedWorkspaceIDs.isEmpty {
+                Button("Deselect All") { store.send(.clearWorkspaceSelection) }
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                store.send(.deleteWorkspace(workspaceID))
+            }
+            .disabled(store.workspaces.count <= 1)
         }
-        Button("Rename...") {
-            store.send(.setRenamingWorkspaceID(workspaceID))
-        }
-        Menu("Color") {
-            ForEach(WorkspaceColor.allCases) { color in
-                Button(color.displayName) {
-                    workspaceStore.send(.setColor(color))
+    }
+
+    /// Bulk "Move to Group ▸" submenu used when 2+ workspaces are selected.
+    /// Routes through `.moveWorkspacesToGroup` so the move is atomic and
+    /// preserves the same insertion semantics as multi-select drag-and-drop.
+    @ViewBuilder
+    private func moveToGroupBulkMenu(selection: Set<UUID>) -> some View {
+        let inAnyGroup = selection.contains { store.state.groupID(forWorkspace: $0) != nil }
+        if !store.groups.isEmpty || inAnyGroup {
+            let ordered = workspaceIDs(sortedBySidebar: selection)
+            Menu("Move \(selection.count) Workspaces to Group") {
+                if inAnyGroup {
+                    Button("Remove from Group") {
+                        store.send(.moveWorkspacesToGroup(
+                            ids: ordered, groupID: nil, index: nil
+                        ))
+                    }
+                    Divider()
+                }
+                if !store.groups.isEmpty {
+                    ForEach(store.groups) { group in
+                        let allInThisGroup = selection.allSatisfy {
+                            store.state.groupID(forWorkspace: $0) == group.id
+                        }
+                        Button(group.name) {
+                            store.send(.moveWorkspacesToGroup(
+                                ids: ordered, groupID: group.id, index: nil
+                            ))
+                        }
+                        .disabled(allInThisGroup)
+                    }
                 }
             }
         }
-        moveToGroupMenu(workspaceID: workspaceID)
-        Divider()
-        Button("Select All Workspaces") { store.send(.selectAllWorkspaces) }
-            .disabled(store.selectedWorkspaceIDs.count >= store.workspaces.count)
-        if !store.selectedWorkspaceIDs.isEmpty {
-            Button("Deselect All") { store.send(.clearWorkspaceSelection) }
-        }
-        Divider()
-        Button("Delete", role: .destructive) {
-            store.send(.deleteWorkspace(workspaceID))
-        }
-        .disabled(store.workspaces.count <= 1)
     }
 
     /// "Move to Group ▸" submenu attached to a workspace row's context menu.
