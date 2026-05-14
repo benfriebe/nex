@@ -45,7 +45,12 @@ struct GroupHeaderRow: View {
                     .focused($renameFieldFocused)
                     .onAppear {
                         renameText = name
-                        renameFieldFocused = true
+                        // Defer the focus assignment so the TextField's
+                        // NSTextField is attached to the window first.
+                        // Without this, SwiftUI's focus binding silently
+                        // no-ops and the keyView chain hands focus to the
+                        // sidebar's filter input instead (issue #132).
+                        DispatchQueue.main.async { renameFieldFocused = true }
                     }
                     .onExitCommand { onCancelRename() }
                     .onSubmit {
