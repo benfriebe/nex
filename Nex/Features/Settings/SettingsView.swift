@@ -33,6 +33,13 @@ struct SettingsView: View {
                 minHeight: 440, idealHeight: 520, maxHeight: .infinity
             )
             .background(WindowResizabilityModifier())
+            // Listen here too: the main WindowGroup (and ContentView's
+            // observer) may be closed while the Settings scene stays
+            // open. Without this, the dialog's "Don't ask again" tick
+            // would leave the toggle stale until next launch (issue #129).
+            .onReceive(NotificationCenter.default.publisher(for: QuitGate.confirmQuitChangedNotification)) { _ in
+                store.send(.settings(.refreshConfirmQuitWhenActive))
+            }
         }
     }
 }
