@@ -129,6 +129,22 @@ struct HelpCommands: Commands {
     }
 }
 
+/// Window menu command that reopens the main window if the user has
+/// closed it (⌘W or the red traffic light). Paired with
+/// `NexAppDelegate.applicationShouldHandleReopen` so dock-click recovery
+/// also works.
+struct ShowWindowCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .windowArrangement) {
+            Button("Show Window") {
+                openWindow(id: "main")
+            }
+        }
+    }
+}
+
 /// NSEvent monitor for shortcuts that need focused-pane context.
 /// These can't go through SwiftUI Commands because they need to know
 /// which pane is focused.

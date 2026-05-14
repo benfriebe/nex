@@ -4,11 +4,15 @@ import SwiftUI
 
 @main
 struct NexApp: App {
+    @NSApplicationDelegateAdaptor(NexAppDelegate.self) private var appDelegate
+    @Environment(\.openWindow) private var openWindow
+
     @State private var store = Store(initialState: AppReducer.State()) {
         AppReducer()
     }
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
+    @State private var didLaunch = false
     @StateObject private var updaterViewModel = UpdaterViewModel(
         startUpdater: !NexApp.isTestMode
     )
@@ -23,7 +27,13 @@ struct NexApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // Single-instance Window (not WindowGroup) so closing it via ⌘W or
+        // the red traffic light leaves a recoverable scene: openWindow(id:
+        // "main") brings it back. A `Window` matched against an
+        // `applicationShouldHandleReopen` adaptor is the standard macOS
+        // pattern for "let the user close everything and still find their
+        // way back to the app".
+        Window("Nex", id: "main") {
             ContentView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
@@ -32,6 +42,20 @@ struct NexApp: App {
                 .frame(minWidth: 600, minHeight: 400)
                 .onAppear {
                     guard !Self.isTestMode else { return }
+
+                    // Re-capture each mount so the closure tracks the
+                    // current scene's openWindow action. Cheap and
+                    // protects against any future scene-restart edge cases.
+                    appDelegate.reopenHandler = { openWindow(id: "main") }
+
+                    // Init below runs once per app launch. If the user
+                    // closes the only window and reopens it via dock
+                    // click or Window > Show Window, this body re-mounts
+                    // and onAppear fires again — but StatusBarController
+                    // and PaneShortcutMonitor would double-up without a
+                    // guard.
+                    guard !didLaunch else { return }
+                    didLaunch = true
 
                     // Keep the global /usr/local/bin/nex symlink and installed
                     // nex-agentic skill in sync with the running bundle after
@@ -112,6 +136,7 @@ struct NexApp: App {
                 CheckForUpdatesView(updaterViewModel: updaterViewModel)
             }
             NexCommands(store: store)
+            ShowWindowCommands()
             HelpCommands()
         }
 
@@ -128,16 +153,15 @@ struct NexApp: App {
 }
 
 /// Attaches the user's macOS Dock Spaces binding to the main window
-/// (issue #102). SwiftUI's WindowGroup creates the window early, before
-/// WindowServer applies the per-bundle binding after a system restart;
-/// reading it from `com.apple.spaces` and applying it ourselves makes
-/// "Assign To: All Desktops" survive reboots.
+/// (issue #102). SwiftUI creates the window early, before WindowServer
+/// applies the per-bundle binding after a system restart; reading it
+/// from `com.apple.spaces` and applying it ourselves makes "Assign To:
+/// All Desktops" survive reboots.
 ///
 /// The hosting view's `viewDidMoveToWindow` is the only deterministic
 /// hook for "this view is now parented in a real NSWindow". `.onAppear`
 /// fires later and `makeNSView` fires earlier (when `view.window` is
-/// still nil). Each WindowGroup instance gets its own attacher, which
-/// is the right behaviour if SwiftUI ever opens multiple main windows.
+/// still nil).
 private struct SpacesBindingAttacher: NSViewRepresentable {
     func makeNSView(context _: Context) -> SpacesBindingView {
         SpacesBindingView()
@@ -157,5 +181,25 @@ private final class SpacesBindingView: NSView {
         guard !didApply, let window else { return }
         didApply = true
         WindowSpacesBinding.applyIfNeeded(to: window)
+    }
+}
+
+/// Reopens the main window when the user reactivates the app (dock click,
+/// Spotlight launch, etc.) with no visible window. Without this, ⌘W or
+/// the red traffic light leaves the app running with no obvious way back —
+/// we replace `File > New Window` with our own commands, so the system's
+/// default "click dock to open a new window" path doesn't apply.
+@MainActor
+final class NexAppDelegate: NSObject, @preconcurrency NSApplicationDelegate {
+    /// Installed by `NexApp` once the scene mounts. Captures the
+    /// SwiftUI `openWindow` environment action targeting the "main"
+    /// scene id.
+    var reopenHandler: (() -> Void)?
+
+    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows {
+            reopenHandler?()
+        }
+        return true
     }
 }
