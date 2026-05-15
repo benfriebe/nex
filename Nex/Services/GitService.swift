@@ -74,6 +74,12 @@ struct GitService {
     /// the parent's branch ref still points at the checkpoint
     /// commits graft made during the session.
     var resetHard: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
+    /// `git reset --mixed <sha>` — rewinds the current branch ref and
+    /// the index to `<sha>` but leaves working-tree files untouched.
+    /// Used on graft stop in the WORKTREE so the checkpoint commits
+    /// disappear while the user's actual edits remain on disk as
+    /// uncommitted changes.
+    var resetMixed: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
 }
 
 // MARK: - Live Implementation
@@ -368,6 +374,10 @@ extension GitService {
 
         resetHard: { repoPath, sha in
             _ = try runGit(args: ["reset", "--hard", sha], at: repoPath)
+        },
+
+        resetMixed: { repoPath, sha in
+            _ = try runGit(args: ["reset", "--mixed", sha], at: repoPath)
         }
     )
 }
@@ -449,7 +459,8 @@ extension GitService: DependencyKey {
             checkoutHeadForce: unimplemented("GitService.checkoutHeadForce"),
             repoState: unimplemented("GitService.repoState", placeholder: .clean),
             getHeadSha: unimplemented("GitService.getHeadSha", placeholder: ""),
-            resetHard: unimplemented("GitService.resetHard")
+            resetHard: unimplemented("GitService.resetHard"),
+            resetMixed: unimplemented("GitService.resetMixed")
         )
     }
 }

@@ -47,6 +47,13 @@ struct GraftSession: Equatable, Identifiable {
     /// resets the branch back here so the checkpoint commits graft
     /// added during the session don't survive the toggle-off.
     var preGraftSha: String?
+    /// Worktree's HEAD SHA at the moment graft started, captured
+    /// BEFORE the initial sync's `nex-graft: checkpoint`. On `stop`
+    /// the worktree's branch is rewound to this SHA via
+    /// `git reset --mixed` so the checkpoint commits vanish from the
+    /// worktree's history. The user's actual edits stay on disk as
+    /// uncommitted changes.
+    var worktreePreGraftSha: String?
 }
 
 enum GraftSessionEvent: Equatable {
@@ -67,6 +74,10 @@ struct GraftOrphan: Equatable, Identifiable {
     /// breadcrumb). The recovery flow resets to this so the
     /// checkpoint commits don't survive the abrupt termination.
     var preGraftSha: String?
+    /// Worktree's HEAD SHA at the moment graft started (from the
+    /// breadcrumb). The recovery flow does `git reset --mixed` in
+    /// the worktree so checkpoint commits disappear.
+    var worktreePreGraftSha: String?
 }
 
 enum GraftError: Error, Equatable {
@@ -75,6 +86,11 @@ enum GraftError: Error, Equatable {
     case missingWorktree(worktreePath: String)
     case branchResolutionFailed(worktreePath: String)
     case stashPopConflict(stashRef: String, underlying: String)
+    /// Refuses graft when the association points at the main repo
+    /// (i.e. `worktreeRoot == parentRepoRoot`). Graft only mirrors a
+    /// LINKED worktree back to its parent; running it on the parent
+    /// itself would be a self-reference with no useful mirroring.
+    case notAWorktree(path: String)
     case unknown(String)
 }
 
@@ -128,6 +144,17 @@ final class GraftServiceImpl: Sendable {
             throw GraftError.missingWorktree(worktreePath: worktreePath)
         }
         let parentRepoRoot = canonicalize(info.parentRepoRoot)
+        let worktreeRoot = canonicalize(info.worktreeRoot)
+
+        // Refuse to graft the parent repo onto itself. Graft only
+        // makes sense for a linked worktree mirroring back to its
+        // parent — running it on the parent's main checkout would
+        // mean we'd stash the user's edits, checkout themselves,
+        // sync themselves, and rewind themselves, which is just an
+        // expensive no-op (or worse, a stash conflict).
+        guard worktreeRoot != parentRepoRoot else {
+            throw GraftError.notAWorktree(path: worktreePath)
+        }
 
         // Reject if the parent root is already being grafted into.
         try lock.withLock {
@@ -209,7 +236,8 @@ final class GraftServiceImpl: Sendable {
                             worktreePath: worktreePath,
                             branch: association.branchName ?? "HEAD",
                             preGraftBranch: preGraftBranch,
-                            preGraftSha: preGraftSha
+                            preGraftSha: preGraftSha,
+                            worktreePreGraftSha: nil
                         )
                     )
                 }
@@ -232,6 +260,19 @@ final class GraftServiceImpl: Sendable {
             throw await rollbackAfterStash(error)
         }
 
+        // Capture the worktree's HEAD SHA BEFORE the initial sync.
+        // `stop` uses this to rewind the worktree's branch via
+        // `git reset --mixed` so the checkpoint commits the session
+        // made disappear from history (without that, the worktree's
+        // branch silently grows by N "nex-graft: checkpoint" commits
+        // every toggle cycle).
+        let worktreePreGraftSha: String?
+        do {
+            worktreePreGraftSha = try await gitService.getHeadSha(worktreePath)
+        } catch {
+            throw await rollbackAfterStash(error)
+        }
+
         // Persist the recovery breadcrumb before doing any further
         // work — if the next step crashes we still have what we
         // need to clean up on relaunch.
@@ -246,7 +287,8 @@ final class GraftServiceImpl: Sendable {
                     worktreePath: worktreePath,
                     branch: branch,
                     preGraftBranch: preGraftBranch,
-                    preGraftSha: preGraftSha
+                    preGraftSha: preGraftSha,
+                    worktreePreGraftSha: worktreePreGraftSha
                 )
             )
         } catch {
@@ -279,7 +321,8 @@ final class GraftServiceImpl: Sendable {
             lastSync: Date(),
             recentLog: [GraftLogEntry(kind: .info, message: "Graft started")],
             preGraftBranch: preGraftBranch,
-            preGraftSha: preGraftSha
+            preGraftSha: preGraftSha,
+            worktreePreGraftSha: worktreePreGraftSha
         )
 
         lock.withLock { sessions[association.id] = initialSession }
@@ -317,6 +360,20 @@ final class GraftServiceImpl: Sendable {
         // Cancel the watcher first so a sync pass can't fire mid-stop.
         if let task = lock.withLock({ watcherTasks.removeValue(forKey: associationID) }) {
             task.cancel()
+        }
+
+        // Rewind the WORKTREE's branch first so the checkpoint
+        // commits disappear before the parent restore renames any
+        // shared refs. `git reset --mixed` keeps the working-tree
+        // files intact — the user's actual edits remain on disk as
+        // uncommitted changes against the pre-graft tip.
+        if let worktreePreGraftSha = session.worktreePreGraftSha,
+           !worktreePreGraftSha.isEmpty,
+           FileManager.default.fileExists(atPath: session.worktreePath) {
+            // Best-effort. A failure here shouldn't block the parent
+            // restore — the user can manually rewind the worktree
+            // later if needed.
+            try? await gitService.resetMixed(session.worktreePath, worktreePreGraftSha)
         }
 
         do {
@@ -394,7 +451,8 @@ final class GraftServiceImpl: Sendable {
                 worktreePath: bread.worktreePath,
                 stashRef: bread.stashRef,
                 preGraftBranch: bread.preGraftBranch,
-                preGraftSha: bread.preGraftSha
+                preGraftSha: bread.preGraftSha,
+                worktreePreGraftSha: bread.worktreePreGraftSha
             ))
         }
         return found
@@ -404,6 +462,11 @@ final class GraftServiceImpl: Sendable {
         // Perform the restore + stash pop using the breadcrumb's
         // recorded state. Mirrors `stop()`: any failure leaves the
         // breadcrumb on disk so the user can retry recovery later.
+        if let worktreePreGraftSha = orphan.worktreePreGraftSha,
+           !worktreePreGraftSha.isEmpty,
+           FileManager.default.fileExists(atPath: orphan.worktreePath) {
+            try? await gitService.resetMixed(orphan.worktreePath, worktreePreGraftSha)
+        }
         try await restoreParent(
             parentRepoRoot: orphan.parentRepoRoot,
             preGraftBranch: orphan.preGraftBranch,
@@ -616,6 +679,12 @@ final class GraftServiceImpl: Sendable {
         /// Parent repo's HEAD SHA at the moment graft started.
         /// Optional for backwards compat with v1 breadcrumbs.
         let preGraftSha: String?
+        /// Worktree's HEAD SHA at the moment graft started (captured
+        /// before the initial sync's first checkpoint). On recovery,
+        /// `git reset --mixed` rewinds the worktree's branch to this
+        /// SHA so the checkpoint commits disappear. Optional for
+        /// backwards compat with earlier breadcrumbs.
+        let worktreePreGraftSha: String?
     }
 
     private func breadcrumbPath(at parentRepoRoot: String) -> String {

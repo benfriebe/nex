@@ -133,6 +133,75 @@ struct GraftServiceTests {
         #expect(!FileManager.default.fileExists(atPath: leakedFile))
     }
 
+    @Test func stopRewindsWorktreeBranchSoCheckpointsDisappear() async throws {
+        // Regression: after stop, the worktree's branch ref must be
+        // back at its pre-graft SHA — the checkpoint commits the
+        // session made should not survive on the shared branch.
+        // The user's actual edits remain on disk as uncommitted
+        // changes.
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let watcher = RecursiveFSWatcher(backend: .test)
+        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
+
+        let worktreeInitialSHA = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.worktree
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        _ = try await impl.start(env.association)
+
+        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
+        try "hello".write(toFile: newFile, atomically: true, encoding: .utf8)
+        watcher.inject([newFile], into: env.worktree)
+        try await pollUntil(timeout: .seconds(5)) {
+            let log = (try? shell("git", ["log", "-1", "--pretty=%s"], at: env.worktree)) ?? ""
+            return log.contains("nex-graft: checkpoint")
+        }
+
+        try await impl.stop(env.association.id)
+
+        // Worktree's branch ref is back at the pre-graft SHA.
+        let worktreeSHAAfter = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.worktree
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(worktreeSHAAfter == worktreeInitialSHA)
+
+        // No checkpoint commit reachable from HEAD.
+        let log = try shell("git", ["log", "--pretty=%s"], at: env.worktree)
+        #expect(!log.contains("nex-graft: checkpoint"))
+
+        // The user's actual edit survives as a working-tree file —
+        // `git reset --mixed` keeps working tree intact.
+        #expect(FileManager.default.fileExists(atPath: newFile))
+    }
+
+    @Test func startOnMainRepoRefuses() async throws {
+        // Graft is a worktree-to-parent mirror; running it on the
+        // parent repo itself would self-reference. Reject up front.
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let mainAssoc = RepoAssociation(
+            id: UUID(),
+            repoID: UUID(),
+            worktreePath: env.parent,
+            branchName: "main"
+        )
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+        do {
+            _ = try await impl.start(mainAssoc)
+            Issue.record("expected GraftError.notAWorktree")
+        } catch let error as GraftError {
+            if case .notAWorktree = error {
+                // ok
+            } else {
+                Issue.record("unexpected GraftError: \(error)")
+            }
+        }
+    }
+
     @Test func stopAfterDirtyStartPopsStashAndRemovesBreadcrumb() async throws {
         let env = try makeRepoEnv()
         defer { env.cleanup() }

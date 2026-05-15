@@ -226,8 +226,8 @@ struct WorkspaceInspectorView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             } else {
-                ForEach(workspace.repoAssociations) { assoc in
-                    repoAssociationRow(assoc, activeID: activeID)
+                ForEach(groupedAssociations(workspace.repoAssociations), id: \.repoID) { group in
+                    repoGroup(group, activeID: activeID)
                 }
             }
 
@@ -264,17 +264,104 @@ struct WorkspaceInspectorView: View {
         }
     }
 
-    private func repoAssociationRow(_ assoc: RepoAssociation, activeID: UUID) -> some View {
+    /// One repo plus the workspace's associations for it, split so the
+    /// inspector can render the main checkout at the top and worktrees
+    /// indented underneath. `mainAssociation` is the association whose
+    /// path equals the registered repo path (i.e. the parent repo
+    /// itself) — nil when the workspace only references worktrees of
+    /// the repo without the parent.
+    private struct RepoGroup {
+        let repoID: UUID
+        let repoName: String
+        let repoPath: String
+        let mainAssociation: RepoAssociation?
+        let worktreeAssociations: [RepoAssociation]
+    }
+
+    private func groupedAssociations(_ associations: IdentifiedArrayOf<RepoAssociation>) -> [RepoGroup] {
+        // Preserve registration order: walk associations in their
+        // existing order and bucket by repoID; the first encounter
+        // of each repoID defines the group's position in the list.
+        var order: [UUID] = []
+        var buckets: [UUID: [RepoAssociation]] = [:]
+        for assoc in associations {
+            if buckets[assoc.repoID] == nil {
+                order.append(assoc.repoID)
+                buckets[assoc.repoID] = []
+            }
+            buckets[assoc.repoID]?.append(assoc)
+        }
+        return order.compactMap { repoID -> RepoGroup? in
+            guard let repo = store.repoRegistry[id: repoID] else { return nil }
+            let entries = buckets[repoID] ?? []
+            let repoPath = (repo.path as NSString).standardizingPath
+            let main = entries.first { assoc in
+                (assoc.worktreePath as NSString).standardizingPath == repoPath
+            }
+            let worktrees = entries.filter { $0.id != main?.id }
+            return RepoGroup(
+                repoID: repoID,
+                repoName: repo.name,
+                repoPath: repo.path,
+                mainAssociation: main,
+                worktreeAssociations: worktrees
+            )
+        }
+    }
+
+    private func repoGroup(_ group: RepoGroup, activeID: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let main = group.mainAssociation {
+                repoAssociationRow(main, activeID: activeID, kind: .mainRepo, repoName: group.repoName)
+            } else if !group.worktreeAssociations.isEmpty {
+                // No main-repo association in the workspace — show
+                // a non-interactive header so worktrees are visibly
+                // anchored to a parent.
+                HStack(spacing: 6) {
+                    Image(systemName: "externaldrive")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(group.repoName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+            ForEach(group.worktreeAssociations) { assoc in
+                repoAssociationRow(assoc, activeID: activeID, kind: .worktree, repoName: group.repoName)
+                    .padding(.leading, 12)
+            }
+        }
+    }
+
+    private enum RepoAssociationKind {
+        /// The association is the parent repo's main checkout. No
+        /// graft toggle — graft is a worktree-to-parent mirror that
+        /// makes no sense on the parent itself.
+        case mainRepo
+        /// The association is a linked worktree. Renders the graft
+        /// toggle and a branch-style icon.
+        case worktree
+    }
+
+    private func repoAssociationRow(
+        _ assoc: RepoAssociation,
+        activeID: UUID,
+        kind: RepoAssociationKind,
+        repoName: String
+    ) -> some View {
         HStack(spacing: 6) {
             statusDot(for: assoc.id)
 
+            Image(systemName: kind == .mainRepo ? "externaldrive" : "arrow.triangle.branch")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
             VStack(alignment: .leading, spacing: 1) {
-                if let repo = store.repoRegistry[id: assoc.repoID] {
-                    Text(repo.name)
-                        .font(.system(size: 12, weight: .medium))
-                }
+                Text(kind == .mainRepo ? repoName : (assoc.branchName ?? "worktree"))
+                    .font(.system(size: 12, weight: .medium))
                 HStack(spacing: 6) {
-                    if let branch = assoc.branchName {
+                    if kind == .mainRepo, let branch = assoc.branchName {
                         Text(branch)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
@@ -293,7 +380,9 @@ struct WorkspaceInspectorView: View {
                 ))
             }
 
-            GraftInspectorButton(association: assoc, store: store)
+            if kind == .worktree {
+                GraftInspectorButton(association: assoc, store: store)
+            }
 
             InspectorIconButton(
                 icon: "terminal",
@@ -316,12 +405,14 @@ struct WorkspaceInspectorView: View {
                     deleteWorktree: false
                 ))
             }
-            Button("Remove & Delete Worktree", role: .destructive) {
-                store.send(.removeWorktreeAssociation(
-                    workspaceID: activeID,
-                    associationID: assoc.id,
-                    deleteWorktree: true
-                ))
+            if kind == .worktree {
+                Button("Remove & Delete Worktree", role: .destructive) {
+                    store.send(.removeWorktreeAssociation(
+                        workspaceID: activeID,
+                        associationID: assoc.id,
+                        deleteWorktree: true
+                    ))
+                }
             }
         }
     }
