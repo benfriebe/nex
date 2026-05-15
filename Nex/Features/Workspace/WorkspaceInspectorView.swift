@@ -215,6 +215,12 @@ struct WorkspaceInspectorView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
+            let assocPaths = Set(workspace.repoAssociations.map(\.worktreePath))
+            let relevantOrphans = store.graft.orphans.filter { assocPaths.contains($0.worktreePath) }
+            ForEach(relevantOrphans) { orphan in
+                GraftOrphanBanner(orphan: orphan, store: store)
+            }
+
             if workspace.repoAssociations.isEmpty {
                 Text("No repositories associated")
                     .font(.caption)
@@ -286,6 +292,8 @@ struct WorkspaceInspectorView: View {
                     fromPaneID: nil
                 ))
             }
+
+            GraftInspectorButton(association: assoc, store: store)
 
             InspectorIconButton(
                 icon: "terminal",
@@ -464,7 +472,7 @@ struct CreateWorktreeSheet: View {
 /// Compact icon button used in the inspector for per-repo actions. Adds a
 /// hover background, brightened foreground, and pointing-hand cursor since
 /// `.buttonStyle(.plain)` provides none of these by default.
-private struct InspectorIconButton: View {
+struct InspectorIconButton: View {
     let icon: String
     let tooltip: String
     let action: () -> Void

@@ -791,4 +791,46 @@ struct SocketParsingTests {
         let result = SocketServer.parseWireMessage(data)
         #expect(result?.0 == .paneList(paneID: nil, workspace: nil, scope: nil))
     }
+
+    // MARK: - parseWireMessage — Graft
+
+    @Test func parseGraftStartWithFilters() {
+        let data = jsonData("""
+        {"command":"graft-start","workspace":"Dev","repo":"my-repo","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .graftStart(workspace: "Dev", repo: "my-repo", paneID: Self.paneUUID))
+    }
+
+    @Test func parseGraftStartBare() {
+        let data = jsonData("""
+        {"command":"graft-start"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .graftStart(workspace: nil, repo: nil, paneID: nil))
+    }
+
+    @Test func parseGraftStartEmptyStringsNormalised() {
+        let data = jsonData("""
+        {"command":"graft-start","workspace":"","repo":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .graftStart(workspace: nil, repo: nil, paneID: nil))
+    }
+
+    @Test func parseGraftStop() {
+        let data = jsonData("""
+        {"command":"graft-stop","workspace":"Dev"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .graftStop(workspace: "Dev", repo: nil, paneID: nil))
+    }
+
+    @Test func parseGraftStatus() {
+        let data = jsonData("""
+        {"command":"graft-status"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .graftStatus)
+    }
 }

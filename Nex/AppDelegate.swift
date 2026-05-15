@@ -16,6 +16,11 @@ final class NexAppDelegate: NSObject, NSApplicationDelegate {
         // flush here, a `.terminateNow` (e.g. dialog disabled) kills
         // the process before the debounced Task can run (issue #129).
         QuitGate.shared.flushPendingSaves()
+        // Stop every active graft session so the `.git/nex-graft-active`
+        // breadcrumbs get cleared on a clean quit — otherwise the
+        // orphan-recovery banner would fire on every launch even when
+        // the user shut down cleanly.
+        QuitGate.shared.flushGraftSessions()
 
         // Skip the dialog during XCTest runs and when the user has
         // disabled it via Settings or the suppression checkbox.

@@ -38,6 +38,14 @@ final class QuitGate {
     /// about its internals.
     var flushPendingSaves: () -> Void = {}
 
+    /// Stop every active graft session before the process exits.
+    /// Wired by `NexApp.onAppear` to snapshot the store's graft
+    /// sessions and run `graftService.stop` for each, with a short
+    /// blocking wait so the `.git/nex-graft-active` breadcrumb is
+    /// cleared on a clean quit. Abrupt termination still works
+    /// (recovery banner on next launch).
+    var flushGraftSessions: () -> Void = {}
+
     private init() {}
 
     /// Whether the dialog should fire at all. `true` by default; the

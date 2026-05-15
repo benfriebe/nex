@@ -17,6 +17,19 @@ struct RepoRootInfo: Equatable {
     let parentRepoRoot: String
 }
 
+/// In-progress operations that block graft mirroring. `clean` means
+/// `git status` is dirty-allowed but there is no merge/rebase/etc in
+/// flight. `unknown` covers anything we don't explicitly recognise.
+enum RepoState: Equatable {
+    case clean
+    case merge
+    case rebase
+    case cherryPick
+    case revert
+    case bisect
+    case unknown(String)
+}
+
 struct GitService {
     var scanForRepos: @Sendable (_ rootPath: String, _ maxDepth: Int) async throws -> [ScannedRepo]
     var getRemoteURL: @Sendable (_ repoPath: String) async throws -> String?
@@ -29,6 +42,31 @@ struct GitService {
     var resolveRepoRoot: @Sendable (_ path: String) async -> RepoRootInfo?
     var getDiff: @Sendable (_ repoPath: String, _ targetPath: String?) async throws -> String
     var resolveHeadPath: @Sendable (_ worktreePath: String) async throws -> String
+    /// `git stash push --include-untracked -m <message>`. Returns the
+    /// resulting stash SHA (via `git rev-parse refs/stash`) or `nil` if
+    /// there was nothing to stash.
+    var stashPushIncludeUntracked: @Sendable (_ repoPath: String, _ message: String) async throws -> String?
+    /// `git stash pop <stashRef>`. Pops by SHA so the operation is
+    /// stable across other stashes landing in the meantime.
+    var stashPopRef: @Sendable (_ repoPath: String, _ stashRef: String) async throws -> Void
+    /// `git add -A` + `git commit -m <msg>` (optionally `--no-verify`).
+    /// Returns the staged paths captured between add and commit. If
+    /// nothing is staged the function is a no-op and returns `[]`.
+    var addAllAndCommit: @Sendable (_ worktreePath: String, _ message: String, _ noVerify: Bool) async throws -> [String]
+    /// `git checkout -f <branchOrSha> --`. Used to overwrite the
+    /// parent root's tree on every graft sync.
+    var checkoutBranchForce: @Sendable (_ repoPath: String, _ branchOrSha: String) async throws -> Void
+    /// `git checkout -f HEAD --`. Used on graft stop to discard the
+    /// synced tree before popping the user's stash.
+    var checkoutHeadForce: @Sendable (_ repoPath: String) async throws -> Void
+    /// Inspect git-dir for merge/rebase/cherry-pick/revert/bisect
+    /// breadcrumbs. Returns `.clean` when no operation is in flight.
+    var repoState: @Sendable (_ repoPath: String) async throws -> RepoState
+    /// `git rev-parse HEAD` — returns the SHA of the current HEAD.
+    /// Used by the graft sync pass to fall back to SHA-based
+    /// checkout when the worktree is on a branch the parent root
+    /// doesn't know, or detached.
+    var getHeadSha: @Sendable (_ repoPath: String) async throws -> String
 }
 
 // MARK: - Live Implementation
@@ -237,6 +275,88 @@ extension GitService {
                 (worktreePath as NSString).appendingPathComponent(trimmed)
             }
             return (absolute as NSString).standardizingPath
+        },
+
+        stashPushIncludeUntracked: { repoPath, message in
+            // `git stash push` is silent on success and prints to stdout
+            // when there's nothing to stash. The exit code is 0 in both
+            // cases, so we detect the "nothing to stash" outcome by
+            // inspecting the output.
+            let output = try runGit(
+                args: ["stash", "push", "--include-untracked", "-m", message],
+                at: repoPath
+            )
+            if output.contains("No local changes to save") {
+                return nil
+            }
+            let sha = try runGit(args: ["rev-parse", "refs/stash"], at: repoPath)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return sha.isEmpty ? nil : sha
+        },
+
+        stashPopRef: { repoPath, stashRef in
+            // `git stash pop` requires a `stash@{N}` reference, not a
+            // bare SHA. Look up the index that currently matches the
+            // recorded SHA — robust against other stashes landing in
+            // the meantime. If the stash is gone (user dropped it),
+            // treat as a no-op so the rest of the stop sequence can
+            // still clean up.
+            let listing = try runGit(args: ["stash", "list", "--format=%H"], at: repoPath)
+            let shas = listing
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+            guard let index = shas.firstIndex(of: stashRef) else { return }
+            _ = try runGit(args: ["stash", "pop", "stash@{\(index)}"], at: repoPath)
+        },
+
+        addAllAndCommit: { worktreePath, message, noVerify in
+            _ = try runGit(args: ["add", "-A"], at: worktreePath)
+            let staged = try runGit(
+                args: ["diff", "--name-only", "--cached"],
+                at: worktreePath
+            )
+            let paths = staged
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !paths.isEmpty else { return [] }
+            var commitArgs = ["commit", "-m", message]
+            if noVerify { commitArgs.append("--no-verify") }
+            _ = try runGit(args: commitArgs, at: worktreePath)
+            return paths
+        },
+
+        checkoutBranchForce: { repoPath, branchOrSha in
+            _ = try runGit(args: ["checkout", "-f", branchOrSha, "--"], at: repoPath)
+        },
+
+        checkoutHeadForce: { repoPath in
+            _ = try runGit(args: ["checkout", "-f", "HEAD", "--"], at: repoPath)
+        },
+
+        repoState: { repoPath in
+            let raw = try runGit(args: ["rev-parse", "--git-dir"], at: repoPath)
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let gitDir: String = if trimmed.hasPrefix("/") {
+                trimmed
+            } else {
+                (repoPath as NSString).appendingPathComponent(trimmed)
+            }
+            let fm = FileManager.default
+            func exists(_ component: String) -> Bool {
+                fm.fileExists(atPath: (gitDir as NSString).appendingPathComponent(component))
+            }
+            if exists("MERGE_HEAD") { return .merge }
+            if exists("rebase-merge") || exists("rebase-apply") { return .rebase }
+            if exists("CHERRY_PICK_HEAD") { return .cherryPick }
+            if exists("REVERT_HEAD") { return .revert }
+            if exists("BISECT_LOG") { return .bisect }
+            return .clean
+        },
+
+        getHeadSha: { repoPath in
+            let raw = try runGit(args: ["rev-parse", "HEAD"], at: repoPath)
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     )
 }
@@ -310,7 +430,14 @@ extension GitService: DependencyKey {
             // in `GitHeadWatcher`, so the watcher silently no-ops in tests
             // that don't care about HEAD watching. Tests that do care should
             // override this to return a real HEAD path.
-            resolveHeadPath: { _ in "" }
+            resolveHeadPath: { _ in "" },
+            stashPushIncludeUntracked: unimplemented("GitService.stashPushIncludeUntracked", placeholder: nil),
+            stashPopRef: unimplemented("GitService.stashPopRef"),
+            addAllAndCommit: unimplemented("GitService.addAllAndCommit", placeholder: []),
+            checkoutBranchForce: unimplemented("GitService.checkoutBranchForce"),
+            checkoutHeadForce: unimplemented("GitService.checkoutHeadForce"),
+            repoState: unimplemented("GitService.repoState", placeholder: .clean),
+            getHeadSha: unimplemented("GitService.getHeadSha", placeholder: "")
         )
     }
 }
