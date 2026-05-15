@@ -79,6 +79,60 @@ struct GraftServiceTests {
         try await impl.stop(env.association.id)
     }
 
+    @Test func stopRewindsParentToPreGraftSHA() async throws {
+        // The pre-stop-fix bug: `git checkout -f HEAD` is a no-op
+        // because the parent's HEAD has been advanced by the
+        // checkpoint commits, so the parent stays at the synced
+        // state forever. The fix captures the pre-graft branch + SHA
+        // and does `git reset --hard <sha>` on stop. This test
+        // exercises that path with real git.
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let watcher = RecursiveFSWatcher(backend: .test)
+        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
+
+        // Switch the parent to a NEW branch first so the sync target
+        // (the worktree's "feature" branch) differs from the parent's
+        // branch. This is the realistic case: parent on main, worktree
+        // on a feature branch.
+        _ = try shell("git", ["branch", "main-parent"], at: env.parent)
+        _ = try shell("git", ["checkout", "main-parent"], at: env.parent)
+        let parentInitialBranch = try shell(
+            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let parentInitialSHA = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        _ = try await impl.start(env.association)
+
+        // Drive a sync to advance the feature branch with a
+        // checkpoint commit.
+        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
+        try "hello".write(toFile: newFile, atomically: true, encoding: .utf8)
+        watcher.inject([newFile], into: env.worktree)
+        try await pollUntil(timeout: .seconds(5)) {
+            let log = (try? shell("git", ["log", "-1", "--pretty=%s"], at: env.worktree)) ?? ""
+            return log.contains("nex-graft: checkpoint")
+        }
+
+        try await impl.stop(env.association.id)
+
+        // Post-stop: parent must be back on its original branch at
+        // its original SHA. The synced file must be gone.
+        let parentBranchAfter = try shell(
+            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let parentSHAAfter = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(parentBranchAfter == parentInitialBranch)
+        #expect(parentSHAAfter == parentInitialSHA)
+
+        let leakedFile = (env.parent as NSString).appendingPathComponent("synced.txt")
+        #expect(!FileManager.default.fileExists(atPath: leakedFile))
+    }
+
     @Test func stopAfterDirtyStartPopsStashAndRemovesBreadcrumb() async throws {
         let env = try makeRepoEnv()
         defer { env.cleanup() }

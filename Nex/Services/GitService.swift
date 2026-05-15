@@ -67,6 +67,13 @@ struct GitService {
     /// checkout when the worktree is on a branch the parent root
     /// doesn't know, or detached.
     var getHeadSha: @Sendable (_ repoPath: String) async throws -> String
+    /// `git reset --hard <sha>` — rewinds the current branch to a
+    /// specific SHA, discarding working tree and index changes. Used
+    /// on graft stop to roll the parent root back to its pre-graft
+    /// state before popping the user's stash. Without this step,
+    /// the parent's branch ref still points at the checkpoint
+    /// commits graft made during the session.
+    var resetHard: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
 }
 
 // MARK: - Live Implementation
@@ -357,6 +364,10 @@ extension GitService {
         getHeadSha: { repoPath in
             let raw = try runGit(args: ["rev-parse", "HEAD"], at: repoPath)
             return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        },
+
+        resetHard: { repoPath, sha in
+            _ = try runGit(args: ["reset", "--hard", sha], at: repoPath)
         }
     )
 }
@@ -437,7 +448,8 @@ extension GitService: DependencyKey {
             checkoutBranchForce: unimplemented("GitService.checkoutBranchForce"),
             checkoutHeadForce: unimplemented("GitService.checkoutHeadForce"),
             repoState: unimplemented("GitService.repoState", placeholder: .clean),
-            getHeadSha: unimplemented("GitService.getHeadSha", placeholder: "")
+            getHeadSha: unimplemented("GitService.getHeadSha", placeholder: ""),
+            resetHard: unimplemented("GitService.resetHard")
         )
     }
 }

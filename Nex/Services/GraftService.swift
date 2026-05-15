@@ -38,6 +38,15 @@ struct GraftSession: Equatable, Identifiable {
     var stashRef: String?
     var lastSync: Date?
     var recentLog: [GraftLogEntry]
+    /// Parent repo's branch at the moment graft started. `stop` checks
+    /// this out so the parent returns to where the user left it. May
+    /// be "HEAD" (literal) when the parent was detached, in which case
+    /// the SHA fallback is the only restore mechanism.
+    var preGraftBranch: String?
+    /// Parent repo's HEAD SHA at the moment graft started. `stop`
+    /// resets the branch back here so the checkpoint commits graft
+    /// added during the session don't survive the toggle-off.
+    var preGraftSha: String?
 }
 
 enum GraftSessionEvent: Equatable {
@@ -51,6 +60,13 @@ struct GraftOrphan: Equatable, Identifiable {
     var parentRepoRoot: String
     var worktreePath: String
     var stashRef: String?
+    /// Parent repo's branch at the moment graft started (from the
+    /// breadcrumb). The recovery flow checks this out before reset.
+    var preGraftBranch: String?
+    /// Parent repo's HEAD SHA at the moment graft started (from the
+    /// breadcrumb). The recovery flow resets to this so the
+    /// checkpoint commits don't survive the abrupt termination.
+    var preGraftSha: String?
 }
 
 enum GraftError: Error, Equatable {
@@ -133,6 +149,22 @@ final class GraftServiceImpl: Sendable {
             throw GraftError.repoBusy(state: describe(state))
         }
 
+        // Capture the parent's pre-graft branch + SHA BEFORE we touch
+        // it. The stop sequence uses these to restore the parent's
+        // working tree (checkout the original branch, then `git reset
+        // --hard <sha>` to undo every checkpoint commit the session
+        // made). Without this capture, `stop()` would just be sitting
+        // on the synced state with no way to roll back.
+        let preGraftBranch: String?
+        let preGraftSha: String?
+        do {
+            preGraftBranch = try await gitService.getCurrentBranch(parentRepoRoot)
+            preGraftSha = try await gitService.getHeadSha(parentRepoRoot)
+        } catch {
+            releaseBusy(parentRepoRoot)
+            throw error
+        }
+
         // Stash any uncommitted changes in the parent root. The
         // breadcrumb records the resulting SHA so `stop` pops the
         // exact stash even if other stashes are pushed in the
@@ -175,7 +207,9 @@ final class GraftServiceImpl: Sendable {
                             assocId: association.id.uuidString,
                             stashRef: stashRef,
                             worktreePath: worktreePath,
-                            branch: association.branchName ?? "HEAD"
+                            branch: association.branchName ?? "HEAD",
+                            preGraftBranch: preGraftBranch,
+                            preGraftSha: preGraftSha
                         )
                     )
                 }
@@ -210,7 +244,9 @@ final class GraftServiceImpl: Sendable {
                     assocId: association.id.uuidString,
                     stashRef: stashRef,
                     worktreePath: worktreePath,
-                    branch: branch
+                    branch: branch,
+                    preGraftBranch: preGraftBranch,
+                    preGraftSha: preGraftSha
                 )
             )
         } catch {
@@ -241,7 +277,9 @@ final class GraftServiceImpl: Sendable {
             status: .watching,
             stashRef: stashRef,
             lastSync: Date(),
-            recentLog: [GraftLogEntry(kind: .info, message: "Graft started")]
+            recentLog: [GraftLogEntry(kind: .info, message: "Graft started")],
+            preGraftBranch: preGraftBranch,
+            preGraftSha: preGraftSha
         )
 
         lock.withLock { sessions[association.id] = initialSession }
@@ -282,9 +320,13 @@ final class GraftServiceImpl: Sendable {
         }
 
         do {
-            try await gitService.checkoutHeadForce(session.parentRepoRoot)
+            try await restoreParent(
+                parentRepoRoot: session.parentRepoRoot,
+                preGraftBranch: session.preGraftBranch,
+                preGraftSha: session.preGraftSha
+            )
         } catch {
-            // Checkout failed (permissions, concurrent edit, etc).
+            // Restore failed (permissions, concurrent edit, etc).
             // LEAVE the breadcrumb in place so the orphan-recovery
             // banner can pick this up on next launch — the user's
             // stash is still on disk and they need a UI path to it.
@@ -350,17 +392,23 @@ final class GraftServiceImpl: Sendable {
                 id: id,
                 parentRepoRoot: parent,
                 worktreePath: bread.worktreePath,
-                stashRef: bread.stashRef
+                stashRef: bread.stashRef,
+                preGraftBranch: bread.preGraftBranch,
+                preGraftSha: bread.preGraftSha
             ))
         }
         return found
     }
 
     func recoverOrphan(_ orphan: GraftOrphan) async throws {
-        // Perform the checkout + stash pop using the breadcrumb's
+        // Perform the restore + stash pop using the breadcrumb's
         // recorded state. Mirrors `stop()`: any failure leaves the
         // breadcrumb on disk so the user can retry recovery later.
-        try await gitService.checkoutHeadForce(orphan.parentRepoRoot)
+        try await restoreParent(
+            parentRepoRoot: orphan.parentRepoRoot,
+            preGraftBranch: orphan.preGraftBranch,
+            preGraftSha: orphan.preGraftSha
+        )
         if let stashRef = orphan.stashRef {
             do {
                 try await gitService.stashPopRef(orphan.parentRepoRoot, stashRef)
@@ -376,6 +424,43 @@ final class GraftServiceImpl: Sendable {
 
     func dismissOrphan(_ orphan: GraftOrphan) async {
         removeBreadcrumb(at: orphan.parentRepoRoot)
+    }
+
+    // MARK: - Restore
+
+    /// Roll the parent root back to its pre-graft state: switch to the
+    /// original branch (if known), then `git reset --hard` to the
+    /// original SHA so the checkpoint commits graft added during the
+    /// session are discarded. The shared branch ref is rewound for
+    /// every worktree pointing at it — that's intentional. The user's
+    /// actual edits live on disk in the worktree's working tree and
+    /// are not affected.
+    ///
+    /// Older breadcrumbs (pre-stop-fix) may lack `preGraftBranch` /
+    /// `preGraftSha` — in that case we fall back to the original
+    /// behaviour (`git checkout -f HEAD`) so recovery still works for
+    /// breadcrumbs written by earlier builds.
+    private func restoreParent(
+        parentRepoRoot: String,
+        preGraftBranch: String?,
+        preGraftSha: String?
+    ) async throws {
+        guard let preGraftSha, !preGraftSha.isEmpty else {
+            // Best-effort fallback for breadcrumbs that predate the
+            // pre-graft capture. This won't actually rewind the
+            // synced state but at least clears any unstaged
+            // workspace changes.
+            try await gitService.checkoutHeadForce(parentRepoRoot)
+            return
+        }
+        // Restore the original branch first so the subsequent reset
+        // targets the right ref. The literal "HEAD" sentinel means the
+        // parent was detached — skip the branch switch and let the
+        // reset land on the detached HEAD position directly.
+        if let preGraftBranch, !preGraftBranch.isEmpty, preGraftBranch != "HEAD" {
+            try await gitService.checkoutBranchForce(parentRepoRoot, preGraftBranch)
+        }
+        try await gitService.resetHard(parentRepoRoot, preGraftSha)
     }
 
     // MARK: - Sync
@@ -525,6 +610,12 @@ final class GraftServiceImpl: Sendable {
         let stashRef: String?
         let worktreePath: String
         let branch: String
+        /// Parent repo's branch at the moment graft started. Optional
+        /// for backwards compat with v1 breadcrumbs (decoded as nil).
+        let preGraftBranch: String?
+        /// Parent repo's HEAD SHA at the moment graft started.
+        /// Optional for backwards compat with v1 breadcrumbs.
+        let preGraftSha: String?
     }
 
     private func breadcrumbPath(at parentRepoRoot: String) -> String {
