@@ -259,10 +259,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
                     translationFlags: translationEvent.modifierFlags
                 )
                 key.composing = false
-                text.withCString { ptr in
-                    key.text = ptr
-                    _ = ghosttySurface?.sendKey(key)
-                }
+                sendKey(key, text: Self.ghosttyText(from: text))
             }
         } else {
             // No committed text. Either a pure preedit update, a bare key (arrow, enter),
@@ -274,14 +271,19 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
                 translationFlags: translationEvent.modifierFlags
             )
             key.composing = hasMarkedText() || markedTextBefore
-            if let text = Self.ghosttyCharacters(from: translationEvent) {
-                text.withCString { ptr in
-                    key.text = ptr
-                    _ = ghosttySurface?.sendKey(key)
-                }
-            } else {
-                _ = ghosttySurface?.sendKey(key)
-            }
+            sendKey(key, text: Self.ghosttyText(from: Self.ghosttyCharacters(from: translationEvent)))
+        }
+    }
+
+    private func sendKey(_ key: ghostty_input_key_s, text: String?) {
+        guard let text else {
+            _ = ghosttySurface?.sendKey(key)
+            return
+        }
+        var keyWithText = key
+        text.withCString { ptr in
+            keyWithText.text = ptr
+            _ = ghosttySurface?.sendKey(keyWithText)
         }
     }
 
@@ -673,6 +675,23 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         }
 
         return characters
+    }
+
+    /// Final filter on the text passed into a libghostty key event's `key.text`.
+    /// Returns nil for empty input or for strings whose first UTF-8 byte is a C0
+    /// control code (< 0x20). When nil, the caller should send the key without
+    /// `text` set so libghostty's keymap encodes the proper escape sequence
+    /// (e.g. ESC [ Z for Shift+Tab, where macOS otherwise hands us 0x19).
+    ///
+    /// Mirrors upstream Ghostty's `keyAction` filter in SurfaceView_AppKit.swift.
+    /// Note: this checks the first UTF-8 byte (not Unicode scalar), so emoji /
+    /// astral chars and ZWJ sequences pass through unchanged.
+    static func ghosttyText(from text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        if let firstByte = text.utf8.first, firstByte < 0x20 {
+            return nil
+        }
+        return text
     }
 
     static func keyEvent(

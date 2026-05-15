@@ -132,4 +132,73 @@ struct SurfaceViewKeyboardTests {
 
         #expect(SurfaceView.ghosttyCharacters(from: event) == "é")
     }
+
+    // MARK: - ghosttyText (text filter for libghostty key.text)
+
+    @Test func ghosttyTextFiltersBackTabControlByte() {
+        // Shift+Tab gives us NSBackTabCharacter (0x19). libghostty's keymap must
+        // encode it as CSI Z, so we strip the raw text and rely on keycode+mods.
+        #expect(SurfaceView.ghosttyText(from: "\u{19}") == nil)
+    }
+
+    @Test func ghosttyTextFiltersReturnControlByte() {
+        // Ctrl+Enter's text (0x0D) — upstream's motivating example for this filter.
+        #expect(SurfaceView.ghosttyText(from: "\r") == nil)
+    }
+
+    @Test func ghosttyTextFiltersTabControlByte() {
+        // Plain Tab (0x09). Pre-filter we'd send "\t" as text; post-filter we
+        // rely on the keymap, which produces the same byte on the PTY.
+        #expect(SurfaceView.ghosttyText(from: "\t") == nil)
+    }
+
+    @Test func ghosttyTextPassesThroughDelete() {
+        // 0x7F (DEL) is not < 0x20 and intentionally flows through as text.
+        // Matches upstream Ghostty's threshold — pinning to document the choice.
+        #expect(SurfaceView.ghosttyText(from: "\u{7F}") == "\u{7F}")
+    }
+
+    @Test func ghosttyTextPassesThroughSpace() {
+        // Ctrl+Space lands here as " " (after ghosttyCharacters strips control).
+        // 0x20 is the threshold, so space passes through.
+        #expect(SurfaceView.ghosttyText(from: " ") == " ")
+    }
+
+    @Test func ghosttyTextPassesThroughPrintable() {
+        #expect(SurfaceView.ghosttyText(from: "f") == "f")
+    }
+
+    @Test func ghosttyTextPassesThroughMultiByteUnicode() {
+        #expect(SurfaceView.ghosttyText(from: "é") == "é")
+    }
+
+    @Test func ghosttyTextPassesThroughEmojiAndZWJ() {
+        // Astral / surrogate-pair / ZWJ sequences start with high UTF-8
+        // bytes (0xF0+ for astral, 0xE2 for ZWJ U+200D). The filter checks
+        // first UTF-8 byte (not first scalar), so they pass through.
+        #expect(SurfaceView.ghosttyText(from: "🎉") == "🎉")
+        #expect(SurfaceView.ghosttyText(from: "👨‍👩‍👧") == "👨‍👩‍👧")
+    }
+
+    @Test func ghosttyTextReturnsNilForNilInput() {
+        #expect(SurfaceView.ghosttyText(from: nil) == nil)
+    }
+
+    @Test func ghosttyTextReturnsNilForEmptyInput() {
+        #expect(SurfaceView.ghosttyText(from: "") == nil)
+    }
+
+    @Test func shiftTabRoundTripFiltersToNil() {
+        // End-to-end regression check for issue #134: Shift+Tab through both
+        // helpers should yield nil so the keymap encodes CSI Z.
+        let event = keyEvent(
+            keyCode: 48,
+            modifierFlags: .shift,
+            characters: "\u{19}",
+            charactersIgnoringModifiers: "\t"
+        )
+
+        let text = SurfaceView.ghosttyText(from: SurfaceView.ghosttyCharacters(from: event))
+        #expect(text == nil)
+    }
 }
