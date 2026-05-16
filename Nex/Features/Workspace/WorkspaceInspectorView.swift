@@ -421,8 +421,13 @@ struct WorkspaceInspectorView: View {
     private func diffStatsLabel(for associationID: UUID) -> some View {
         if case .dirty(let files, let adds, let dels) = store.gitStatuses[associationID] ?? .unknown {
             HStack(spacing: 4) {
-                Text("\(files) file\(files == 1 ? "" : "s")")
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 2) {
+                    Image(systemName: "doc")
+                        .font(.system(size: 9))
+                    Text("\(files)")
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(files) file\(files == 1 ? "" : "s") changed")
                 if adds > 0 {
                     Text("+\(adds)").foregroundStyle(.green)
                 }
