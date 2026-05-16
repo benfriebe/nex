@@ -345,9 +345,29 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         return NSPoint(x: point.x, y: frame.height - point.y)
     }
 
+    /// Set on cmd+click mouseDown when we resolve a markdown path locally
+    /// (issue #107). When set, the matching mouseUp posts the open notification
+    /// and skips forwarding press/release to libghostty so its fragment-only
+    /// match doesn't fight with us. Cleared at the top of every mouseDown so
+    /// a missed mouseUp (window closed mid-drag, focus stolen, etc.) cannot
+    /// strand libghostty's mouse state into the next click.
+    private var consumedCmdClickPath: String?
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // Stale state from a missed mouseUp must never carry over: if it did,
+        // the next mouseUp would suppress libghostty's RELEASE for a click we
+        // didn't intercept here, leaving its mouse button stuck.
+        consumedCmdClickPath = nil
         let point = mousePoint(from: event)
+        if event.modifierFlags.contains(.command),
+           let path = resolveWrappedMarkdownPath(at: point) {
+            // Defer the open until mouseUp to match libghostty's
+            // press-then-release activation timing. mouseUp also handles the
+            // surface lookup for the notification's userInfo.
+            consumedCmdClickPath = path
+            return
+        }
         ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
         _ = ghosttySurface?.sendMouseButton(
             state: GHOSTTY_MOUSE_PRESS,
@@ -357,6 +377,11 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let path = consumedCmdClickPath {
+            consumedCmdClickPath = nil
+            postOpenMarkdownNotification(path: path)
+            return
+        }
         let point = mousePoint(from: event)
         ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
         _ = ghosttySurface?.sendMouseButton(
@@ -366,7 +391,53 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         )
     }
 
+    /// Try to resolve a markdown path under a cmd+click, including paths that
+    /// wrap across multiple terminal rows. Returns nil when no .md path
+    /// covers the click; in that case the caller should forward the click to
+    /// libghostty so non-markdown links (URLs, single-line bare paths handled
+    /// by libghostty's regex) keep working.
+    private func resolveWrappedMarkdownPath(at point: NSPoint) -> String? {
+        guard let ghostty = ghosttySurface else { return nil }
+        let size = ghostty.size
+        guard size.cell_width_px > 0, size.cell_height_px > 0,
+              size.columns > 0, size.rows > 0 else { return nil }
+        // `cell_width_px` / `cell_height_px` are physical pixels (libghostty
+        // is sized via `bounds * backingScaleFactor` in viewDidMoveToWindow /
+        // setFrameSize). `point` is in NSView logical points. Convert before
+        // dividing or Retina (2x) gives half the correct column.
+        let scale = window?.backingScaleFactor ?? 1.0
+        let clickCol = Int(point.x * scale) / Int(size.cell_width_px)
+        let clickRow = Int(point.y * scale) / Int(size.cell_height_px)
+        guard clickRow >= 0, clickRow < Int(size.rows),
+              clickCol >= 0, clickCol < Int(size.columns) else { return nil }
+        guard let viewportText = ghostty.readText(includeScrollback: false) else { return nil }
+        return CmdClickPathResolver.findMarkdownPath(
+            in: viewportText,
+            firstRow: 0,
+            cols: Int(size.columns),
+            clickRow: clickRow,
+            clickCol: clickCol
+        )
+    }
+
+    private func postOpenMarkdownNotification(path: String) {
+        let surface = ghosttySurface?.surface as Any
+        let standardized = NSString(string: path).standardizingPath
+        NotificationCenter.default.post(
+            name: GhosttyApp.openFileNotification,
+            object: nil,
+            userInfo: [
+                "path": standardized,
+                "surface": surface
+            ]
+        )
+    }
+
     override func mouseDragged(with event: NSEvent) {
+        // If we intercepted the matching mouseDown, libghostty never received
+        // a PRESS — feeding it cursor moves now would desync its hover/select
+        // state. Drop the drag; mouseUp will post the open notification.
+        if consumedCmdClickPath != nil { return }
         let point = mousePoint(from: event)
         ghosttySurface?.sendMousePos(
             x: point.x, y: point.y,

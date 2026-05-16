@@ -100,7 +100,9 @@
 		B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */; };
 		B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */; };
 		B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */; };
+		BC03D29CE48A7376A7F2B97E /* CmdClickPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22CA9FDA34D1BCE30C07D121 /* CmdClickPathResolver.swift */; };
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
+		BFC73C4306DF628DF52FF55D /* CmdClickPathResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A830B6BF72CE183AC4EC7C17 /* CmdClickPathResolverTests.swift */; };
 		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
 		C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */; };
 		C276E6F9F7B46ED43FF491D5 /* NexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3714AA1F15C85762BF36B1FE /* NexApp.swift */; };
@@ -177,6 +179,7 @@
 		200EB2588E40ABB7C51E24E6 /* MarkdownHTMLRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLRendererTests.swift; sourceTree = "<group>"; };
 		21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseMigrationTests.swift; sourceTree = "<group>"; };
 		221A3B0170CFD708F3B03A84 /* Repo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repo.swift; sourceTree = "<group>"; };
+		22CA9FDA34D1BCE30C07D121 /* CmdClickPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmdClickPathResolver.swift; sourceTree = "<group>"; };
 		2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupRenderTests.swift; sourceTree = "<group>"; };
 		257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoAssociation.swift; sourceTree = "<group>"; };
 		281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHeadWatcher.swift; sourceTree = "<group>"; };
@@ -236,6 +239,7 @@
 		A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutTests.swift; sourceTree = "<group>"; };
 		A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigClient.swift; sourceTree = "<group>"; };
+		A830B6BF72CE183AC4EC7C17 /* CmdClickPathResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmdClickPathResolverTests.swift; sourceTree = "<group>"; };
 		AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingTests.swift; sourceTree = "<group>"; };
 		ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDetectRepoTests.swift; sourceTree = "<group>"; };
 		ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureTests.swift; sourceTree = "<group>"; };
@@ -375,6 +379,7 @@
 				A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */,
 				D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */,
 				ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */,
+				A830B6BF72CE183AC4EC7C17 /* CmdClickPathResolverTests.swift */,
 				89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */,
 				309F641591BB580429299666 /* ConfigParserTests.swift */,
 				21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */,
@@ -426,6 +431,7 @@
 			isa = PBXGroup;
 			children = (
 				DC371B0DE7B02828E9EDFE8E /* ClipboardImageHelper.swift */,
+				22CA9FDA34D1BCE30C07D121 /* CmdClickPathResolver.swift */,
 				000C46C62FB60503295A92E8 /* GhosttyApp.swift */,
 				96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */,
 				A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */,
@@ -735,6 +741,7 @@
 				840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */,
 				B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */,
 				DC11308E0E92225F551CF162 /* AutoDetectRepoTests.swift in Sources */,
+				BFC73C4306DF628DF52FF55D /* CmdClickPathResolverTests.swift in Sources */,
 				FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */,
 				A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */,
 				B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */,
@@ -782,6 +789,7 @@
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,
 				B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */,
 				B221D950378165611A0DF932 /* ClipboardImageHelper.swift in Sources */,
+				BC03D29CE48A7376A7F2B97E /* CmdClickPathResolver.swift in Sources */,
 				3C74513CA9D5FD60E672B477 /* CommandPaletteItem.swift in Sources */,
 				741144CE5AC7DEC20A18A89D /* CommandPaletteView.swift in Sources */,
 				2D8754E0B3E9AD185D7EB6B0 /* ConfigParser.swift in Sources */,
