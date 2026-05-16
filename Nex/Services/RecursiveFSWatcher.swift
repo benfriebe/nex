@@ -211,17 +211,6 @@ final class RecursiveFSWatcher: Sendable {
         let filtered = filterPaths(paths, ignoredComponents: ignoredComponents)
         guard !filtered.isEmpty else { return }
 
-        let shouldSchedule: Bool = pending.lock.withLock {
-            for path in filtered {
-                pending.paths.insert(path)
-            }
-            if pending.workItem != nil {
-                pending.workItem?.cancel()
-            }
-            return true
-        }
-        guard shouldSchedule else { return }
-
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let flushed: [String] = pending.lock.withLock {
@@ -236,7 +225,13 @@ final class RecursiveFSWatcher: Sendable {
             guard stillAlive else { return }
             continuation.yield(flushed.sorted())
         }
-        pending.lock.withLock { pending.workItem = work }
+        pending.lock.withLock {
+            for path in filtered {
+                pending.paths.insert(path)
+            }
+            pending.workItem?.cancel()
+            pending.workItem = work
+        }
         queue.asyncAfter(deadline: .now() + debounce, execute: work)
     }
 
