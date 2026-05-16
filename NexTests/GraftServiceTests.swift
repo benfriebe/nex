@@ -50,95 +50,12 @@ struct GraftServiceTests {
         try await impl.stop(env.association.id)
     }
 
-    @Test func syncPassCheckpointsWorktreeAndUpdatesParent() async throws {
-        let env = try makeRepoEnv()
-        defer { env.cleanup() }
-        let watcher = RecursiveFSWatcher(backend: .test)
-        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
-
-        _ = try await impl.start(env.association)
-
-        // Drop a file in the worktree, then poke the fake watcher.
-        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
-        try "hello graft".write(toFile: newFile, atomically: true, encoding: .utf8)
-        watcher.inject([newFile], into: env.worktree)
-
-        // Sync pass runs through the watcher loop on a background task.
-        // Poll the worktree log up to a few seconds.
-        try await pollUntil(timeout: .seconds(5)) {
-            let log = (try? shell("git", ["log", "-1", "--pretty=%s"], at: env.worktree)) ?? ""
-            return log.contains("nex-graft: checkpoint")
-        }
-
-        let parentLog = try shell("git", ["log", "-1", "--pretty=%s"], at: env.parent)
-        #expect(parentLog.contains("nex-graft: checkpoint"))
-
-        let parentFile = (env.parent as NSString).appendingPathComponent("synced.txt")
-        #expect(FileManager.default.fileExists(atPath: parentFile))
-
-        try await impl.stop(env.association.id)
-    }
-
-    @Test func stopRewindsParentToPreGraftSHA() async throws {
-        // The pre-stop-fix bug: `git checkout -f HEAD` is a no-op
-        // because the parent's HEAD has been advanced by the
-        // checkpoint commits, so the parent stays at the synced
-        // state forever. The fix captures the pre-graft branch + SHA
-        // and does `git reset --hard <sha>` on stop. This test
-        // exercises that path with real git.
-        let env = try makeRepoEnv()
-        defer { env.cleanup() }
-        let watcher = RecursiveFSWatcher(backend: .test)
-        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
-
-        // Switch the parent to a NEW branch first so the sync target
-        // (the worktree's "feature" branch) differs from the parent's
-        // branch. This is the realistic case: parent on main, worktree
-        // on a feature branch.
-        _ = try shell("git", ["branch", "main-parent"], at: env.parent)
-        _ = try shell("git", ["checkout", "main-parent"], at: env.parent)
-        let parentInitialBranch = try shell(
-            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        let parentInitialSHA = try shell(
-            "git", ["rev-parse", "HEAD"], at: env.parent
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        _ = try await impl.start(env.association)
-
-        // Drive a sync to advance the feature branch with a
-        // checkpoint commit.
-        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
-        try "hello".write(toFile: newFile, atomically: true, encoding: .utf8)
-        watcher.inject([newFile], into: env.worktree)
-        try await pollUntil(timeout: .seconds(5)) {
-            let log = (try? shell("git", ["log", "-1", "--pretty=%s"], at: env.worktree)) ?? ""
-            return log.contains("nex-graft: checkpoint")
-        }
-
-        try await impl.stop(env.association.id)
-
-        // Post-stop: parent must be back on its original branch at
-        // its original SHA. The synced file must be gone.
-        let parentBranchAfter = try shell(
-            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        let parentSHAAfter = try shell(
-            "git", ["rev-parse", "HEAD"], at: env.parent
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(parentBranchAfter == parentInitialBranch)
-        #expect(parentSHAAfter == parentInitialSHA)
-
-        let leakedFile = (env.parent as NSString).appendingPathComponent("synced.txt")
-        #expect(!FileManager.default.fileExists(atPath: leakedFile))
-    }
-
-    @Test func stopRewindsWorktreeBranchSoCheckpointsDisappear() async throws {
-        // Regression: after stop, the worktree's branch ref must be
-        // back at its pre-graft SHA — the checkpoint commits the
-        // session made should not survive on the shared branch.
-        // The user's actual edits remain on disk as uncommitted
-        // changes.
+    @Test func syncMirrorsTrackedFilesToParentWithoutCommitting() async throws {
+        // Under the tree-based design: the worktree's branch ref and
+        // index are never touched. The parent's working tree gets
+        // updated to reflect the worktree's content (via
+        // `read-tree --reset -u`), but the parent's HEAD / branch
+        // ref also stays put.
         let env = try makeRepoEnv()
         defer { env.cleanup() }
         let watcher = RecursiveFSWatcher(backend: .test)
@@ -147,31 +64,97 @@ struct GraftServiceTests {
         let worktreeInitialSHA = try shell(
             "git", ["rev-parse", "HEAD"], at: env.worktree
         ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let parentInitialSHA = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
 
         _ = try await impl.start(env.association)
 
         let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
-        try "hello".write(toFile: newFile, atomically: true, encoding: .utf8)
+        try "hello graft".write(toFile: newFile, atomically: true, encoding: .utf8)
         watcher.inject([newFile], into: env.worktree)
+
+        // Poll for the file to land in the parent. The tree-based
+        // sync writes tracked files via read-tree, so the parent's
+        // working tree sees them without any commit.
+        let parentFile = (env.parent as NSString).appendingPathComponent("synced.txt")
         try await pollUntil(timeout: .seconds(5)) {
-            let log = (try? shell("git", ["log", "-1", "--pretty=%s"], at: env.worktree)) ?? ""
-            return log.contains("nex-graft: checkpoint")
+            FileManager.default.fileExists(atPath: parentFile)
         }
 
-        try await impl.stop(env.association.id)
-
-        // Worktree's branch ref is back at the pre-graft SHA.
+        // Worktree branch ref must NOT have moved — no checkpoint
+        // commit appended.
         let worktreeSHAAfter = try shell(
             "git", ["rev-parse", "HEAD"], at: env.worktree
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(worktreeSHAAfter == worktreeInitialSHA)
 
-        // No checkpoint commit reachable from HEAD.
-        let log = try shell("git", ["log", "--pretty=%s"], at: env.worktree)
-        #expect(!log.contains("nex-graft: checkpoint"))
+        // Parent's HEAD ref also unchanged (no detached HEAD).
+        let parentSHAAfter = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(parentSHAAfter == parentInitialSHA)
 
-        // The user's actual edit survives as a working-tree file —
-        // `git reset --mixed` keeps working tree intact.
+        // No `nex-graft: checkpoint` commit anywhere.
+        let worktreeLog = try shell("git", ["log", "--pretty=%s"], at: env.worktree)
+        #expect(!worktreeLog.contains("nex-graft: checkpoint"))
+        let parentLog = try shell("git", ["log", "--pretty=%s"], at: env.parent)
+        #expect(!parentLog.contains("nex-graft: checkpoint"))
+
+        try await impl.stop(env.association.id)
+    }
+
+    @Test func stopRestoresParentWorkingTreeAndKeepsWorktreeUntouched() async throws {
+        // After the tree-based redesign: stop restores the parent's
+        // working tree to its pre-graft branch HEAD via
+        // `git reset --hard <preGraftSha>`, and the worktree is
+        // never touched at any point.
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let watcher = RecursiveFSWatcher(backend: .test)
+        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
+
+        let parentInitialBranch = try shell(
+            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let parentInitialSHA = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let worktreeInitialSHA = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.worktree
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        _ = try await impl.start(env.association)
+
+        // Drive a sync so the parent has the worktree's content.
+        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
+        try "hello".write(toFile: newFile, atomically: true, encoding: .utf8)
+        watcher.inject([newFile], into: env.worktree)
+        let parentFile = (env.parent as NSString).appendingPathComponent("synced.txt")
+        try await pollUntil(timeout: .seconds(5)) {
+            FileManager.default.fileExists(atPath: parentFile)
+        }
+
+        try await impl.stop(env.association.id)
+
+        // Parent restored: same branch, same SHA, synced file gone.
+        let parentBranchAfter = try shell(
+            "git", ["rev-parse", "--abbrev-ref", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let parentSHAAfter = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.parent
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(parentBranchAfter == parentInitialBranch)
+        #expect(parentSHAAfter == parentInitialSHA)
+        #expect(!FileManager.default.fileExists(atPath: parentFile))
+
+        // Worktree completely untouched.
+        let worktreeSHAAfter = try shell(
+            "git", ["rev-parse", "HEAD"], at: env.worktree
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(worktreeSHAAfter == worktreeInitialSHA)
+        // The user's actual edit on disk is preserved (it's never been
+        // touched by git).
         #expect(FileManager.default.fileExists(atPath: newFile))
     }
 

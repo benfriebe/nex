@@ -80,6 +80,22 @@ struct GitService {
     /// disappear while the user's actual edits remain on disk as
     /// uncommitted changes.
     var resetMixed: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
+    /// Compute the tree SHA representing the worktree's current state
+    /// (HEAD + all staged + all unstaged edits) WITHOUT touching the
+    /// worktree's real index. Backed by an out-of-band temp index
+    /// (`GIT_INDEX_FILE=…`) so the user's pending staging in the
+    /// worktree is preserved verbatim.
+    ///
+    /// This is the worktree-side primitive for the tree-based graft
+    /// sync: the parent then applies the tree via `readTreeInto` and
+    /// nothing on the worktree's git state changes (no checkpoint
+    /// commits, no branch ref movement).
+    var writeTreeForWorktree: @Sendable (_ worktreePath: String) async throws -> String
+    /// `git read-tree --reset -u <tree>` — replace the repo's index and
+    /// working tree with `<tree>`. Used by the parent in graft sync to
+    /// mirror the worktree's content without changing the parent's
+    /// HEAD / branch ref.
+    var readTreeInto: @Sendable (_ repoPath: String, _ treeSha: String) async throws -> Void
 }
 
 // MARK: - Live Implementation
@@ -378,17 +394,52 @@ extension GitService {
 
         resetMixed: { repoPath, sha in
             _ = try runGit(args: ["reset", "--mixed", sha], at: repoPath)
+        },
+
+        writeTreeForWorktree: { worktreePath in
+            // Build a throw-away index file so the user's real
+            // staging in the worktree survives untouched. The
+            // sequence: seed the temp index with HEAD's tree → stage
+            // every working-tree change (`add -A`) into the temp
+            // index → write that index out as a tree. The resulting
+            // tree SHA represents "worktree's working tree as a
+            // single committable snapshot".
+            let tempDir = NSTemporaryDirectory() as NSString
+            let tempIndex = tempDir.appendingPathComponent("nex-graft-index-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(atPath: tempIndex) }
+            let env = ["GIT_INDEX_FILE": tempIndex]
+            _ = try runGit(args: ["read-tree", "HEAD"], at: worktreePath, env: env)
+            _ = try runGit(args: ["add", "-A"], at: worktreePath, env: env)
+            let raw = try runGit(args: ["write-tree"], at: worktreePath, env: env)
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        },
+
+        readTreeInto: { repoPath, treeSha in
+            // `--reset -u`: reset the repo's index to the given tree
+            // AND update the working tree to match. Tracked files
+            // that differ get overwritten; tracked files absent from
+            // the new tree are removed. Untracked files (node_modules,
+            // build artifacts, ignored caches) are left alone.
+            _ = try runGit(args: ["read-tree", "--reset", "-u", treeSha], at: repoPath)
         }
     )
 }
 
 // MARK: - Helpers
 
-private func runGit(args: [String], at directory: String) throws -> String {
+private func runGit(args: [String], at directory: String, env: [String: String]? = nil) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: directory)
+    if let env, !env.isEmpty {
+        // Inherit the parent process env so PATH, HOME, etc. survive.
+        var merged = ProcessInfo.processInfo.environment
+        for (key, value) in env {
+            merged[key] = value
+        }
+        process.environment = merged
+    }
 
     let pipe = Pipe()
     process.standardOutput = pipe
@@ -460,7 +511,9 @@ extension GitService: DependencyKey {
             repoState: unimplemented("GitService.repoState", placeholder: .clean),
             getHeadSha: unimplemented("GitService.getHeadSha", placeholder: ""),
             resetHard: unimplemented("GitService.resetHard"),
-            resetMixed: unimplemented("GitService.resetMixed")
+            resetMixed: unimplemented("GitService.resetMixed"),
+            writeTreeForWorktree: unimplemented("GitService.writeTreeForWorktree", placeholder: ""),
+            readTreeInto: unimplemented("GitService.readTreeInto")
         )
     }
 }

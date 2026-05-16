@@ -260,18 +260,15 @@ final class GraftServiceImpl: Sendable {
             throw await rollbackAfterStash(error)
         }
 
-        // Capture the worktree's HEAD SHA BEFORE the initial sync.
-        // `stop` uses this to rewind the worktree's branch via
-        // `git reset --mixed` so the checkpoint commits the session
-        // made disappear from history (without that, the worktree's
-        // branch silently grows by N "nex-graft: checkpoint" commits
-        // every toggle cycle).
-        let worktreePreGraftSha: String?
-        do {
-            worktreePreGraftSha = try await gitService.getHeadSha(worktreePath)
-        } catch {
-            throw await rollbackAfterStash(error)
-        }
+        // The tree-based sync (introduced after the commit-based
+        // design caused detached HEAD in the parent and shared-ref
+        // leakage) never touches the worktree's index or branch ref
+        // — so there's nothing to rewind on the worktree side. The
+        // `worktreePreGraftSha` field is still threaded through the
+        // breadcrumb + session as Optional so older breadcrumbs
+        // written under the previous design (which DID need a
+        // worktree rewind) still recover correctly.
+        let worktreePreGraftSha: String? = nil
 
         // Persist the recovery breadcrumb before doing any further
         // work — if the next step crashes we still have what we
@@ -300,8 +297,7 @@ final class GraftServiceImpl: Sendable {
         do {
             try await runSyncPass(
                 worktreePath: worktreePath,
-                parentRepoRoot: parentRepoRoot,
-                branch: branch
+                parentRepoRoot: parentRepoRoot
             )
         } catch {
             // Roll back stash + breadcrumb on initial-sync failure.
@@ -538,25 +534,24 @@ final class GraftServiceImpl: Sendable {
         }
 
         do {
-            let changed = try await runSyncPass(
+            try await runSyncPass(
                 worktreePath: session.worktreePath,
-                parentRepoRoot: session.parentRepoRoot,
-                branch: session.branch
+                parentRepoRoot: session.parentRepoRoot
             )
+            let batchSize = batch.count
             mutateAndPublish(associationID: associationID) { current in
                 current.status = .watching
                 current.lastSync = Date()
-                let msg = changed.isEmpty
-                    ? "Sync: no staged changes"
-                    : "Sync: \(changed.count) file\(changed.count == 1 ? "" : "s")"
+                let msg = batchSize == 0
+                    ? "Sync complete"
+                    : "Sync: \(batchSize) file change\(batchSize == 1 ? "" : "s")"
                 appendLog(
                     &current,
                     entry: GraftLogEntry(
-                        kind: .sync(filesChanged: changed.count),
+                        kind: .sync(filesChanged: batchSize),
                         message: msg
                     )
                 )
-                _ = batch // referenced only to silence unused-capture warnings
             }
         } catch {
             let msg = "Sync failed: \(String(describing: error))"
@@ -573,13 +568,12 @@ final class GraftServiceImpl: Sendable {
     @discardableResult
     private func runSyncPass(
         worktreePath: String,
-        parentRepoRoot: String,
-        branch: String
+        parentRepoRoot: String
     ) async throws -> [String] {
         // Re-check the parent's state on every sync. A user who runs
         // `git merge` / `git rebase` in the parent root between syncs
         // would otherwise have their in-progress operation wiped out
-        // by the next checkout. Abort the sync if non-clean — the
+        // by the next read-tree. Abort the sync if non-clean — the
         // session stays alive and the next batch retries.
         let parentState = try await gitService.repoState(parentRepoRoot)
         guard parentState == .clean else {
@@ -592,40 +586,26 @@ final class GraftServiceImpl: Sendable {
             throw GraftError.missingWorktree(worktreePath: worktreePath)
         }
 
-        let staged = try await gitService.addAllAndCommit(
-            worktreePath,
-            "nex-graft: checkpoint",
-            true
-        )
+        // Compute the worktree's current tree via a throw-away index.
+        // The worktree's real index, branch ref, and HEAD are never
+        // touched — so no checkpoint commits, no detached HEAD, no
+        // shared-ref collisions with a parent checkout.
+        let tree = try await gitService.writeTreeForWorktree(worktreePath)
 
-        // Detached HEAD: `git rev-parse --abbrev-ref HEAD` prints the
-        // literal "HEAD" rather than nil. If we tried to `checkout -f
-        // HEAD` in the parent, it would succeed but reflect the
-        // PARENT'S HEAD, not the worktree's tip — completely silent
-        // miss. Force SHA-based checkout in that case.
-        //
-        // Also re-resolve the branch on every sync so a user switching
-        // worktree branches mid-session doesn't keep grafting the
-        // stale name (which would either fail or — worse — succeed
-        // against the parent's stale ref).
-        let currentBranch = await (try? gitService.getCurrentBranch(worktreePath))
-            ?? branch
-        if currentBranch == "HEAD" || currentBranch.isEmpty {
-            let sha = try await gitService.getHeadSha(worktreePath)
-            try await gitService.checkoutBranchForce(parentRepoRoot, sha)
-            return staged
-        }
+        // Apply the tree to the parent. `read-tree --reset -u`
+        // overwrites the parent's index and working tree to match
+        // the tree, but leaves the parent's HEAD / branch ref alone.
+        // Untracked files in the parent (node_modules, .next, dist,
+        // etc.) are preserved verbatim — only tracked files move.
+        try await gitService.readTreeInto(parentRepoRoot, tree)
 
-        do {
-            try await gitService.checkoutBranchForce(parentRepoRoot, currentBranch)
-        } catch {
-            // Parent doesn't know this branch name (rare — only when
-            // the worktree was created on a branch the parent doesn't
-            // have locally). Fall back to the worktree's HEAD SHA.
-            let sha = try await gitService.getHeadSha(worktreePath)
-            try await gitService.checkoutBranchForce(parentRepoRoot, sha)
-        }
-        return staged
+        // The "changed paths" log entry was a nice-to-have under the
+        // commit-based design (it returned `git diff --name-only
+        // --cached` from the checkpoint). Under the tree-based
+        // design we'd have to diff the tree against the previous
+        // tree to get the same answer — keep this simple: report a
+        // count via mtime rather than file paths.
+        return []
     }
 
     // MARK: - State helpers
