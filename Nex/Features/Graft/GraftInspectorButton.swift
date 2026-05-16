@@ -29,8 +29,20 @@ struct GraftInspectorButton: View {
     @ViewBuilder
     private func statusDot(for status: GraftSessionStatus) -> some View {
         switch status {
-        case .starting, .syncing:
-            Circle().fill(.yellow).frame(width: 5, height: 5)
+        case .starting:
+            Image(systemName: "circle.fill")
+                .resizable()
+                .frame(width: 5, height: 5)
+                .foregroundStyle(.yellow)
+        case .syncing:
+            // Pulsing so the user can distinguish a stuck `.starting`
+            // (solid yellow) from an actively-syncing session (the
+            // common case under file churn) at a glance.
+            Image(systemName: "circle.fill")
+                .resizable()
+                .frame(width: 5, height: 5)
+                .foregroundStyle(.yellow)
+                .symbolEffect(.pulse, options: .repeating)
         case .watching:
             Circle().fill(.green).frame(width: 5, height: 5)
         case .error:

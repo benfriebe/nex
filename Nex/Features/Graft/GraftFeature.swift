@@ -33,6 +33,11 @@ struct GraftFeature {
         case sessionEvent(GraftSessionEvent)
         case subscribeToUpdates
         case recoverOrphan(GraftOrphan)
+        /// Recovery couldn't complete cleanly (typically a stash-pop
+        /// conflict). The orphan is re-inserted so the banner shows
+        /// again — without this, the breadcrumb + stash both live on
+        /// disk with no UI path to retry.
+        case orphanRecoveryFailed(orphan: GraftOrphan, error: String)
         case dismissOrphan(GraftOrphan)
         /// User accepted the swap prompt: stop the existing session
         /// for the contested parent root and then start the new one.
@@ -40,11 +45,6 @@ struct GraftFeature {
         /// User dismissed the swap prompt: clear the placeholder for
         /// the new attempt; the existing session keeps running.
         case cancelSwap
-        /// Stops every active session. Called from app teardown so
-        /// breadcrumbs don't survive a clean quit. Errors are
-        /// swallowed (the breadcrumb-based recovery picks up anything
-        /// that didn't tear down cleanly).
-        case stopAll
     }
 
     @Dependency(\.graftService) var graftService
@@ -103,8 +103,7 @@ struct GraftFeature {
                         branch: association.branchName ?? "",
                         status: .starting,
                         stashRef: nil,
-                        lastSync: nil,
-                        recentLog: []
+                        lastSync: nil
                     ))
                     return .run { send in
                         do {
@@ -154,8 +153,7 @@ struct GraftFeature {
                         branch: association.branchName ?? "",
                         status: .error(message),
                         stashRef: nil,
-                        lastSync: nil,
-                        recentLog: []
+                        lastSync: nil
                     ))
                     return .none
                 }
@@ -171,8 +169,7 @@ struct GraftFeature {
                     branch: prompt.newAssociation.branchName ?? "",
                     status: .starting,
                     stashRef: nil,
-                    lastSync: nil,
-                    recentLog: []
+                    lastSync: nil
                 ))
                 return .run { send in
                     // Stop must complete (busyRoots released) before
@@ -248,23 +245,34 @@ struct GraftFeature {
 
             case .recoverOrphan(let orphan):
                 state.orphans.remove(id: orphan.id)
-                return .run { _ in
-                    try? await graftService.recoverOrphan(orphan)
+                return .run { send in
+                    do {
+                        try await graftService.recoverOrphan(orphan)
+                    } catch {
+                        // Recovery hit a snag (typically a stash-pop
+                        // conflict). The breadcrumb and stash both
+                        // still live on disk; if we leave the banner
+                        // off-screen the user has no UI affordance to
+                        // retry. Re-emit the orphan so the banner
+                        // re-appears.
+                        await send(.orphanRecoveryFailed(
+                            orphan: orphan,
+                            error: String(describing: error)
+                        ))
+                    }
                 }
+
+            case .orphanRecoveryFailed(let orphan, _):
+                // Re-insert the orphan so the recovery banner shows
+                // again. The error string is currently surfaced via
+                // log; the recovery banner copy stays generic.
+                state.orphans[id: orphan.id] = orphan
+                return .none
 
             case .dismissOrphan(let orphan):
                 state.orphans.remove(id: orphan.id)
                 return .run { _ in
                     await graftService.dismissOrphan(orphan)
-                }
-
-            case .stopAll:
-                let ids = state.sessions.ids
-                state.sessions.removeAll()
-                return .run { _ in
-                    for id in ids {
-                        try? await graftService.stop(id)
-                    }
                 }
             }
         }

@@ -9,26 +9,6 @@ enum GraftSessionStatus: Equatable {
     case error(String)
 }
 
-struct GraftLogEntry: Equatable, Identifiable {
-    let id: UUID
-    let timestamp: Date
-    let kind: Kind
-    let message: String
-
-    enum Kind: Equatable {
-        case info
-        case sync(filesChanged: Int)
-        case error
-    }
-
-    init(id: UUID = UUID(), timestamp: Date = Date(), kind: Kind, message: String) {
-        self.id = id
-        self.timestamp = timestamp
-        self.kind = kind
-        self.message = message
-    }
-}
-
 struct GraftSession: Equatable, Identifiable {
     var id: UUID
     var worktreePath: String
@@ -37,7 +17,6 @@ struct GraftSession: Equatable, Identifiable {
     var status: GraftSessionStatus
     var stashRef: String?
     var lastSync: Date?
-    var recentLog: [GraftLogEntry]
     /// Parent repo's branch at the moment graft started. `stop` checks
     /// this out so the parent returns to where the user left it. May
     /// be "HEAD" (literal) when the parent was detached, in which case
@@ -115,7 +94,6 @@ final class GraftServiceImpl: Sendable {
     private let gitService: GitService
     private let watcher: RecursiveFSWatcher
     private let debounce: DispatchTimeInterval
-    private let logCap: Int = 100
 
     private let lock = NSLock()
     private nonisolated(unsafe) var sessions: [UUID: GraftSession] = [:]
@@ -321,7 +299,6 @@ final class GraftServiceImpl: Sendable {
             status: .watching,
             stashRef: stashRef,
             lastSync: Date(),
-            recentLog: [GraftLogEntry(kind: .info, message: "Graft started")],
             preGraftBranch: preGraftBranch,
             preGraftSha: preGraftSha,
             worktreePreGraftSha: worktreePreGraftSha
@@ -576,27 +553,35 @@ final class GraftServiceImpl: Sendable {
             mutateAndPublish(associationID: associationID) { current in
                 current.status = .watching
                 current.lastSync = Date()
-                let msg = batchSize == 0
-                    ? "Sync complete"
-                    : "Sync: \(batchSize) file change\(batchSize == 1 ? "" : "s")"
-                appendLog(
-                    &current,
-                    entry: GraftLogEntry(
-                        kind: .sync(filesChanged: batchSize),
-                        message: msg
-                    )
-                )
+                _ = batchSize // batched file-change count is currently
+                // surfaced via session.lastSync timestamps; if a popover
+                // log is added later, wire batchSize back in here.
             }
         } catch {
-            let msg = "Sync failed: \(String(describing: error))"
+            let msg = describeSyncError(error)
             mutateAndPublish(associationID: associationID) { current in
                 current.status = .error(msg)
-                appendLog(
-                    &current,
-                    entry: GraftLogEntry(kind: .error, message: msg)
-                )
             }
         }
+    }
+
+    /// Translate a sync-pass error into something the tooltip can
+    /// actually act on. The big one is git's "Untracked working tree
+    /// file '<path>' would be overwritten by merge" — `read-tree`'s
+    /// way of saying the parent has an untracked file that collides
+    /// with a tracked file in the worktree. The user needs to remove
+    /// (or commit) the parent file; surfacing the raw stderr lets
+    /// them see exactly which path.
+    private func describeSyncError(_ error: Error) -> String {
+        if let git = error as? GitServiceError,
+           case .commandFailed(_, _, let stderr) = git,
+           let stderr, !stderr.isEmpty {
+            if stderr.contains("Untracked working tree file") {
+                return "Sync blocked — \(stderr.split(separator: "\n").first ?? "untracked file conflict")"
+            }
+            return "Sync failed: \(stderr)"
+        }
+        return "Sync failed: \(String(describing: error))"
     }
 
     @discardableResult
@@ -679,13 +664,6 @@ final class GraftServiceImpl: Sendable {
         }
         for c in conts {
             c.yield(event)
-        }
-    }
-
-    private func appendLog(_ session: inout GraftSession, entry: GraftLogEntry) {
-        session.recentLog.append(entry)
-        if session.recentLog.count > logCap {
-            session.recentLog.removeFirst(session.recentLog.count - logCap)
         }
     }
 
@@ -794,8 +772,7 @@ extension GraftService: DependencyKey {
                     branch: "",
                     status: .starting,
                     stashRef: nil,
-                    lastSync: nil,
-                    recentLog: []
+                    lastSync: nil
                 )
             ),
             stop: unimplemented("GraftService.stop"),

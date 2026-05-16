@@ -81,8 +81,7 @@ struct GraftCLIReplyTests {
             branch: "feature/x",
             status: .watching,
             stashRef: nil,
-            lastSync: nil,
-            recentLog: []
+            lastSync: nil
         )
     }
 

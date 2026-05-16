@@ -24,8 +24,7 @@ struct GraftFeatureTests {
             branch: "feature/x",
             status: .watching,
             stashRef: nil,
-            lastSync: nil,
-            recentLog: []
+            lastSync: nil
         )
     }
 
@@ -53,8 +52,7 @@ struct GraftFeatureTests {
             branch: "feature/x",
             status: .starting,
             stashRef: nil,
-            lastSync: nil,
-            recentLog: []
+            lastSync: nil
         )
 
         await store.send(.toggleGraft(makeAssociation())) { state in
@@ -73,7 +71,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: Self.assocID, worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil, recentLog: []) },
+                start: { _ in .init(id: Self.assocID, worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -105,7 +103,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil, recentLog: []) },
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -136,8 +134,7 @@ struct GraftFeatureTests {
             branch: "existing-branch",
             status: .watching,
             stashRef: nil,
-            lastSync: nil,
-            recentLog: []
+            lastSync: nil
         )
         var initial = GraftFeature.State()
         initial.sessions.append(existingSession)
@@ -209,8 +206,7 @@ struct GraftFeatureTests {
             branch: newAssoc.branchName ?? "",
             status: .watching,
             stashRef: nil,
-            lastSync: nil,
-            recentLog: []
+            lastSync: nil
         )
 
         let store = TestStore(initialState: initial) {
@@ -245,8 +241,7 @@ struct GraftFeatureTests {
                 branch: newAssoc.branchName ?? "",
                 status: .starting,
                 stashRef: nil,
-                lastSync: nil,
-                recentLog: []
+                lastSync: nil
             )
         }
         await store.receive(.startSucceeded(newSession)) { state in
@@ -276,7 +271,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil, recentLog: []) },
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -303,7 +298,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil, recentLog: []) },
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },

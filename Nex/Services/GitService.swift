@@ -441,25 +441,34 @@ private func runGit(args: [String], at directory: String, env: [String: String]?
         process.environment = merged
     }
 
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = Pipe()
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.standardOutput = stdout
+    process.standardError = stderr
 
     try process.run()
     process.waitUntilExit()
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let data = stdout.fileHandleForReading.readDataToEndOfFile()
     guard process.terminationStatus == 0 else {
+        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        let errText = String(data: errData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         throw GitServiceError.commandFailed(
             command: "git \(args.joined(separator: " "))",
-            exitCode: Int(process.terminationStatus)
+            exitCode: Int(process.terminationStatus),
+            stderr: errText
         )
     }
     return String(data: data, encoding: .utf8) ?? ""
 }
 
 enum GitServiceError: Error, Equatable {
-    case commandFailed(command: String, exitCode: Int)
+    /// `stderr` carries the message git printed (e.g. "error: Untracked
+    /// working tree file '<path>' would be overwritten by merge") so
+    /// the graft sync error tooltip can surface something actionable
+    /// instead of `exitCode: 128`.
+    case commandFailed(command: String, exitCode: Int, stderr: String?)
 }
 
 /// Parse a `git diff --shortstat` summary line into (additions, deletions).

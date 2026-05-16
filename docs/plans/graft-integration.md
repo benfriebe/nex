@@ -23,7 +23,17 @@ Nex already owns every concept the feature needs:
 
 The gap is recursive directory watching — `GitHeadWatcher` watches a single file via kqueue. We add an FSEvents-backed `RecursiveFSWatcher` for directory trees.
 
-## 2. The mirroring state machine
+---
+
+## Historical (commit-based design) — superseded
+
+> Sections 2 through 4 describe the original commit-based design (`git add -A` + checkpoint commit in the worktree, then `git checkout -f <branch>` in the parent). That design is no longer live: git refuses to check out a branch already owned by the linked worktree, so the parent always landed in detached HEAD; and every sync pass added a `nex-graft: checkpoint` commit to the worktree's shared branch ref, which was visible in `git log` and confusing.
+>
+> The shipped design uses tree-based mirroring: `git write-tree` in the worktree via a throw-away `GIT_INDEX_FILE` (so the worktree's real index + branch ref are never touched) → `git read-tree --reset -u <tree>` in the parent (parent's HEAD / branch ref unchanged, only its working tree + index move). See `Nex/Services/GraftService.swift::runSyncPass` for the implementation.
+>
+> Sections 2-4 below are retained for archaeological context. Treat sections 1 and 5+ as still-canonical except where the commit-based assumptions leak through.
+
+## 2. The mirroring state machine (historical)
 
 Three phases, all shellable through `git`:
 
@@ -54,7 +64,7 @@ Three phases, all shellable through `git`:
 
 Only one active graft session per **parent repo root**. Two workspaces pointing at different worktrees of the same repo can't graft simultaneously — the root is the shared target. Enforce via a `Set<String>` (canonicalised `parentRepoRoot` paths) inside `GraftService`. UI disables the toggle on the second association with a tooltip: "Already grafting <other-workspace> into this repo."
 
-## 3. Files to create
+## 3. Files to create (historical)
 
 ### 3a. `Nex/Services/RecursiveFSWatcher.swift` (new)
 
@@ -238,7 +248,7 @@ struct GraftInspectorButton: View {
 }
 ```
 
-## 4. Files to modify
+## 4. Files to modify (historical)
 
 ### 4a. `Nex/Services/GitService.swift`
 
@@ -288,6 +298,10 @@ Above the row, render the orphan-recovery banner once per workspace if `store.gr
 ### 4d. `Nex/NexApp.swift` (test-mode gate)
 
 If you use `FSEvents` directly in `RecursiveFSWatcher`, guard the `liveValue` so it returns a no-op watcher under `NexApp.isTestMode` (search for existing usages — same gate is used for ghostty init). Tests should never trigger FSEvents.
+
+---
+
+## End of historical section. Sections 5+ remain canonical.
 
 ## 5. CLI (`Tools/nex-cli/nex.swift`)
 
