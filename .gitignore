@@ -31,3 +31,6 @@ Package.resolved
 
 # Python
 __pycache__/
+
+# Local working docs (plans, notes — not part of the public repo)
+docs/
