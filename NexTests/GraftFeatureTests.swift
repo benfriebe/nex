@@ -179,6 +179,88 @@ struct GraftFeatureTests {
         }
     }
 
+    @Test func confirmSwapStopsExistingThenStartsNew() async {
+        // Happy path: prompt was set, user clicks Stop existing &
+        // swap. Reducer must call graftService.stop on the existing
+        // session ID, then call graftService.start on the new
+        // association, in that order, and surface .startSucceeded
+        // for the new session.
+        let newAssoc = makeAssociation()
+        let existingID = UUID(uuidString: "00000000-0000-0000-0000-00000000C001")!
+        let prompt = GraftSwapPrompt(
+            id: newAssoc.id,
+            newAssociation: newAssoc,
+            existingSessionID: existingID,
+            existingBranch: "existing",
+            existingWorktreePath: "/tmp/wt-existing",
+            parentRepoRoot: "/tmp/repo"
+        )
+
+        var initial = GraftFeature.State()
+        initial.swapPrompt = prompt
+
+        let stopCalls = ConcurrentCounter()
+        let startCalls = ConcurrentCounter()
+        let ordering = LockedArray()
+        let newSession = GraftSession(
+            id: newAssoc.id,
+            worktreePath: newAssoc.worktreePath,
+            parentRepoRoot: "/tmp/repo",
+            branch: newAssoc.branchName ?? "",
+            status: .watching,
+            stashRef: nil,
+            lastSync: nil,
+            recentLog: []
+        )
+
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { assoc in
+                    startCalls.increment()
+                    ordering.append("start:\(assoc.id.uuidString)")
+                    return newSession
+                },
+                stop: { id in
+                    stopCalls.increment()
+                    ordering.append("stop:\(id.uuidString)")
+                },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.confirmSwap(prompt)) { state in
+            state.swapPrompt = nil
+            // Optimistic placeholder for the new session.
+            state.sessions[id: newAssoc.id] = GraftSession(
+                id: newAssoc.id,
+                worktreePath: newAssoc.worktreePath,
+                parentRepoRoot: "",
+                branch: newAssoc.branchName ?? "",
+                status: .starting,
+                stashRef: nil,
+                lastSync: nil,
+                recentLog: []
+            )
+        }
+        await store.receive(.startSucceeded(newSession)) { state in
+            state.sessions[id: newAssoc.id] = newSession
+        }
+        await store.finish()
+
+        #expect(stopCalls.value == 1)
+        #expect(startCalls.value == 1)
+        // Stop must come before start.
+        #expect(ordering.snapshot.first?.hasPrefix("stop:") == true)
+        #expect(ordering.snapshot.last?.hasPrefix("start:") == true)
+    }
+
     @Test func cancelSwapClearsPrompt() async {
         let newAssoc = makeAssociation()
         var initial = GraftFeature.State()
@@ -248,5 +330,18 @@ private final class ConcurrentCounter: @unchecked Sendable {
 
     var value: Int {
         lock.withLock { _value }
+    }
+}
+
+private final class LockedArray: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _items: [String] = []
+
+    func append(_ item: String) {
+        lock.withLock { _items.append(item) }
+    }
+
+    var snapshot: [String] {
+        lock.withLock { _items }
     }
 }

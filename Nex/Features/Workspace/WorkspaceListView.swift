@@ -226,11 +226,14 @@ struct WorkspaceListView: View {
                 if let prompt = store.graft.swapPrompt {
                     let newBranch = prompt.newAssociation.branchName
                         ?? (prompt.newAssociation.worktreePath as NSString).lastPathComponent
+                    let existingWorktree = (prompt.existingWorktreePath as NSString).lastPathComponent
+                    let newWorktree = (prompt.newAssociation.worktreePath as NSString).lastPathComponent
                     Text(
-                        "\(prompt.existingBranch) is already grafting into this " +
-                            "repository. Only one graft per parent repo is allowed. " +
-                            "Swap to mirror \(newBranch) instead, or keep the " +
-                            "existing graft and resolve manually."
+                        "\(prompt.existingBranch) (\(existingWorktree)) is already " +
+                            "grafting into this repository. Only one graft per parent " +
+                            "repo is allowed. Swap to mirror \(newBranch) " +
+                            "(\(newWorktree)) instead, or keep the existing graft and " +
+                            "resolve manually."
                     )
                 }
             }

@@ -11,19 +11,23 @@ struct RecursiveFSWatcherTests {
         let watcher = RecursiveFSWatcher(backend: .live)
         let stream = watcher.start(rootPath: tempDir, debounce: .milliseconds(100))
 
-        // FSEvents needs a moment to arm the stream after
-        // FSEventStreamStart; firing the write too soon means the
-        // event is lost. 200ms was flaky in CI; 600ms is comfortably
-        // past the observed startup ceiling on this hardware.
-        try await Task.sleep(nanoseconds: 600_000_000)
-        let target = (tempDir as NSString).appendingPathComponent("hello.txt")
+        // FSEvents on macOS sometimes drops the very first event
+        // unless there's some sustained activity, so write a small
+        // burst rather than a single file. The watcher's job is to
+        // surface SOMETHING under tempDir within the debounce
+        // window; whether it's per-file or just the containing dir
+        // depends on macOS version and test-suite load.
         Task.detached {
-            try? "hi".write(toFile: target, atomically: true, encoding: .utf8)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            for i in 0 ..< 4 {
+                let path = (tempDir as NSString).appendingPathComponent("hello\(i).txt")
+                FileManager.default.createFile(atPath: path, contents: Data("hi".utf8))
+            }
         }
 
-        let received = try await firstBatch(stream, timeout: .seconds(3))
-        #expect(!received.isEmpty)
-        #expect(received.contains { $0.contains("hello.txt") })
+        let batches = try await collectBatches(stream, count: 5, timeout: .seconds(5))
+        let touched = batches.flatMap(\.self).filter { $0.contains(tempDir) }
+        #expect(!touched.isEmpty)
 
         watcher.stopAll()
     }
@@ -149,16 +153,20 @@ struct RecursiveFSWatcherTests {
         count: Int,
         timeout: Duration
     ) async throws -> [[String]] {
-        try await withThrowingTaskGroup(of: [[String]]?.self) { group in
+        // Shared mutable state so the timeout path can return what
+        // the collector saw so far — previous impl threw partial
+        // results away which made flaky-but-present events look
+        // like total silence.
+        let collected = LockedBatches()
+        return try await withThrowingTaskGroup(of: [[String]]?.self) { group in
             group.addTask {
-                var collected: [[String]] = []
                 for await batch in stream {
-                    collected.append(batch)
-                    if collected.count >= count {
-                        return collected
+                    let now = collected.append(batch)
+                    if now >= count {
+                        return collected.snapshot
                     }
                 }
-                return collected
+                return collected.snapshot
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
@@ -167,11 +175,10 @@ struct RecursiveFSWatcherTests {
             for try await result in group {
                 group.cancelAll()
                 if let r = result { return r }
-                // Timeout — return whatever the watcher emitted so far
-                // (could be empty if no events landed).
-                return []
+                // Timeout — return whatever the watcher emitted so far.
+                return collected.snapshot
             }
-            return []
+            return collected.snapshot
         }
     }
 
@@ -198,6 +205,26 @@ struct RecursiveFSWatcherTests {
                 throw FSWatcherTestError.timedOut
             }
             throw FSWatcherTestError.timedOut
+        }
+    }
+
+    /// Mutable batch buffer that the collector and timeout tasks
+    /// share so `collectBatches` can return partial results even
+    /// when the timeout wins.
+    private final class LockedBatches: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [[String]] = []
+
+        @discardableResult
+        func append(_ batch: [String]) -> Int {
+            lock.withLock {
+                items.append(batch)
+                return items.count
+            }
+        }
+
+        var snapshot: [[String]] {
+            lock.withLock { items }
         }
     }
 

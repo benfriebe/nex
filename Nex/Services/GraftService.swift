@@ -120,6 +120,12 @@ final class GraftServiceImpl: Sendable {
     private let lock = NSLock()
     private nonisolated(unsafe) var sessions: [UUID: GraftSession] = [:]
     private nonisolated(unsafe) var watcherTasks: [UUID: Task<Void, Never>] = [:]
+    /// Tracks the currently in-flight `handleBatch` task per session.
+    /// `stop()` awaits this before restoring the parent so a sync
+    /// pass that started just before the stop can't re-apply
+    /// `read-tree --reset -u` AFTER `restoreParent` (which would
+    /// re-corrupt the parent and break the stash pop).
+    private nonisolated(unsafe) var activeSyncTasks: [UUID: Task<Void, Never>] = [:]
     /// Canonicalised `parentRepoRoot` paths that currently hold a graft
     /// session. A second association targeting the same root is rejected
     /// with `GraftError.alreadyActive`.
@@ -334,10 +340,25 @@ final class GraftServiceImpl: Sendable {
         let task = Task { [weak self] in
             for await batch in watchStream {
                 guard let self else { return }
-                await handleBatch(
-                    associationID: association.id,
-                    batch: batch
-                )
+                // Spawn each batch handler as its own Task and record
+                // it so `stop()` can await the current sync before
+                // tearing down. Without this, a sync pass already
+                // inside its `read-tree` call survives stop's watcher
+                // cancellation and re-applies the worktree's tree
+                // AFTER the parent has been restored, leaving the
+                // parent dirty and breaking the stash pop.
+                let assocID = association.id
+                let syncTask = Task { [weak self] in
+                    guard let self else { return }
+                    await handleBatch(associationID: assocID, batch: batch)
+                }
+                lock.withLock { activeSyncTasks[assocID] = syncTask }
+                await syncTask.value
+                // The watcher loop is serial — only one batch can be
+                // in flight per session at a time. If `stop()` already
+                // pulled the entry out (it awaits and removes via
+                // `removeValue`), this is a no-op.
+                lock.withLock { _ = activeSyncTasks.removeValue(forKey: assocID) }
             }
         }
         lock.withLock { watcherTasks[association.id] = task }
@@ -353,9 +374,21 @@ final class GraftServiceImpl: Sendable {
         }
         guard let session else { return }
 
-        // Cancel the watcher first so a sync pass can't fire mid-stop.
+        // Cancel the watcher first so a NEW sync pass can't fire
+        // mid-stop. Cancellation propagates to the `for await batch
+        // in watchStream` loop; the next iteration won't start.
         if let task = lock.withLock({ watcherTasks.removeValue(forKey: associationID) }) {
             task.cancel()
+        }
+
+        // BUT a sync pass that already started before the cancel can
+        // still be sitting in its (synchronous) `git read-tree` call.
+        // Wait for it to finish before we touch the parent's tree
+        // ourselves — otherwise the pending sync re-applies the
+        // worktree's tree AFTER we restore the parent and corrupts
+        // the post-stop state.
+        if let inFlight = lock.withLock({ activeSyncTasks.removeValue(forKey: associationID) }) {
+            await inFlight.value
         }
 
         // Rewind the WORKTREE's branch first so the checkpoint
@@ -585,6 +618,17 @@ final class GraftServiceImpl: Sendable {
         // -rf`-ing it would otherwise spin failing sync passes forever.
         if !FileManager.default.fileExists(atPath: worktreePath) {
             throw GraftError.missingWorktree(worktreePath: worktreePath)
+        }
+
+        // Same check on the WORKTREE. If the user kicked off a merge /
+        // rebase / cherry-pick in the worktree, `write-tree` would
+        // capture the partial-merge files (with `<<<<<<<` markers,
+        // unresolved conflicts, etc) and mirror them into the parent.
+        // Abort instead — the session keeps watching and resumes once
+        // the user resolves.
+        let worktreeState = try await gitService.repoState(worktreePath)
+        guard worktreeState == .clean else {
+            throw GraftError.repoBusy(state: describe(worktreeState))
         }
 
         // Compute the worktree's current tree via a throw-away index.

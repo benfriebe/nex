@@ -180,13 +180,15 @@ struct GraftFeature {
                     do {
                         try await graftService.stop(prompt.existingSessionID)
                     } catch {
-                        // Existing session refused to stop; surface
-                        // as an error on the NEW attempt so the user
-                        // sees something went wrong. The existing
-                        // session stays as-is.
+                        // Stop FAILED — the existing session is still
+                        // running. Tell the user the existing graft
+                        // survives so they know they don't have to
+                        // panic about the lost-everything case.
                         await send(.startFailed(
                             association: prompt.newAssociation,
-                            failure: .other(message: "Couldn't stop existing graft: \(error)")
+                            failure: .other(message:
+                                "Couldn't stop the existing graft: \(error). " +
+                                    "The existing graft is still active; the new one was not started.")
                         ))
                         return
                     }
@@ -194,9 +196,18 @@ struct GraftFeature {
                         let session = try await graftService.start(prompt.newAssociation)
                         await send(.startSucceeded(session))
                     } catch {
+                        // Stop succeeded; start failed. BOTH sides
+                        // are gone — the user has no working graft.
+                        // Surface that clearly so they know to retry
+                        // (or that they need to re-toggle the
+                        // ORIGINAL worktree if they wanted to keep
+                        // mirroring it).
+                        let underlying = String(describing: error)
                         await send(.startFailed(
                             association: prompt.newAssociation,
-                            failure: GraftStartFailure(error: error)
+                            failure: .other(message:
+                                "Existing graft was stopped, but the new graft failed " +
+                                    "to start: \(underlying). Toggle the icon again to retry.")
                         ))
                     }
                 }

@@ -3281,11 +3281,29 @@ struct AppReducer {
                       let assoc = workspace.repoAssociations[id: associationID],
                       let repo = state.repoRegistry[id: assoc.repoID] else { return .none }
 
+                // Stop any active graft session FIRST. Otherwise the
+                // session keeps trying to mirror a worktree that no
+                // longer has an association (and, in the
+                // `deleteWorktree: true` case, is about to disappear
+                // entirely), leaving the parent root mid-mirror and
+                // the breadcrumb stranded.
+                let needsGraftStop = state.graft.sessions[id: associationID] != nil
+
                 state.workspaces[id: workspaceID]?.repoAssociations.remove(id: associationID)
                 state.gitStatuses.removeValue(forKey: associationID)
 
+                let graftStop: Effect<Action> = needsGraftStop
+                    ? .send(.graft(.toggleGraft(assoc)))
+                    : .none
+
                 if deleteWorktree {
+                    // graftStop and removeWorktree run in parallel —
+                    // safe because graft's stop awaits any in-flight
+                    // sync (so no read-tree fires on a half-deleted
+                    // worktree) and operates on the PARENT root, not
+                    // the worktree dir we're about to remove.
                     return .merge(
+                        graftStop,
                         .send(.stopHeadWatcher(associationID: associationID)),
                         .run { _ in
                             try? await gitService.removeWorktree(repo.path, assoc.worktreePath)
@@ -3294,6 +3312,7 @@ struct AppReducer {
                     )
                 }
                 return .merge(
+                    graftStop,
                     .send(.stopHeadWatcher(associationID: associationID)),
                     .send(.persistState)
                 )
