@@ -206,7 +206,41 @@ struct WorkspaceListView: View {
                     )
                 }
             }
+            .confirmationDialog(
+                graftSwapTitle,
+                isPresented: Binding(
+                    get: { store.graft.swapPrompt != nil },
+                    set: { if !$0 { store.send(.graft(.cancelSwap)) } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let prompt = store.graft.swapPrompt {
+                    Button("Stop existing & swap", role: .destructive) {
+                        store.send(.graft(.confirmSwap(prompt)))
+                    }
+                    Button("Keep existing", role: .cancel) {
+                        store.send(.graft(.cancelSwap))
+                    }
+                }
+            } message: {
+                if let prompt = store.graft.swapPrompt {
+                    let newBranch = prompt.newAssociation.branchName
+                        ?? (prompt.newAssociation.worktreePath as NSString).lastPathComponent
+                    Text(
+                        "\(prompt.existingBranch) is already grafting into this " +
+                            "repository. Only one graft per parent repo is allowed. " +
+                            "Swap to mirror \(newBranch) instead, or keep the " +
+                            "existing graft and resolve manually."
+                    )
+                }
+            }
         }
+    }
+
+    private var graftSwapTitle: String {
+        guard let prompt = store.graft.swapPrompt else { return "" }
+        let repoName = (prompt.parentRepoRoot as NSString).lastPathComponent
+        return "Already grafting into \(repoName)"
     }
 
     private var mainListBody: some View {

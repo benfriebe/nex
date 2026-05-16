@@ -2,6 +2,8 @@
 
 > Implementer: read this top-to-bottom before touching code. The plan is self-contained — you do not need conversation history. All file paths and line numbers reference the repo state as of branch `main` at commit `99befa9`.
 
+> **Implementation note (post-PR #137):** the shipped design diverges from this plan. The sync pass does NOT add a `nex-graft: checkpoint` commit to the worktree's branch and does NOT `git checkout -f <branch>` in the parent — that path produces a detached HEAD in the parent (git refuses to check out a branch already owned by the linked worktree) and pollutes the worktree's history. Instead the live code uses a tree-based mirror: build the worktree's tree via a throw-away `GIT_INDEX_FILE` (`git write-tree`) and apply it to the parent via `git read-tree --reset -u <tree>`. Net result: no commits on either side, parent stays on its original branch, worktree's git state is never touched. See `Nex/Services/GraftService.swift::runSyncPass`. Sections below describe the original commit-based design and are retained as historical context only.
+
 ## 1. What we are building
 
 A built-in capability in the Nex Swift app that watches a git worktree for file changes and continuously mirrors those tracked-file changes back to the parent repo's working tree. Any `RepoAssociation` row in the workspace inspector gets a one-click toggle to start/stop this mirroring.

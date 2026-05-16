@@ -123,6 +123,93 @@ struct GraftFeatureTests {
         #expect(recoverCount.value == 1)
     }
 
+    @Test func startFailingWithAlreadyActiveTriggersSwapPrompt() async {
+        // An existing session for the parent root + a fresh
+        // toggleGraft for a SECOND association whose worktree maps
+        // to the same parent should clear the optimistic placeholder
+        // and surface the swap prompt.
+        let existingID = UUID(uuidString: "00000000-0000-0000-0000-00000000C001")!
+        let existingSession = GraftSession(
+            id: existingID,
+            worktreePath: "/tmp/wt-existing",
+            parentRepoRoot: "/tmp/repo",
+            branch: "existing-branch",
+            status: .watching,
+            stashRef: nil,
+            lastSync: nil,
+            recentLog: []
+        )
+        var initial = GraftFeature.State()
+        initial.sessions.append(existingSession)
+
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in
+                    throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
+                },
+                stop: { _ in },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let newAssoc = makeAssociation()
+        await store.send(.toggleGraft(newAssoc))
+        await store.receive(.startFailed(
+            association: newAssoc,
+            failure: .alreadyActive(parentRepoRoot: "/tmp/repo")
+        )) { state in
+            // Optimistic placeholder for the new attempt is removed.
+            state.sessions.remove(id: newAssoc.id)
+            // Swap prompt set with both sides.
+            state.swapPrompt = GraftSwapPrompt(
+                id: newAssoc.id,
+                newAssociation: newAssoc,
+                existingSessionID: existingID,
+                existingBranch: "existing-branch",
+                existingWorktreePath: "/tmp/wt-existing",
+                parentRepoRoot: "/tmp/repo"
+            )
+        }
+    }
+
+    @Test func cancelSwapClearsPrompt() async {
+        let newAssoc = makeAssociation()
+        var initial = GraftFeature.State()
+        initial.swapPrompt = GraftSwapPrompt(
+            id: newAssoc.id,
+            newAssociation: newAssoc,
+            existingSessionID: UUID(),
+            existingBranch: "existing",
+            existingWorktreePath: "/tmp/wt-existing",
+            parentRepoRoot: "/tmp/repo"
+        )
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil, recentLog: []) },
+                stop: { _ in },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.cancelSwap) { state in
+            state.swapPrompt = nil
+        }
+    }
+
     @Test func orphansDetectedReplacesBanner() async {
         let orphan = GraftOrphan(
             id: UUID(uuidString: "00000000-0000-0000-0000-00000000B002")!,

@@ -177,11 +177,11 @@ final class GraftServiceImpl: Sendable {
         }
 
         // Capture the parent's pre-graft branch + SHA BEFORE we touch
-        // it. The stop sequence uses these to restore the parent's
-        // working tree (checkout the original branch, then `git reset
-        // --hard <sha>` to undo every checkpoint commit the session
-        // made). Without this capture, `stop()` would just be sitting
-        // on the synced state with no way to roll back.
+        // it. The stop sequence uses these to restore the parent
+        // (checkout the original branch, then `git reset --hard
+        // <sha>`) so any working-tree drift from `read-tree --reset
+        // -u` is undone — and so the parent is safe even on recovery
+        // from an older breadcrumb whose session DID move HEAD.
         let preGraftBranch: String?
         let preGraftSha: String?
         do {
@@ -489,11 +489,12 @@ final class GraftServiceImpl: Sendable {
 
     /// Roll the parent root back to its pre-graft state: switch to the
     /// original branch (if known), then `git reset --hard` to the
-    /// original SHA so the checkpoint commits graft added during the
-    /// session are discarded. The shared branch ref is rewound for
-    /// every worktree pointing at it — that's intentional. The user's
-    /// actual edits live on disk in the worktree's working tree and
-    /// are not affected.
+    /// original SHA. Under the tree-based design this is just a
+    /// working-tree + index restore (HEAD doesn't move during graft);
+    /// the same path also handles recovery from older breadcrumbs
+    /// written by the commit-based design, where the parent's branch
+    /// ref was advanced by checkpoint commits and the reset rewinds
+    /// it. The user's worktree is never touched.
     ///
     /// Older breadcrumbs (pre-stop-fix) may lack `preGraftBranch` /
     /// `preGraftSha` — in that case we fall back to the original

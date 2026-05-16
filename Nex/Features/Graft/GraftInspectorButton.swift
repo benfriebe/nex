@@ -41,9 +41,9 @@ struct GraftInspectorButton: View {
     private func tooltipText(session: GraftSession?) -> String {
         guard let session else {
             let branch = association.branchName ?? "this worktree"
-            return "Start grafting \(branch) into parent repo. " +
-                "Files in the parent root are stashed; checkpoint commits " +
-                "skip pre-commit hooks."
+            return "Mirror \(branch)'s tracked files into the parent repo's " +
+                "working tree. Parent's branch stays put; untracked files " +
+                "(node_modules, build output) are untouched."
         }
         switch session.status {
         case .starting:
@@ -54,8 +54,8 @@ struct GraftInspectorButton: View {
             let lastSync = session.lastSync
                 .map { "Last sync \(Self.relativeFormatter.localizedString(for: $0, relativeTo: Date()))" }
                 ?? "Watching"
-            return "Grafting \(session.branch). \(lastSync). " +
-                "Stop to discard the synced tree and pop the stash."
+            return "Mirroring \(session.branch) into the parent. \(lastSync). " +
+                "Stop to restore the parent's working tree."
         case .error(let message):
             return "Graft error: \(message)"
         }
@@ -70,8 +70,9 @@ struct GraftInspectorButton: View {
 
 /// Banner shown above the repo association list when an unclean shutdown
 /// left a graft breadcrumb behind. The user picks "Restore" (run the
-/// stop sequence using the breadcrumb's recorded stash ref) or
-/// "Dismiss" (delete the breadcrumb only).
+/// stop sequence using the breadcrumb's recorded pre-graft branch +
+/// SHA, then pop any stashed parent edits) or "Dismiss" (delete the
+/// breadcrumb only).
 struct GraftOrphanBanner: View {
     let orphan: GraftOrphan
     @Bindable var store: StoreOf<AppReducer>

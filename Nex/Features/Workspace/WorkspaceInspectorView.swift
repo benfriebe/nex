@@ -372,16 +372,16 @@ struct WorkspaceInspectorView: View {
 
             Spacer()
 
+            if kind == .worktree {
+                GraftInspectorButton(association: assoc, store: store)
+            }
+
             InspectorIconButton(icon: "plusminus", tooltip: "Show diff for this repo") {
                 store.send(.openDiffPath(
                     repoPath: assoc.worktreePath,
                     targetPath: nil,
                     fromPaneID: nil
                 ))
-            }
-
-            if kind == .worktree {
-                GraftInspectorButton(association: assoc, store: store)
             }
 
             InspectorIconButton(

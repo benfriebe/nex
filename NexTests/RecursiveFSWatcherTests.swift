@@ -11,12 +11,13 @@ struct RecursiveFSWatcherTests {
         let watcher = RecursiveFSWatcher(backend: .live)
         let stream = watcher.start(rootPath: tempDir, debounce: .milliseconds(100))
 
+        // FSEvents needs a moment to arm the stream after
+        // FSEventStreamStart; firing the write too soon means the
+        // event is lost. 200ms was flaky in CI; 600ms is comfortably
+        // past the observed startup ceiling on this hardware.
+        try await Task.sleep(nanoseconds: 600_000_000)
         let target = (tempDir as NSString).appendingPathComponent("hello.txt")
-        // Schedule the write after FSEvents has had a moment to settle on
-        // the watch root. Without the delay, FSEvents sometimes coalesces
-        // the create with stream startup and drops the event.
         Task.detached {
-            try? await Task.sleep(nanoseconds: 200_000_000)
             try? "hi".write(toFile: target, atomically: true, encoding: .utf8)
         }
 
