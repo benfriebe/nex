@@ -41,6 +41,15 @@ final class WebPaneStore: Sendable {
         _ = lock.withLock { coordinators.removeValue(forKey: paneID) }
     }
 
+    /// Tear down a single tab inside a pane. No-op when the pane's
+    /// coordinator hasn't been created yet (the tab's WKWebView was
+    /// never built either).
+    @MainActor
+    func destroyTab(paneID: UUID, tabID: UUID) {
+        guard let coordinator = lock.withLock({ coordinators[paneID] }) else { return }
+        coordinator.destroyTab(tabID: tabID)
+    }
+
     @MainActor
     func destroyAll() {
         _ = lock.withLock {
@@ -70,5 +79,5 @@ extension DependencyValues {
 import SwiftUI
 
 extension EnvironmentValues {
-    @Entry var webPaneStore: WebPaneStore = WebPaneStore.liveValue
+    @Entry var webPaneStore: WebPaneStore = .liveValue
 }

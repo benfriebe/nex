@@ -762,6 +762,10 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web forward  [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web reload   [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
       nex web capture  [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
+      nex web tabs        [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--json] [--no-header]
+      nex web tab-new     [<url>] [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--no-focus]
+      nex web tab-close   <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web tab-select  <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -880,10 +884,100 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "capture")
         sendWebReplyAndPrintCapture(payload)
 
+    case "tabs":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let noHeader = popSwitch("--no-header", from: &args)
+        var payload: [String: Any] = ["command": "web-tabs"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tabs")
+        sendWebReplyAndPrintTabs(payload, asJSON: asJSON, noHeader: noHeader)
+
+    case "tab-new":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let noFocus = popSwitch("--no-focus", from: &args)
+        let url = args.popFirst() ?? ""
+        var payload: [String: Any] = [
+            "command": "web-tab-new",
+            "url": url,
+            "make_active": !noFocus
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tab-new")
+        sendWebReplyAndPrintBasic(payload, command: "tab-new")
+
+    case "tab-close":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        guard let ref = args.popFirst(), !ref.isEmpty else {
+            fputs("Usage: nex web tab-close <ref> [--target X] [--workspace Y]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-tab-close",
+            "tab": ref
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tab-close")
+        sendWebReplyAndPrintBasic(payload, command: "tab-close")
+
+    case "tab-select":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        guard let ref = args.popFirst(), !ref.isEmpty else {
+            fputs("Usage: nex web tab-select <ref> [--target X] [--workspace Y]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-tab-select",
+            "tab": ref
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tab-select")
+        sendWebReplyAndPrintBasic(payload, command: "tab-select")
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
         exit(1)
+    }
+}
+
+private func sendWebReplyAndPrintTabs(_ payload: [String: Any], asJSON: Bool, noHeader: Bool) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web tabs: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web tabs: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web tabs: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web tabs: \(msg)\n", stderr)
+        exit(1)
+    }
+    let tabs = (json["tabs"] as? [[String: Any]]) ?? []
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: tabs, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    // Plain text: INDEX  ACTIVE  TITLE  URL  ID
+    if !noHeader {
+        print("IDX  A  TITLE                    URL")
+    }
+    for tab in tabs {
+        let idx = (tab["index"] as? Int) ?? 0
+        let active = (tab["active"] as? Bool) ?? false
+        let title = (tab["title"] as? String) ?? ""
+        let url = (tab["url"] as? String) ?? ""
+        let titleClipped = title.count > 24 ? String(title.prefix(23)) + "…" : title
+        print(String(format: "%-3d  %@  %-24@  %@", idx, active ? "*" : " ", titleClipped as NSString, url))
     }
 }
 

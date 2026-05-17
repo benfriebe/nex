@@ -189,6 +189,20 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v13_web_pane_tabs") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("webTabsJSON") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "webTabsJSON", .text)
+                }
+            }
+            if !columns.contains("webActiveTabID") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "webActiveTabID", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -224,10 +238,15 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var status: String
     var createdAt: Double
     var lastActivityAt: Double
-    /// Last-known URL for a `.web` pane (Phase 1: single-tab v1).
-    /// Always nil for other pane types and for private web panes
-    /// (whose contents intentionally do not survive restart).
+    /// Legacy single-tab URL for a `.web` pane. `webTabsJSON` is
+    /// authoritative on read; this is kept around for loaders that
+    /// pre-date the v13 migration. Always nil for non-web panes and
+    /// for private web panes (whose contents do not survive restart).
     var webURL: String?
+    /// Full tab list as JSON-encoded `[WebTab]`.
+    var webTabsJSON: String?
+    /// Id of the active tab; nil falls back to `tabs.first`.
+    var webActiveTabID: String?
 }
 
 struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {

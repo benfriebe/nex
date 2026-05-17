@@ -206,11 +206,11 @@ final class PaneShortcutMonitor {
         return dispatchAction(action, activeWorkspaceID: activeID)
     }
 
-    /// Phase 1 web priority layer. Returns:
-    /// - `true`  — event consumed by a web action
-    /// - `false` — event consumed by an intentional fall-through
+    /// Web pane priority layer. Returns:
+    /// - `true`  - event consumed by a web action
+    /// - `false` - event consumed by an intentional fall-through
     ///   (e.g. URL bar editing + ⌘[ shouldn't trip back)
-    /// - `nil`   — not applicable, the main layer should run
+    /// - `nil`   - not applicable, the main layer should run
     private func handleWebPanePriorityShortcut(
         event _: NSEvent,
         trigger: KeyTrigger,
@@ -223,6 +223,7 @@ final class PaneShortcutMonitor {
 
         // ⌘ alone, no shift / ctrl / option.
         let isPlainCommand = trigger.modifiers == .command
+        let isCmdShift = trigger.modifiers == [.command, .shift]
         // ⌘[ / ⌘] — only intercept when the URL bar isn't editing.
         // The bar is an NSTextField, which becomes the window's
         // firstResponder via its NSText editor when typing.
@@ -232,29 +233,49 @@ final class PaneShortcutMonitor {
             return responder is NSText
         }()
 
-        switch (trigger.keyCode, isPlainCommand) {
-        case (37, true): // ⌘L
+        switch (trigger.keyCode, isPlainCommand, isCmdShift) {
+        case (37, true, _): // ⌘L
             store.send(.webPaneFocusURLBar(paneID: focusedID))
             return true
-        case (15, true): // ⌘R
+        case (15, true, _): // ⌘R
             store.send(.workspaces(.element(
                 id: id,
                 action: .webPaneReload(paneID: focusedID, hard: false)
             )))
             return true
-        case (33, true): // ⌘[
+        case (33, true, _): // ⌘[
             if urlBarIsEditing { return nil } // fall through to focusPreviousPane
             store.send(.workspaces(.element(
                 id: id,
                 action: .webPaneBack(paneID: focusedID)
             )))
             return true
-        case (30, true): // ⌘]
+        case (30, true, _): // ⌘]
             if urlBarIsEditing { return nil }
             store.send(.workspaces(.element(
                 id: id,
                 action: .webPaneForward(paneID: focusedID)
             )))
+            return true
+        case (17, true, _): // ⌘T → new tab
+            store.send(.webPaneOpenNewTab(paneID: focusedID, url: nil))
+            return true
+        case (13, true, _): // ⌘W → close tab (falls through to closePane on the last tab)
+            guard let webState = workspace.webPanes[focusedID],
+                  webState.tabs.count > 1,
+                  let activeTabID = webState.activeTab?.id else { return nil }
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneTabClose(paneID: focusedID, tabID: activeTabID)
+            )))
+            return true
+        case (33, false, true): // ⌘⇧[ → previous tab
+            if urlBarIsEditing { return nil }
+            store.send(.webPaneTabCycleFocused(offset: -1))
+            return true
+        case (30, false, true): // ⌘⇧] → next tab
+            if urlBarIsEditing { return nil }
+            store.send(.webPaneTabCycleFocused(offset: 1))
             return true
         default:
             return nil
@@ -382,6 +403,37 @@ final class PaneShortcutMonitor {
         case .webReload:
             return handleWebAction(activeWorkspaceID: id) { paneID in
                 .workspaces(.element(id: id, action: .webPaneReload(paneID: paneID, hard: false)))
+            }
+
+        case .webTabNew:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .webPaneOpenNewTab(paneID: paneID, url: nil)
+            }
+
+        case .webTabClose:
+            // Single-tab panes fall through (returns false) so the
+            // binding doesn't no-op — the user's keymap can route ⌘W
+            // to the workspace-level close-pane action instead.
+            guard let workspace = store.workspaces[id: id],
+                  let focusedID = workspace.focusedPaneID,
+                  workspace.panes[id: focusedID]?.type == .web,
+                  let webState = workspace.webPanes[focusedID],
+                  webState.tabs.count > 1,
+                  let activeTabID = webState.activeTab?.id else { return false }
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneTabClose(paneID: focusedID, tabID: activeTabID)
+            )))
+            return true
+
+        case .webTabPrev:
+            return handleWebAction(activeWorkspaceID: id) { _ in
+                .webPaneTabCycleFocused(offset: -1)
+            }
+
+        case .webTabNext:
+            return handleWebAction(activeWorkspaceID: id) { _ in
+                .webPaneTabCycleFocused(offset: 1)
             }
 
         default:

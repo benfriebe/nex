@@ -41,6 +41,9 @@ struct PaneGridView: View {
     var onWebBack: ((UUID) -> Void)?
     var onWebForward: ((UUID) -> Void)?
     var onWebReload: ((UUID) -> Void)?
+    var onWebTabSelect: ((UUID, UUID) -> Void)?
+    var onWebTabClose: ((UUID, UUID) -> Void)?
+    var onWebTabNew: ((UUID) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -223,13 +226,17 @@ struct PaneGridView: View {
             case .web:
                 WebPaneView(
                     paneID: pane.id,
-                    tab: webPanes[pane.id]?.activeTab,
+                    tabs: webPanes[pane.id]?.tabs ?? [],
+                    activeTabID: webPanes[pane.id]?.activeTabID,
                     isFocused: pane.id == focusedPaneID,
                     focusURLBarToken: webPaneURLFocusToken[pane.id] ?? 0,
                     onNavigate: { url in onWebNavigate?(pane.id, url) },
                     onBack: { onWebBack?(pane.id) },
                     onForward: { onWebForward?(pane.id) },
-                    onReload: { onWebReload?(pane.id) }
+                    onReload: { onWebReload?(pane.id) },
+                    onTabSelect: { tabID in onWebTabSelect?(pane.id, tabID) },
+                    onTabClose: { tabID in onWebTabClose?(pane.id, tabID) },
+                    onTabNew: { onWebTabNew?(pane.id) }
                 )
             }
         }

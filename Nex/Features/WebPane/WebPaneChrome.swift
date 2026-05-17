@@ -1,26 +1,46 @@
 import AppKit
 import SwiftUI
 
-/// Slim chrome strip at the top of a web pane: back / forward / reload
-/// buttons + URL bar. Phase 1 keeps the surface intentionally small —
-/// the tab strip arrives in Phase 2 and favourites in Phase 4.
+/// Chrome strip at the top of a web pane: nav buttons + URL bar +
+/// inspector toggle, with a tab strip below. The tab strip and `+`
+/// button are hidden when only one tab is open so single-tab panes
+/// stay visually quiet.
 struct WebPaneChrome: View {
     let paneID: UUID
     let displayedURL: String
     let canGoBack: Bool
     let canGoForward: Bool
     let isLoading: Bool
+    /// All open tabs. Used by the tab strip to render pills.
+    let tabs: [WebTab]
+    let activeTabID: UUID?
     let onBack: () -> Void
     let onForward: () -> Void
     let onReload: () -> Void
     let onNavigate: (String) -> Void
     let onInspect: () -> Void
+    let onTabSelect: (UUID) -> Void
+    let onTabClose: (UUID) -> Void
+    let onTabNew: () -> Void
 
     /// Set non-nil to programmatically promote the URL bar to first
     /// responder (consumed by the priority key layer for ⌘L).
     let focusRequestToken: UInt64
 
     var body: some View {
+        VStack(spacing: 0) {
+            navAndURLBar
+            if tabs.count > 1 {
+                tabStrip
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var navAndURLBar: some View {
         HStack(spacing: 6) {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
@@ -62,6 +82,16 @@ struct WebPaneChrome: View {
             )
             .frame(maxWidth: .infinity)
 
+            Button(action: onTabNew) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(0.8)
+            .help("New tab (⌘T)")
+
             Button(action: onInspect) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 11, weight: .medium))
@@ -74,10 +104,73 @@ struct WebPaneChrome: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .bottom) {
-            Divider()
+    }
+
+    private var tabStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(tabs) { tab in
+                    WebTabPill(
+                        tab: tab,
+                        isActive: tab.id == activeTabID,
+                        onSelect: { onTabSelect(tab.id) },
+                        onClose: { onTabClose(tab.id) }
+                    )
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
         }
+    }
+}
+
+/// A single tab pill in the strip. Shows the tab's title (or host as
+/// a fallback) plus a close `x`. Click anywhere on the pill to select;
+/// hovering reveals the close button.
+private struct WebTabPill: View {
+    let tab: WebTab
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(tab.displayLabel)
+                .font(.system(size: 11, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(isActive ? Color.primary : Color.secondary)
+
+            if isHovered || isActive {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close tab (⌘W)")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .frame(maxWidth: 180, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isActive ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(
+                    isActive ? Color.accentColor.opacity(0.4) : Color.clear,
+                    lineWidth: 1
+                )
+        )
+        .onTapGesture(perform: onSelect)
+        .onHover { isHovered = $0 }
     }
 }
 

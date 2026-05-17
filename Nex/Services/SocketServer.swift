@@ -103,6 +103,20 @@ enum SocketMessage: Equatable {
     /// visible page text; `screenshot` returns a PNG (inline base64
     /// under 1 MB, else a `/tmp` path).
     case webCapture(paneID: UUID?, target: String?, workspace: String?, mode: String)
+
+    // Tab commands
+
+    /// List the open tabs of the resolved web pane.
+    case webTabs(paneID: UUID?, target: String?, workspace: String?)
+    /// Open a new tab in the resolved web pane. `url` may be empty
+    /// (blank tab). `makeActive` defaults to true.
+    case webTabNew(paneID: UUID?, target: String?, workspace: String?, url: String, makeActive: Bool)
+    /// Close a tab. `tabRef` is either a tab UUID or a numeric index.
+    /// Resolving to the only tab in the pane returns `{ok:false}`
+    /// rather than implicitly closing the pane — callers can use
+    /// `pane close` for that.
+    case webTabClose(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
+    case webTabSelect(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -113,7 +127,8 @@ private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "graft-start", "graft-stop", "graft-status",
     "web-open", "web-url", "web-back",
-    "web-forward", "web-reload", "web-capture"
+    "web-forward", "web-reload", "web-capture",
+    "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -180,7 +195,20 @@ final class SocketServer: Sendable {
             closeImpl()
         }
 
-        /// Identity compare on id only — the closures aren't comparable
+        /// Convenience for the common reply path: send then close.
+        func sendAndClose(_ json: [String: Any]) {
+            sendImpl(json)
+            closeImpl()
+        }
+
+        /// Convenience for the common error path: send `{ok:false,error:...}`
+        /// then close.
+        func error(_ message: String) {
+            sendImpl(["ok": false, "error": message])
+            closeImpl()
+        }
+
+        /// Identity compare on id only - the closures aren't comparable
         /// but two handles from the same server slot always share an id.
         /// Keeps the enclosing TCA Action Equatable-synthesized.
         static func == (lhs: ReplyHandle, rhs: ReplyHandle) -> Bool {
@@ -518,6 +546,13 @@ final class SocketServer: Sendable {
         var mode: String?
         /// `web-reload --hard`.
         var hard: Bool?
+        /// `web-tab-close` / `web-tab-select` — tab UUID or numeric
+        /// index. Parser keeps it as a raw string; the reducer
+        /// resolves to a concrete UUID by trying UUID(uuidString:)
+        /// first, then Int parsing for index.
+        var tab: String?
+        /// `web-tab-new --no-focus` → false.
+        var makeActive: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -534,7 +569,23 @@ final class SocketServer: Sendable {
             case lines, scrollback
             case repo
             case url, mode, hard
+            case tab
+            case makeActive = "make_active"
         }
+    }
+
+    /// Shared scope extraction for the `web-*` commands. All of them
+    /// follow the same shape on the wire (paneID from NEX_PANE_ID
+    /// and/or --target with optional --workspace) and reject when
+    /// neither paneID nor target is present.
+    private static func parseWebTarget(
+        _ wire: WireMessage
+    ) -> (paneID: UUID?, target: String?, workspace: String?)? {
+        let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+        let target = (wire.target?.isEmpty == true) ? nil : wire.target
+        let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+        guard paneID != nil || target != nil else { return nil }
+        return (paneID, target, workspace)
     }
 
     /// Parse a single JSON message into a (SocketMessage, WireMessage) tuple.
@@ -659,48 +710,65 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-url" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
-            return (.webURL(paneID: paneID, target: target, workspace: workspace), wire)
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webURL(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-back" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
-            return (.webBack(paneID: paneID, target: target, workspace: workspace), wire)
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webBack(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-forward" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
-            return (.webForward(paneID: paneID, target: target, workspace: workspace), wire)
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webForward(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-reload" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
+            guard let scope = parseWebTarget(wire) else { return nil }
             return (.webReload(
-                paneID: paneID, target: target, workspace: workspace,
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace,
                 hard: wire.hard ?? false
             ), wire)
         }
 
         if wire.command == "web-capture" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard let scope = parseWebTarget(wire) else { return nil }
             let mode = (wire.mode?.isEmpty == true) ? "meta" : (wire.mode ?? "meta")
-            guard paneID != nil || target != nil else { return nil }
             return (.webCapture(
-                paneID: paneID, target: target, workspace: workspace, mode: mode
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, mode: mode
+            ), wire)
+        }
+
+        if wire.command == "web-tabs" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webTabs(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
+        }
+
+        if wire.command == "web-tab-new" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webTabNew(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                url: wire.url ?? "",
+                makeActive: wire.makeActive ?? true
+            ), wire)
+        }
+
+        if wire.command == "web-tab-close" {
+            guard let scope = parseWebTarget(wire),
+                  let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
+            return (.webTabClose(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
+            ), wire)
+        }
+
+        if wire.command == "web-tab-select" {
+            guard let scope = parseWebTarget(wire),
+                  let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
+            return (.webTabSelect(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
             ), wire)
         }
 

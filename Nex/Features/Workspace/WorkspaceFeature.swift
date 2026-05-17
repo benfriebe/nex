@@ -130,6 +130,18 @@ struct WorkspaceFeature {
             }
         }
 
+        /// Sync the pane header to reflect the currently-active web
+        /// tab. Call after any change to `activeTabID` (open / close /
+        /// select / cycle) so the header doesn't lag behind until the
+        /// next KVO tick from the WebView. No-op when the title is
+        /// already correct.
+        mutating func syncWebPaneHeader(paneID: UUID) {
+            guard let webState = webPanes[paneID] else { return }
+            let newTitle = webState.activeTab?.displayLabel ?? "Web"
+            guard panes[id: paneID]?.title != newTitle else { return }
+            mutatePane(id: paneID) { $0.title = newTitle }
+        }
+
         /// Update focused pane and push the previous focus onto
         /// `focusHistory` (deduped, capped). Use for every focus
         /// change EXCEPT pane-close: the closing pane is destroyed,
@@ -220,6 +232,21 @@ struct WorkspaceFeature {
         /// persistence keeps a fresh URL even when the user navigates
         /// without typing in the URL bar.
         case webPaneStateChanged(paneID: UUID, tabID: UUID, url: String, title: String)
+        /// Append a new tab to a web pane. `tabID` is supplied by the
+        /// caller so request/response CLI replies can echo a concrete
+        /// id before the effect runs.
+        case webPaneTabOpen(paneID: UUID, tabID: UUID, url: String, makeActive: Bool = true)
+        /// Close a tab inside a web pane. If `tabID == activeTabID`,
+        /// the active selection falls back to the previous sibling
+        /// (or the new first tab). Closing the last tab is rejected
+        /// here — callers compose with `.closePane(paneID)` instead,
+        /// matching how the priority ⌘W layer handles single-tab
+        /// panes.
+        case webPaneTabClose(paneID: UUID, tabID: UUID)
+        case webPaneTabSelect(paneID: UUID, tabID: UUID)
+        /// Cycle by signed offset. `+1` next, `-1` prev. Wraps around.
+        case webPaneTabCycle(paneID: UUID, offset: Int)
+        case webPaneTabReorder(paneID: UUID, orderedTabIDs: [UUID])
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -627,7 +654,7 @@ struct WorkspaceFeature {
 
             case .webPaneStateChanged(let paneID, let tabID, let url, let title):
                 guard var webState = state.webPanes[paneID] else { return .none }
-                guard let idx = webState.tabs.firstIndex(where: { $0.id == tabID }) else { return .none }
+                guard let idx = webState.index(of: tabID) else { return .none }
                 // Only overwrite the URL when the coordinator reports
                 // something non-empty (about:blank arrives as "" early
                 // in load and would otherwise wipe the persisted URL).
@@ -638,9 +665,91 @@ struct WorkspaceFeature {
                 webState.tabs[idx].url = newURL
                 webState.tabs[idx].title = title
                 state.webPanes[paneID] = webState
-                if !title.isEmpty {
+                // Only echo to the pane header when this tab is the
+                // resolved active one. webState.activeTab falls back to
+                // tabs.first when activeTabID is stale, so this
+                // matches what the UI is actually showing.
+                if !title.isEmpty,
+                   tabID == webState.activeTab?.id,
+                   state.panes[id: paneID]?.title != title {
                     state.mutatePane(id: paneID) { $0.title = title }
                 }
+                return .none
+
+            case .webPaneTabOpen(let paneID, let tabID, let url, let makeActive):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                // Caller is responsible for allocating fresh UUIDs.
+                guard !webState.contains(tabID: tabID) else { return .none }
+                let normalized = WebPaneCoordinator.normalizeURLInput(url)
+                webState.tabs.append(WebTab(id: tabID, url: normalized))
+                if makeActive {
+                    webState.activeTabID = tabID
+                }
+                state.webPanes[paneID] = webState
+                if makeActive {
+                    state.syncWebPaneHeader(paneID: paneID)
+                }
+                return .none
+
+            case .webPaneTabClose(let paneID, let tabID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                guard webState.tabs.count > 1 else {
+                    // Single-tab close = pane close. Use the proper
+                    // closePane flow so the workspace cleanup (focus
+                    // history, layout removal, coordinator teardown)
+                    // happens. Callers that want different behaviour
+                    // should compose explicitly.
+                    return .send(.closePane(paneID))
+                }
+                guard let idx = webState.index(of: tabID) else { return .none }
+                let wasActive = webState.activeTabID == tabID
+                webState.tabs.remove(at: idx)
+                if wasActive {
+                    // Prefer the left neighbour of the closed tab;
+                    // fall back to the new first when idx was 0.
+                    let fallbackIdx = max(idx - 1, 0)
+                    webState.activeTabID = webState.tabs[fallbackIdx].id
+                }
+                state.webPanes[paneID] = webState
+                if wasActive {
+                    state.syncWebPaneHeader(paneID: paneID)
+                }
+                let store = webPaneStore
+                return .run { _ in
+                    await store.destroyTab(paneID: paneID, tabID: tabID)
+                }
+
+            case .webPaneTabSelect(let paneID, let tabID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                guard webState.contains(tabID: tabID) else { return .none }
+                guard webState.activeTabID != tabID else { return .none }
+                webState.activeTabID = tabID
+                state.webPanes[paneID] = webState
+                state.syncWebPaneHeader(paneID: paneID)
+                return .none
+
+            case .webPaneTabCycle(let paneID, let offset):
+                guard var webState = state.webPanes[paneID], webState.tabs.count > 1 else { return .none }
+                let activeID = webState.activeTabID ?? webState.tabs.first?.id
+                guard let activeID, let currentIdx = webState.index(of: activeID) else { return .none }
+                let count = webState.tabs.count
+                let nextIdx = ((currentIdx + offset) % count + count) % count
+                webState.activeTabID = webState.tabs[nextIdx].id
+                state.webPanes[paneID] = webState
+                state.syncWebPaneHeader(paneID: paneID)
+                return .none
+
+            case .webPaneTabReorder(let paneID, let orderedTabIDs):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                let currentOrder = webState.tabs.map(\.id)
+                guard orderedTabIDs != currentOrder else { return .none }
+                // Only reorder if the new sequence is a permutation
+                // of the existing tab ids. Drop the action otherwise
+                // rather than silently truncating / dropping tabs.
+                guard Set(orderedTabIDs) == Set(currentOrder),
+                      orderedTabIDs.count == webState.tabs.count else { return .none }
+                webState.tabs = orderedTabIDs.compactMap { id in webState.tabs.first(where: { $0.id == id }) }
+                state.webPanes[paneID] = webState
                 return .none
 
             case .createScratchpad:

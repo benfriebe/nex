@@ -2,6 +2,12 @@ import ComposableArchitecture
 import Foundation
 import GRDB
 
+/// Shared coders for the web-tabs JSON column. JSONEncoder/Decoder are
+/// stateless and reusable; instantiating fresh per pane on every
+/// debounced save adds noticeable churn when many web panes are open.
+private let webTabsEncoder = JSONEncoder()
+private let webTabsDecoder = JSONDecoder()
+
 /// Debounced state persistence to SQLite via GRDB.
 /// Coalesces rapid state changes into a single write.
 actor PersistenceService {
@@ -134,19 +140,27 @@ actor PersistenceService {
                         )
                         panes.append(pane)
                         if paneType == .web {
-                            // Phase 1: hydrate a single-tab web state
-                            // from the persisted URL. Empty/nil URL =
-                            // blank pane (e.g. private pane on restore).
-                            let url = pr.webURL ?? ""
-                            if !url.isEmpty {
-                                let tab = WebTab(url: url)
-                                webPanes[paneID] = WebPaneState(
-                                    tabs: [tab],
-                                    activeTabID: tab.id
-                                )
-                            } else {
-                                webPanes[paneID] = WebPaneState()
+                            // Prefer the full tabs JSON; fall back to
+                            // the legacy single-tab `webURL` for rows
+                            // written before the v13 migration.
+                            // Empty/nil = blank pane (private pane on
+                            // restore).
+                            var tabs: [WebTab] = []
+                            if let json = pr.webTabsJSON,
+                               !json.isEmpty,
+                               let data = json.data(using: .utf8),
+                               let decoded = try? webTabsDecoder.decode([WebTab].self, from: data) {
+                                tabs = decoded
+                            } else if let url = pr.webURL, !url.isEmpty {
+                                tabs = [WebTab(url: url)]
                             }
+                            let activeID = pr.webActiveTabID
+                                .flatMap { UUID(uuidString: $0) }
+                                ?? tabs.first?.id
+                            webPanes[paneID] = WebPaneState(
+                                tabs: tabs,
+                                activeTabID: activeID
+                            )
                         }
                     }
 
@@ -311,15 +325,24 @@ struct PersistenceSnapshot {
 
         pnRecords = state.workspaces.flatMap { workspace in
             workspace.panes.map { pane in
-                // Phase 1 web persistence: store only the active tab's
-                // URL. Private panes intentionally drop their URL so
+                // Write the full tab list as JSON and the active tab
+                // id. `webURL` is also written as a legacy fallback
+                // for any loader that pre-dates the v13 migration.
+                // Private panes intentionally drop everything so
                 // restart restores them blank.
-                let webURL: String? = if pane.type == .web,
-                                         let webState = workspace.webPanes[pane.id],
-                                         !webState.isPrivate {
-                    webState.activeTab?.url
-                } else {
-                    nil
+                var webURL: String?
+                var webTabsJSON: String?
+                var webActiveTabID: String?
+                if pane.type == .web,
+                   let webState = workspace.webPanes[pane.id],
+                   !webState.isPrivate {
+                    webURL = webState.activeTab?.url
+                    if !webState.tabs.isEmpty,
+                       let data = try? webTabsEncoder.encode(webState.tabs),
+                       let json = String(data: data, encoding: .utf8) {
+                        webTabsJSON = json
+                    }
+                    webActiveTabID = webState.activeTabID?.uuidString
                 }
                 return PaneRecord(
                     id: pane.id.uuidString,
@@ -333,7 +356,9 @@ struct PersistenceSnapshot {
                     status: pane.status.rawValue,
                     createdAt: pane.createdAt.timeIntervalSince1970,
                     lastActivityAt: pane.lastActivityAt.timeIntervalSince1970,
-                    webURL: webURL
+                    webURL: webURL,
+                    webTabsJSON: webTabsJSON,
+                    webActiveTabID: webActiveTabID
                 )
             }
         }

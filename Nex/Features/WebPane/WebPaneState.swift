@@ -1,8 +1,6 @@
 import Foundation
 
-/// A single tab inside a `.web` pane. Phase 1 ships with at most one
-/// tab per pane; the type carries an `id` already so Phase 2 can add
-/// the tab strip without re-shaping persisted state.
+/// A single tab inside a `.web` pane.
 struct WebTab: Equatable, Identifiable, Codable {
     let id: UUID
     var url: String
@@ -13,15 +11,22 @@ struct WebTab: Equatable, Identifiable, Codable {
         self.url = url
         self.title = title
     }
+
+    /// Title used in the pane header and the chrome tab pill. Falls
+    /// back through title -> host -> url -> "New Tab" so a tab that
+    /// hasn't reported a title yet still shows something meaningful.
+    var displayLabel: String {
+        if !title.isEmpty { return title }
+        if let host = URL(string: url)?.host, !host.isEmpty { return host }
+        if !url.isEmpty { return url }
+        return "New Tab"
+    }
 }
 
 /// Sidecar state for a `.web` pane. Lives on `WorkspaceFeature.State`
 /// in the `webPanes: [UUID: WebPaneState]` dictionary, keyed by pane
 /// id. Kept off the `Pane` struct itself so consumers that don't care
 /// about web pane internals don't have to learn the type.
-///
-/// Phase 1 fields only — Phase 3 adds the console buffer and inspector
-/// state alongside these.
 struct WebPaneState: Equatable {
     var tabs: [WebTab]
     var activeTabID: UUID?
@@ -41,6 +46,14 @@ struct WebPaneState: Equatable {
             return tab
         }
         return tabs.first
+    }
+
+    func index(of tabID: UUID) -> Int? {
+        tabs.firstIndex(where: { $0.id == tabID })
+    }
+
+    func contains(tabID: UUID) -> Bool {
+        tabs.contains(where: { $0.id == tabID })
     }
 }
 

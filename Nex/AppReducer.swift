@@ -422,6 +422,16 @@ struct AppReducer {
         case openWebPanePath(url: String, fromPaneID: UUID?)
         /// Bump the URL bar focus token for a web pane (⌘L).
         case webPaneFocusURLBar(paneID: UUID)
+        /// Open a new tab in an existing web pane. `url == nil` →
+        /// blank tab. Allocates the tab id here so the priority key
+        /// path (⌘T) and CLI (`nex web tab-new`) share one entry point.
+        case webPaneOpenNewTab(paneID: UUID, url: String?)
+        /// Cycle tabs in the focused web pane. `+1` = next, `-1` = prev.
+        case webPaneTabCycleFocused(offset: Int)
+        /// Close the active tab in the focused web pane. Falls
+        /// through to the workspace's closePane when only one tab
+        /// remains.
+        case webPaneTabCloseActiveFocused
 
         // Inspector + Git Status
         case toggleInspector
@@ -1606,6 +1616,166 @@ struct AppReducer {
             }
             reply?.send(payload)
             reply?.close()
+        }
+    }
+
+    // MARK: - Web pane tab handlers
+
+    enum TabRefResolution {
+        case found(UUID)
+        case error(String)
+    }
+
+    /// Resolve a `tab` ref (UUID string or numeric index) against a
+    /// web pane's tab list. Returns the concrete tab UUID or an
+    /// error message safe to surface in a reply.
+    private func resolveTabRef(
+        _ ref: String,
+        in webState: WebPaneState
+    ) -> TabRefResolution {
+        if let uuid = UUID(uuidString: ref) {
+            guard webState.contains(tabID: uuid) else {
+                return .error("no tab with UUID '\(ref)' in this web pane")
+            }
+            return .found(uuid)
+        }
+        if let idx = Int(ref) {
+            guard webState.tabs.indices.contains(idx) else {
+                return .error("tab index \(idx) out of range (0..<\(webState.tabs.count))")
+            }
+            return .found(webState.tabs[idx].id)
+        }
+        return .error("tab ref must be a UUID or numeric index, got '\(ref)'")
+    }
+
+    private func tabJSON(_ tab: WebTab, isActive: Bool, index: Int) -> [String: Any] {
+        [
+            "id": tab.id.uuidString,
+            "url": tab.url,
+            "title": tab.title,
+            "index": index,
+            "active": isActive
+        ]
+    }
+
+    func handleWebTabs(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let activeID = resolved.webState.activeTab?.id
+        let entries = resolved.webState.tabs.enumerated().map { idx, tab in
+            tabJSON(tab, isActive: tab.id == activeID, index: idx)
+        }
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "tabs": entries
+        ])
+        return .none
+    }
+
+    func handleWebTabNew(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        url: String,
+        makeActive: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let newTabID = uuid()
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "tab_id": newTabID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "url": WebPaneCoordinator.normalizeURLInput(url),
+            "active": makeActive
+        ])
+        return .send(.workspaces(.element(
+            id: resolved.workspace.id,
+            action: .webPaneTabOpen(
+                paneID: resolved.paneID,
+                tabID: newTabID,
+                url: url,
+                makeActive: makeActive
+            )
+        )))
+    }
+
+    func handleWebTabClose(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        tabRef: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        switch resolveTabRef(tabRef, in: resolved.webState) {
+        case .error(let message):
+            reply?.error(message)
+            return .none
+        case .found(let tabID):
+            if resolved.webState.tabs.count == 1 {
+                reply?.error("cannot close the only tab in a web pane, use `nex pane close` to close the pane itself")
+                return .none
+            }
+            reply?.sendAndClose([
+                "ok": true,
+                "pane_id": resolved.paneID.uuidString,
+                "workspace_id": resolved.workspace.id.uuidString,
+                "tab_id": tabID.uuidString
+            ])
+            return .send(.workspaces(.element(
+                id: resolved.workspace.id,
+                action: .webPaneTabClose(paneID: resolved.paneID, tabID: tabID)
+            )))
+        }
+    }
+
+    func handleWebTabSelect(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        tabRef: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        switch resolveTabRef(tabRef, in: resolved.webState) {
+        case .error(let message):
+            reply?.error(message)
+            return .none
+        case .found(let tabID):
+            reply?.sendAndClose([
+                "ok": true,
+                "pane_id": resolved.paneID.uuidString,
+                "workspace_id": resolved.workspace.id.uuidString,
+                "tab_id": tabID.uuidString
+            ])
+            return .send(.workspaces(.element(
+                id: resolved.workspace.id,
+                action: .webPaneTabSelect(paneID: resolved.paneID, tabID: tabID)
+            )))
         }
     }
 
@@ -2965,6 +3135,43 @@ struct AppReducer {
                 state.webPaneURLFocusTokens[paneID, default: 0] &+= 1
                 return .none
 
+            case .webPaneOpenNewTab(let paneID, let url):
+                guard let workspace = state.workspaces.first(where: { $0.webPanes[paneID] != nil }) else {
+                    return .none
+                }
+                let newTabID = uuid()
+                return .send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webPaneTabOpen(
+                        paneID: paneID,
+                        tabID: newTabID,
+                        url: url ?? "",
+                        makeActive: true
+                    )
+                )))
+
+            case .webPaneTabCycleFocused(let offset):
+                guard let activeID = state.activeWorkspaceID,
+                      let workspace = state.workspaces[id: activeID],
+                      let focusedID = workspace.focusedPaneID,
+                      workspace.panes[id: focusedID]?.type == .web else { return .none }
+                return .send(.workspaces(.element(
+                    id: activeID,
+                    action: .webPaneTabCycle(paneID: focusedID, offset: offset)
+                )))
+
+            case .webPaneTabCloseActiveFocused:
+                guard let activeID = state.activeWorkspaceID,
+                      let workspace = state.workspaces[id: activeID],
+                      let focusedID = workspace.focusedPaneID,
+                      workspace.panes[id: focusedID]?.type == .web,
+                      let webState = workspace.webPanes[focusedID],
+                      let activeTabID = webState.activeTab?.id else { return .none }
+                return .send(.workspaces(.element(
+                    id: activeID,
+                    action: .webPaneTabClose(paneID: focusedID, tabID: activeTabID)
+                )))
+
             case .openDiffPath(let repoPath, let targetPath, let fromPaneID):
                 guard let activeID = state.activeWorkspaceID else { return .none }
                 let workspace = state.workspaces[id: activeID]
@@ -3471,6 +3678,46 @@ struct AppReducer {
                         target: target,
                         workspaceFilter: workspaceFilter,
                         mode: mode,
+                        reply: reply
+                    )
+
+                case .webTabs(let paneID, let target, let workspaceFilter):
+                    return handleWebTabs(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
+
+                case .webTabNew(let paneID, let target, let workspaceFilter, let url, let makeActive):
+                    return handleWebTabNew(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        url: url,
+                        makeActive: makeActive,
+                        reply: reply
+                    )
+
+                case .webTabClose(let paneID, let target, let workspaceFilter, let tabRef):
+                    return handleWebTabClose(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        tabRef: tabRef,
+                        reply: reply
+                    )
+
+                case .webTabSelect(let paneID, let target, let workspaceFilter, let tabRef):
+                    return handleWebTabSelect(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        tabRef: tabRef,
                         reply: reply
                     )
                 }

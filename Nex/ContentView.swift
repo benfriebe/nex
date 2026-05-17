@@ -141,6 +141,21 @@ struct ContentView: View {
                                 id: activeID,
                                 action: .webPaneReload(paneID: paneID, hard: false)
                             )))
+                        },
+                        onWebTabSelect: { paneID, tabID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneTabSelect(paneID: paneID, tabID: tabID)
+                            )))
+                        },
+                        onWebTabClose: { paneID, tabID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneTabClose(paneID: paneID, tabID: tabID)
+                            )))
+                        },
+                        onWebTabNew: { paneID in
+                            store.send(.webPaneOpenNewTab(paneID: paneID, url: nil))
                         }
                     )
                 } else {

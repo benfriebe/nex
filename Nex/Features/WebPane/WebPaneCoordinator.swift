@@ -2,11 +2,10 @@ import AppKit
 import Foundation
 import WebKit
 
-/// Per-pane owner of WKWebView instances. Phase 1 ships with a single
-/// tab per coordinator; Phase 2 grows this to N tabs sharing one
-/// `WKWebsiteDataStore`.
+/// Per-pane owner of WKWebView instances, one per tab, all sharing
+/// the pane's `WKWebsiteDataStore`.
 ///
-/// Lifecycle contract — mirrors `SurfaceManager` for terminal panes:
+/// Lifecycle contract, mirrors `SurfaceManager` for terminal panes:
 /// - `WebPaneStore` creates the coordinator lazily on first access.
 /// - `WebPaneView.makeNSView` retrieves the active tab's WKWebView and
 ///   embeds it; if the surrounding split is later torn down by a layout
@@ -20,8 +19,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
     let paneID: UUID
     let dataStore: WKWebsiteDataStore
 
-    /// Per-tab WKWebView. Phase 1 keeps at most one entry; the
-    /// dictionary shape lets Phase 2 add tabs without refactoring.
+    /// Per-tab WKWebView. Keyed by tab id.
     private var webViews: [UUID: WKWebView] = [:]
     /// Per-tab frame-based container around the WKWebView. Acts as
     /// the "attachment view" the Inspector docks into — see
@@ -78,8 +76,30 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return host
     }
 
-    /// Get-or-create the WebView for the given tab. Phase 1's view code
-    /// only ever asks for `activeTab.id`.
+    /// Look up the existing container without creating one. Used by
+    /// the multi-tab host view to enumerate already-mounted tabs
+    /// without forcing a load.
+    func containerIfExists(tabID: UUID) -> WebPaneTabContainer? {
+        containers[tabID]
+    }
+
+    /// Tear down a single tab — invalidates its KVO tokens, drops
+    /// its WKWebView from the dict, removes its container from the
+    /// view hierarchy. Used by `webPaneTabClose` to release resources
+    /// without affecting sibling tabs.
+    func destroyTab(tabID: UUID) {
+        if let tokens = kvoTokens.removeValue(forKey: tabID) {
+            for token in tokens {
+                token.invalidate()
+            }
+        }
+        if let container = containers.removeValue(forKey: tabID) {
+            container.removeFromSuperview()
+        }
+        webViews.removeValue(forKey: tabID)
+    }
+
+    /// Get-or-create the WebView for the given tab.
     func webView(for tab: WebTab) -> WKWebView {
         if let existing = webViews[tab.id] { return existing }
 
@@ -108,7 +128,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         // `pane web url` reply. The KVO closure is `@Sendable`
         // under Swift 6 strict concurrency, so we can't read
         // `webView.url` / `webView.title` (both main-actor) from
-        // it directly — capture the webView pointer and read on
+        // it directly; capture the webView pointer and read on
         // the main actor inside Task.
         let tabID = tab.id
         let snapshotAndPost: @Sendable (WKWebView?) -> Void = { [weak self] webView in
