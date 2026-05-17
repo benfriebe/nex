@@ -22,6 +22,15 @@ struct GraftFeature {
         case onAppLaunched(parentRepoRoots: [String])
         case orphansDetected([GraftOrphan])
         case toggleGraft(RepoAssociation)
+        /// Unconditional stop for a specific association — used by
+        /// removal paths (workspace delete, bulk delete, cascade
+        /// group delete, repo removal, auto-unlink) where the
+        /// association is being deleted entirely and `toggleGraft`
+        /// would either retry-start an `.error` session or be a
+        /// no-op. Drops the session from state and tells the
+        /// service to tear down. Idempotent: a missing session is
+        /// a no-op.
+        case forceStop(UUID)
         case startSucceeded(GraftSession)
         /// Typed failure so the reducer can distinguish "another
         /// session already owns this parent root" (which triggers the
@@ -115,6 +124,28 @@ struct GraftFeature {
                                 failure: GraftStartFailure(error: error)
                             ))
                         }
+                    }
+                }
+
+            case .forceStop(let assocID):
+                guard let existing = state.sessions[id: assocID] else { return .none }
+                // A session in `.error` state never owns live
+                // resources — just drop the placeholder. Unlike
+                // `toggleGraft`, we never retry-start (the caller is
+                // a removal path; the association no longer exists).
+                if case .error = existing.status {
+                    state.sessions.remove(id: assocID)
+                    return .none
+                }
+                return .run { send in
+                    do {
+                        try await graftService.stop(assocID)
+                        await send(.stopSucceeded(assocID))
+                    } catch {
+                        await send(.stopFailed(
+                            assocID,
+                            error: String(describing: error)
+                        ))
                     }
                 }
 
