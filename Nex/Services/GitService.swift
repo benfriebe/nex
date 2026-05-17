@@ -17,6 +17,19 @@ struct RepoRootInfo: Equatable {
     let parentRepoRoot: String
 }
 
+/// In-progress operations that block graft mirroring. `clean` means
+/// `git status` is dirty-allowed but there is no merge/rebase/etc in
+/// flight. `unknown` covers anything we don't explicitly recognise.
+enum RepoState: Equatable {
+    case clean
+    case merge
+    case rebase
+    case cherryPick
+    case revert
+    case bisect
+    case unknown(String)
+}
+
 struct GitService {
     var scanForRepos: @Sendable (_ rootPath: String, _ maxDepth: Int) async throws -> [ScannedRepo]
     var getRemoteURL: @Sendable (_ repoPath: String) async throws -> String?
@@ -29,6 +42,60 @@ struct GitService {
     var resolveRepoRoot: @Sendable (_ path: String) async -> RepoRootInfo?
     var getDiff: @Sendable (_ repoPath: String, _ targetPath: String?) async throws -> String
     var resolveHeadPath: @Sendable (_ worktreePath: String) async throws -> String
+    /// `git stash push --include-untracked -m <message>`. Returns the
+    /// resulting stash SHA (via `git rev-parse refs/stash`) or `nil` if
+    /// there was nothing to stash.
+    var stashPushIncludeUntracked: @Sendable (_ repoPath: String, _ message: String) async throws -> String?
+    /// `git stash pop <stashRef>`. Pops by SHA so the operation is
+    /// stable across other stashes landing in the meantime.
+    var stashPopRef: @Sendable (_ repoPath: String, _ stashRef: String) async throws -> Void
+    /// `git add -A` + `git commit -m <msg>` (optionally `--no-verify`).
+    /// Returns the staged paths captured between add and commit. If
+    /// nothing is staged the function is a no-op and returns `[]`.
+    var addAllAndCommit: @Sendable (_ worktreePath: String, _ message: String, _ noVerify: Bool) async throws -> [String]
+    /// `git checkout -f <branchOrSha> --`. Used to overwrite the
+    /// parent root's tree on every graft sync.
+    var checkoutBranchForce: @Sendable (_ repoPath: String, _ branchOrSha: String) async throws -> Void
+    /// `git checkout -f HEAD --`. Used on graft stop to discard the
+    /// synced tree before popping the user's stash.
+    var checkoutHeadForce: @Sendable (_ repoPath: String) async throws -> Void
+    /// Inspect git-dir for merge/rebase/cherry-pick/revert/bisect
+    /// breadcrumbs. Returns `.clean` when no operation is in flight.
+    var repoState: @Sendable (_ repoPath: String) async throws -> RepoState
+    /// `git rev-parse HEAD` — returns the SHA of the current HEAD.
+    /// Used by the graft sync pass to fall back to SHA-based
+    /// checkout when the worktree is on a branch the parent root
+    /// doesn't know, or detached.
+    var getHeadSha: @Sendable (_ repoPath: String) async throws -> String
+    /// `git reset --hard <sha>` — rewinds the current branch to a
+    /// specific SHA, discarding working tree and index changes. Used
+    /// on graft stop to roll the parent root back to its pre-graft
+    /// state before popping the user's stash. Without this step,
+    /// the parent's branch ref still points at the checkpoint
+    /// commits graft made during the session.
+    var resetHard: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
+    /// `git reset --mixed <sha>` — rewinds the current branch ref and
+    /// the index to `<sha>` but leaves working-tree files untouched.
+    /// Used on graft stop in the WORKTREE so the checkpoint commits
+    /// disappear while the user's actual edits remain on disk as
+    /// uncommitted changes.
+    var resetMixed: @Sendable (_ repoPath: String, _ sha: String) async throws -> Void
+    /// Compute the tree SHA representing the worktree's current state
+    /// (HEAD + all staged + all unstaged edits) WITHOUT touching the
+    /// worktree's real index. Backed by an out-of-band temp index
+    /// (`GIT_INDEX_FILE=…`) so the user's pending staging in the
+    /// worktree is preserved verbatim.
+    ///
+    /// This is the worktree-side primitive for the tree-based graft
+    /// sync: the parent then applies the tree via `readTreeInto` and
+    /// nothing on the worktree's git state changes (no checkpoint
+    /// commits, no branch ref movement).
+    var writeTreeForWorktree: @Sendable (_ worktreePath: String) async throws -> String
+    /// `git read-tree --reset -u <tree>` — replace the repo's index and
+    /// working tree with `<tree>`. Used by the parent in graft sync to
+    /// mirror the worktree's content without changing the parent's
+    /// HEAD / branch ref.
+    var readTreeInto: @Sendable (_ repoPath: String, _ treeSha: String) async throws -> Void
 }
 
 // MARK: - Live Implementation
@@ -237,37 +304,171 @@ extension GitService {
                 (worktreePath as NSString).appendingPathComponent(trimmed)
             }
             return (absolute as NSString).standardizingPath
+        },
+
+        stashPushIncludeUntracked: { repoPath, message in
+            // `git stash push` is silent on success and prints to stdout
+            // when there's nothing to stash. The exit code is 0 in both
+            // cases, so we detect the "nothing to stash" outcome by
+            // inspecting the output.
+            let output = try runGit(
+                args: ["stash", "push", "--include-untracked", "-m", message],
+                at: repoPath
+            )
+            if output.contains("No local changes to save") {
+                return nil
+            }
+            let sha = try runGit(args: ["rev-parse", "refs/stash"], at: repoPath)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return sha.isEmpty ? nil : sha
+        },
+
+        stashPopRef: { repoPath, stashRef in
+            // `git stash pop` requires a `stash@{N}` reference, not a
+            // bare SHA. Look up the index that currently matches the
+            // recorded SHA — robust against other stashes landing in
+            // the meantime. If the stash is gone (user dropped it),
+            // treat as a no-op so the rest of the stop sequence can
+            // still clean up.
+            let listing = try runGit(args: ["stash", "list", "--format=%H"], at: repoPath)
+            let shas = listing
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+            guard let index = shas.firstIndex(of: stashRef) else { return }
+            _ = try runGit(args: ["stash", "pop", "stash@{\(index)}"], at: repoPath)
+        },
+
+        addAllAndCommit: { worktreePath, message, noVerify in
+            _ = try runGit(args: ["add", "-A"], at: worktreePath)
+            let staged = try runGit(
+                args: ["diff", "--name-only", "--cached"],
+                at: worktreePath
+            )
+            let paths = staged
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !paths.isEmpty else { return [] }
+            var commitArgs = ["commit", "-m", message]
+            if noVerify { commitArgs.append("--no-verify") }
+            _ = try runGit(args: commitArgs, at: worktreePath)
+            return paths
+        },
+
+        checkoutBranchForce: { repoPath, branchOrSha in
+            _ = try runGit(args: ["checkout", "-f", branchOrSha, "--"], at: repoPath)
+        },
+
+        checkoutHeadForce: { repoPath in
+            _ = try runGit(args: ["checkout", "-f", "HEAD", "--"], at: repoPath)
+        },
+
+        repoState: { repoPath in
+            let raw = try runGit(args: ["rev-parse", "--git-dir"], at: repoPath)
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let gitDir: String = if trimmed.hasPrefix("/") {
+                trimmed
+            } else {
+                (repoPath as NSString).appendingPathComponent(trimmed)
+            }
+            let fm = FileManager.default
+            func exists(_ component: String) -> Bool {
+                fm.fileExists(atPath: (gitDir as NSString).appendingPathComponent(component))
+            }
+            if exists("MERGE_HEAD") { return .merge }
+            if exists("rebase-merge") || exists("rebase-apply") { return .rebase }
+            if exists("CHERRY_PICK_HEAD") { return .cherryPick }
+            if exists("REVERT_HEAD") { return .revert }
+            if exists("BISECT_LOG") { return .bisect }
+            return .clean
+        },
+
+        getHeadSha: { repoPath in
+            let raw = try runGit(args: ["rev-parse", "HEAD"], at: repoPath)
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        },
+
+        resetHard: { repoPath, sha in
+            _ = try runGit(args: ["reset", "--hard", sha], at: repoPath)
+        },
+
+        resetMixed: { repoPath, sha in
+            _ = try runGit(args: ["reset", "--mixed", sha], at: repoPath)
+        },
+
+        writeTreeForWorktree: { worktreePath in
+            // Build a throw-away index file so the user's real
+            // staging in the worktree survives untouched. The
+            // sequence: seed the temp index with HEAD's tree → stage
+            // every working-tree change (`add -A`) into the temp
+            // index → write that index out as a tree. The resulting
+            // tree SHA represents "worktree's working tree as a
+            // single committable snapshot".
+            let tempDir = NSTemporaryDirectory() as NSString
+            let tempIndex = tempDir.appendingPathComponent("nex-graft-index-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(atPath: tempIndex) }
+            let env = ["GIT_INDEX_FILE": tempIndex]
+            _ = try runGit(args: ["read-tree", "HEAD"], at: worktreePath, env: env)
+            _ = try runGit(args: ["add", "-A"], at: worktreePath, env: env)
+            let raw = try runGit(args: ["write-tree"], at: worktreePath, env: env)
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        },
+
+        readTreeInto: { repoPath, treeSha in
+            // `--reset -u`: reset the repo's index to the given tree
+            // AND update the working tree to match. Tracked files
+            // that differ get overwritten; tracked files absent from
+            // the new tree are removed. Untracked files (node_modules,
+            // build artifacts, ignored caches) are left alone.
+            _ = try runGit(args: ["read-tree", "--reset", "-u", treeSha], at: repoPath)
         }
     )
 }
 
 // MARK: - Helpers
 
-private func runGit(args: [String], at directory: String) throws -> String {
+private func runGit(args: [String], at directory: String, env: [String: String]? = nil) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: directory)
+    if let env, !env.isEmpty {
+        // Inherit the parent process env so PATH, HOME, etc. survive.
+        var merged = ProcessInfo.processInfo.environment
+        for (key, value) in env {
+            merged[key] = value
+        }
+        process.environment = merged
+    }
 
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = Pipe()
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.standardOutput = stdout
+    process.standardError = stderr
 
     try process.run()
     process.waitUntilExit()
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let data = stdout.fileHandleForReading.readDataToEndOfFile()
     guard process.terminationStatus == 0 else {
+        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        let errText = String(data: errData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         throw GitServiceError.commandFailed(
             command: "git \(args.joined(separator: " "))",
-            exitCode: Int(process.terminationStatus)
+            exitCode: Int(process.terminationStatus),
+            stderr: errText
         )
     }
     return String(data: data, encoding: .utf8) ?? ""
 }
 
 enum GitServiceError: Error, Equatable {
-    case commandFailed(command: String, exitCode: Int)
+    /// `stderr` carries the message git printed (e.g. "error: Untracked
+    /// working tree file '<path>' would be overwritten by merge") so
+    /// the graft sync error tooltip can surface something actionable
+    /// instead of `exitCode: 128`.
+    case commandFailed(command: String, exitCode: Int, stderr: String?)
 }
 
 /// Parse a `git diff --shortstat` summary line into (additions, deletions).
@@ -310,7 +511,18 @@ extension GitService: DependencyKey {
             // in `GitHeadWatcher`, so the watcher silently no-ops in tests
             // that don't care about HEAD watching. Tests that do care should
             // override this to return a real HEAD path.
-            resolveHeadPath: { _ in "" }
+            resolveHeadPath: { _ in "" },
+            stashPushIncludeUntracked: unimplemented("GitService.stashPushIncludeUntracked", placeholder: nil),
+            stashPopRef: unimplemented("GitService.stashPopRef"),
+            addAllAndCommit: unimplemented("GitService.addAllAndCommit", placeholder: []),
+            checkoutBranchForce: unimplemented("GitService.checkoutBranchForce"),
+            checkoutHeadForce: unimplemented("GitService.checkoutHeadForce"),
+            repoState: unimplemented("GitService.repoState", placeholder: .clean),
+            getHeadSha: unimplemented("GitService.getHeadSha", placeholder: ""),
+            resetHard: unimplemented("GitService.resetHard"),
+            resetMixed: unimplemented("GitService.resetMixed"),
+            writeTreeForWorktree: unimplemented("GitService.writeTreeForWorktree", placeholder: ""),
+            readTreeInto: unimplemented("GitService.readTreeInto")
         )
     }
 }

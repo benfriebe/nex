@@ -75,13 +75,25 @@ enum SocketMessage: Equatable {
     /// Replies with `{"ok":true,"text":"..."}` or `{"ok":false,"error":...}`
     /// (request/response — see `replyCommandAllowlist`).
     case paneCapture(paneID: UUID?, target: String?, workspace: String?, lines: Int?, includeScrollback: Bool)
+    /// `nex graft start` — begin worktree-to-root mirroring. `paneID`
+    /// comes from `NEX_PANE_ID` and scopes resolution to the caller's
+    /// workspace when neither `workspace` nor `repo` is supplied.
+    /// Request/response — see `replyCommandAllowlist`.
+    case graftStart(workspace: String?, repo: String?, paneID: UUID?)
+    /// `nex graft stop` — stop active sessions in scope.
+    case graftStop(workspace: String?, repo: String?, paneID: UUID?)
+    /// `nex graft status` — list active sessions across all workspaces.
+    case graftStatus
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
 /// command outside this allowlist the server does not allocate a
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
-private let replyCommandAllowlist: Set<String> = ["pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key"]
+private let replyCommandAllowlist: Set<String> = [
+    "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
+    "graft-start", "graft-stop", "graft-status"
+]
 
 /// Unix domain socket server that listens for structured JSON messages
 /// from the `nex` CLI tool. Agent hooks (Claude Code, Codex)
@@ -477,6 +489,8 @@ final class SocketServer: Sendable {
         /// `pane-capture` filters
         var lines: Int?
         var scrollback: Bool?
+        /// `graft-start` / `graft-stop` — repo name or path scope.
+        var repo: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -491,6 +505,7 @@ final class SocketServer: Sendable {
             case repoPath = "repo_path"
             case targetPath = "target_path"
             case lines, scrollback
+            case repo
         }
     }
 
@@ -589,6 +604,24 @@ final class SocketServer: Sendable {
                 lines: wire.lines,
                 includeScrollback: wire.scrollback ?? false
             ), wire)
+        }
+
+        if wire.command == "graft-start" {
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let repo = (wire.repo?.isEmpty == true) ? nil : wire.repo
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.graftStart(workspace: workspace, repo: repo, paneID: paneID), wire)
+        }
+
+        if wire.command == "graft-stop" {
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let repo = (wire.repo?.isEmpty == true) ? nil : wire.repo
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.graftStop(workspace: workspace, repo: repo, paneID: paneID), wire)
+        }
+
+        if wire.command == "graft-status" {
+            return (.graftStatus, wire)
         }
 
         if wire.command == "pane-send-key" {

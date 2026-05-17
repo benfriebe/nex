@@ -63,7 +63,7 @@ struct WorktreeOperationTests {
         } withDependencies: {
             $0.surfaceManager = SurfaceManager()
             $0.gitService.createWorktree = { _, _, _ in
-                throw GitServiceError.commandFailed(command: "git worktree add", exitCode: 128)
+                throw GitServiceError.commandFailed(command: "git worktree add", exitCode: 128, stderr: nil)
             }
         }
 

@@ -23,6 +23,7 @@ struct AppReducer {
         var lastSelectionAnchor: UUID?
         var bulkDeleteConfirmationIDs: [UUID]?
         var settings = SettingsFeature.State()
+        var graft = GraftFeature.State()
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
@@ -368,6 +369,7 @@ struct AppReducer {
         case seedTestGroup // DEBUG-only menu hook; safe to dispatch in tests
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
+        case graft(GraftFeature.Action)
 
         /// Socket messages (agent lifecycle + pane/workspace commands).
         /// `reply` is non-nil only for request-style commands (currently
@@ -475,6 +477,7 @@ struct AppReducer {
     @Dependency(\.statusBarController) var statusBarController
     @Dependency(\.ghosttyConfig) var ghosttyConfig
     @Dependency(\.globalHotkeyService) var globalHotkeyService
+    @Dependency(\.graftService) var graftService
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
 
@@ -1147,6 +1150,211 @@ struct AppReducer {
         return .run { _ in
             await mgr.sendKey(to: resolvedID, keyName: normalizedKey)
         }
+    }
+
+    // MARK: - Graft socket handlers
+
+    /// Outcome of `resolveGraftAssociations`. Carries either the
+    /// resolved set or a user-facing error message — callers send the
+    /// error string in the reply payload.
+    enum GraftScopeResolution {
+        case resolved([RepoAssociation])
+        case failure(String)
+    }
+
+    /// Resolve the set of associations in scope for a `graft-*` command.
+    /// `workspaceFilter` (name-or-UUID) limits to one workspace;
+    /// `repoFilter` (name or worktree-path) further filters by repo.
+    /// `paneID` (from `NEX_PANE_ID`) is used as the workspace scope
+    /// when neither filter is supplied — that's the "in-pane bare
+    /// command" path that should target the caller's workspace.
+    private func resolveGraftAssociations(
+        state: State,
+        workspaceFilter: String?,
+        repoFilter: String?,
+        paneID: UUID?
+    ) -> GraftScopeResolution {
+        let workspaces: [WorkspaceFeature.State]
+        if let workspaceFilter {
+            guard let wsID = Self.resolveWorkspace(workspaceFilter, state: state),
+                  let ws = state.workspaces[id: wsID] else {
+                return .failure("workspace not found: \(workspaceFilter)")
+            }
+            workspaces = [ws]
+        } else if let paneID {
+            guard let ws = state.workspaceContainingPane(paneID) else {
+                return .failure("no workspace contains the requesting pane")
+            }
+            workspaces = [ws]
+        } else if repoFilter != nil {
+            // Repo-only filter: search every workspace.
+            workspaces = Array(state.workspaces)
+        } else {
+            return .failure("graft requires --workspace, --repo, or NEX_PANE_ID")
+        }
+
+        var results: [RepoAssociation] = []
+        for ws in workspaces {
+            for assoc in ws.repoAssociations {
+                if let repoFilter {
+                    let matchesPath = assoc.worktreePath == repoFilter
+                        || (assoc.worktreePath as NSString).lastPathComponent == repoFilter
+                    let matchesName = state.repoRegistry[id: assoc.repoID]?.name == repoFilter
+                    guard matchesPath || matchesName else { continue }
+                }
+                results.append(assoc)
+            }
+        }
+        if results.isEmpty {
+            return .failure("no repo associations matched the requested scope")
+        }
+        return .resolved(results)
+    }
+
+    private func sessionJSON(_ session: GraftSession) -> [String: Any] {
+        let statusString = switch session.status {
+        case .starting: "starting"
+        case .watching: "watching"
+        case .syncing: "syncing"
+        case .error: "error"
+        }
+        var payload: [String: Any] = [
+            "association_id": session.id.uuidString,
+            "worktree_path": session.worktreePath,
+            "parent_repo_root": session.parentRepoRoot,
+            "branch": session.branch,
+            "status": statusString
+        ]
+        if case .error(let msg) = session.status {
+            payload["error"] = msg
+        }
+        if let stashRef = session.stashRef {
+            payload["stash_ref"] = stashRef
+        }
+        if let lastSync = session.lastSync {
+            payload["last_sync"] = ISO8601DateFormatter().string(from: lastSync)
+        }
+        return payload
+    }
+
+    func handleGraftStart(
+        state: State,
+        workspaceFilter: String?,
+        repoFilter: String?,
+        paneID: UUID?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let assocs: [RepoAssociation]
+        switch resolveGraftAssociations(
+            state: state,
+            workspaceFilter: workspaceFilter,
+            repoFilter: repoFilter,
+            paneID: paneID
+        ) {
+        case .resolved(let resolved):
+            assocs = resolved
+        case .failure(let error):
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        return .run { [graftService] _ in
+            var started: [[String: Any]] = []
+            var failedAny = false
+            var lastError: String?
+            for assoc in assocs {
+                do {
+                    let session = try await graftService.start(assoc)
+                    started.append([
+                        "association_id": session.id.uuidString,
+                        "worktree_path": session.worktreePath,
+                        "branch": session.branch,
+                        "parent_repo_root": session.parentRepoRoot
+                    ])
+                } catch {
+                    failedAny = true
+                    lastError = String(describing: error)
+                }
+            }
+            if started.isEmpty {
+                reply?.send(["ok": false, "error": lastError ?? "graft start failed"])
+            } else if failedAny, let lastError {
+                var payload: [String: Any] = ["ok": true, "started": started]
+                payload["partial_error"] = lastError
+                reply?.send(payload)
+            } else {
+                reply?.send(["ok": true, "started": started])
+            }
+            reply?.close()
+        }
+    }
+
+    func handleGraftStop(
+        state: State,
+        workspaceFilter: String?,
+        repoFilter: String?,
+        paneID: UUID?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let assocs: [RepoAssociation]
+        switch resolveGraftAssociations(
+            state: state,
+            workspaceFilter: workspaceFilter,
+            repoFilter: repoFilter,
+            paneID: paneID
+        ) {
+        case .resolved(let resolved):
+            assocs = resolved
+        case .failure(let error):
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        // Only stop associations that actually have a live session.
+        let activeIDs = Set(state.graft.sessions.ids)
+        let targets = assocs.filter { activeIDs.contains($0.id) }
+        if targets.isEmpty {
+            reply?.send(["ok": true, "stopped": []])
+            reply?.close()
+            return .none
+        }
+
+        return .run { [graftService] _ in
+            var stopped: [String] = []
+            var failures: [[String: Any]] = []
+            for assoc in targets {
+                do {
+                    try await graftService.stop(assoc.id)
+                    stopped.append(assoc.id.uuidString)
+                } catch {
+                    failures.append([
+                        "association_id": assoc.id.uuidString,
+                        "error": String(describing: error)
+                    ])
+                }
+            }
+            var payload: [String: Any] = ["ok": failures.isEmpty, "stopped": stopped]
+            if !failures.isEmpty {
+                payload["failed"] = failures
+            }
+            reply?.send(payload)
+            reply?.close()
+        }
+    }
+
+    func handleGraftStatus(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let payload: [String: Any] = [
+            "ok": true,
+            "sessions": state.graft.sessions.map(sessionJSON)
+        ]
+        reply?.send(payload)
+        reply?.close()
+        return .none
     }
 
     /// Returns the last `n` lines of `text`, joined by `\n`. Preserves
@@ -2022,6 +2230,7 @@ struct AppReducer {
                     }
                 }
 
+                let parentRepoRoots = Array(Set(state.repoRegistry.map(\.path)))
                 return .merge(
                     [
                         .run { send in
@@ -2050,7 +2259,8 @@ struct AppReducer {
                             await send(.persistState)
                         },
                         .send(.refreshGitStatus),
-                        .send(.startGitStatusTimer)
+                        .send(.startGitStatusTimer),
+                        .send(.graft(.onAppLaunched(parentRepoRoots: parentRepoRoots)))
                     ] + watcherSeeds
                 )
 
@@ -2147,6 +2357,10 @@ struct AppReducer {
                 return .send(.persistState)
 
             case .settings:
+                return .none
+
+            case .graft:
+                // Handled by the GraftFeature Scope below.
                 return .none
 
             // MARK: - Command Palette
@@ -2864,6 +3078,27 @@ struct AppReducer {
                         includeScrollback: includeScrollback,
                         reply: reply
                     )
+
+                case .graftStart(let workspaceFilter, let repoFilter, let paneID):
+                    return handleGraftStart(
+                        state: state,
+                        workspaceFilter: workspaceFilter,
+                        repoFilter: repoFilter,
+                        paneID: paneID,
+                        reply: reply
+                    )
+
+                case .graftStop(let workspaceFilter, let repoFilter, let paneID):
+                    return handleGraftStop(
+                        state: state,
+                        workspaceFilter: workspaceFilter,
+                        repoFilter: repoFilter,
+                        paneID: paneID,
+                        reply: reply
+                    )
+
+                case .graftStatus:
+                    return handleGraftStatus(state: state, reply: reply)
                 }
 
             // MARK: - Cross-Workspace Surface Notifications
@@ -3046,11 +3281,29 @@ struct AppReducer {
                       let assoc = workspace.repoAssociations[id: associationID],
                       let repo = state.repoRegistry[id: assoc.repoID] else { return .none }
 
+                // Stop any active graft session FIRST. Otherwise the
+                // session keeps trying to mirror a worktree that no
+                // longer has an association (and, in the
+                // `deleteWorktree: true` case, is about to disappear
+                // entirely), leaving the parent root mid-mirror and
+                // the breadcrumb stranded.
+                let needsGraftStop = state.graft.sessions[id: associationID] != nil
+
                 state.workspaces[id: workspaceID]?.repoAssociations.remove(id: associationID)
                 state.gitStatuses.removeValue(forKey: associationID)
 
+                let graftStop: Effect<Action> = needsGraftStop
+                    ? .send(.graft(.toggleGraft(assoc)))
+                    : .none
+
                 if deleteWorktree {
+                    // graftStop and removeWorktree run in parallel —
+                    // safe because graft's stop awaits any in-flight
+                    // sync (so no read-tree fires on a half-deleted
+                    // worktree) and operates on the PARENT root, not
+                    // the worktree dir we're about to remove.
                     return .merge(
+                        graftStop,
                         .send(.stopHeadWatcher(associationID: associationID)),
                         .run { _ in
                             try? await gitService.removeWorktree(repo.path, assoc.worktreePath)
@@ -3059,6 +3312,7 @@ struct AppReducer {
                     )
                 }
                 return .merge(
+                    graftStop,
                     .send(.stopHeadWatcher(associationID: associationID)),
                     .send(.persistState)
                 )
@@ -3423,6 +3677,10 @@ struct AppReducer {
 
         Scope(state: \.settings, action: \.settings) {
             SettingsFeature()
+        }
+
+        Scope(state: \.graft, action: \.graft) {
+            GraftFeature()
         }
     }
 

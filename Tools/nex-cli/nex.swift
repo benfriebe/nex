@@ -98,6 +98,9 @@ func printUsage() {
       nex layout select <name>
       nex open [--here] <filepath>
       nex diff [<path>]
+      nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
+      nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
+      nex graft status [--json]
     \n
     """, stderr)
 }
@@ -1136,6 +1139,144 @@ func handleDiff(_ args: inout ArraySlice<String>) {
     sendJSONAny(payload)
 }
 
+// MARK: - graft
+
+func handleGraft(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        fputs("Usage: nex graft start|stop|status\n", stderr)
+        exit(1)
+    }
+
+    switch action {
+    case "start":
+        handleGraftCommand(command: "graft-start", args: &args)
+    case "stop":
+        handleGraftCommand(command: "graft-stop", args: &args)
+    case "status":
+        handleGraftStatus(args: &args)
+    case "-h", "--help", "help":
+        fputs("""
+        Usage:
+          nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
+          nex graft stop  [--workspace <name-or-uuid>] [--repo <name-or-path>]
+          nex graft status [--json]
+
+        With no filters, start/stop default to the caller's workspace
+        (requires NEX_PANE_ID). Use --repo to target a single
+        association; use --workspace to scope across every association
+        in another workspace.
+        \n
+        """, stderr)
+    default:
+        fputs("Unknown graft action: \(action)\n", stderr)
+        fputs("Valid actions: start, stop, status\n", stderr)
+        exit(1)
+    }
+}
+
+private func handleGraftCommand(command: String, args: inout ArraySlice<String>) {
+    let workspace = parseFlag("--workspace", from: &args)
+    let repo = parseFlag("--repo", from: &args)
+
+    var payload: [String: Any] = ["command": command]
+    if let workspace { payload["workspace"] = workspace }
+    if let repo { payload["repo"] = repo }
+    if workspace == nil, repo == nil,
+       let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
+        payload["pane_id"] = paneID
+    }
+
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        fputs("nex \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !replyData.isEmpty else {
+        fputs("nex \(command): no response from Nex (upgrade required? need v0.25+)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex \(command): \(msg)\n", stderr)
+        exit(1)
+    }
+
+    if command == "graft-start" {
+        let started = (json["started"] as? [[String: Any]]) ?? []
+        if started.isEmpty {
+            print("No associations started.")
+        } else {
+            for entry in started {
+                let assoc = (entry["association_id"] as? String) ?? "-"
+                let branch = (entry["branch"] as? String) ?? "-"
+                let path = (entry["worktree_path"] as? String) ?? "-"
+                print("started \(branch) (\(assoc)) at \(path)")
+            }
+        }
+        if let partial = json["partial_error"] as? String {
+            fputs("Partial failure: \(partial)\n", stderr)
+        }
+    } else {
+        let stopped = (json["stopped"] as? [String]) ?? []
+        if stopped.isEmpty {
+            print("No active sessions in scope.")
+        } else {
+            for id in stopped {
+                print("stopped \(id)")
+            }
+        }
+        if let failed = json["failed"] as? [[String: Any]], !failed.isEmpty {
+            for f in failed {
+                let id = (f["association_id"] as? String) ?? "?"
+                let err = (f["error"] as? String) ?? "?"
+                fputs("failed \(id): \(err)\n", stderr)
+            }
+            exit(1)
+        }
+    }
+}
+
+private func handleGraftStatus(args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    let payload: [String: Any] = ["command": "graft-status"]
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        fputs("nex graft status: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !replyData.isEmpty else {
+        fputs("nex graft status: no response from Nex (upgrade required? need v0.25+)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex graft status: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    let sessions = (json["sessions"] as? [[String: Any]]) ?? []
+
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: sessions, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+
+    if sessions.isEmpty {
+        print("No active graft sessions.")
+        return
+    }
+    for session in sessions {
+        let branch = (session["branch"] as? String) ?? "-"
+        let path = (session["worktree_path"] as? String) ?? "-"
+        let status = (session["status"] as? String) ?? "-"
+        print("\(branch) [\(status)] \(path)")
+    }
+}
+
 // MARK: - Main
 
 var args = CommandLine.arguments.dropFirst()
@@ -1170,6 +1311,8 @@ case "open":
     handleOpen(&args)
 case "diff":
     handleDiff(&args)
+case "graft":
+    handleGraft(&args)
 default:
     fputs("Unknown command: \(subcommand)\n", stderr)
     printUsage()
