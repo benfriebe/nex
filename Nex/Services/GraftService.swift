@@ -324,12 +324,31 @@ final class GraftServiceImpl: Sendable {
                 // cancellation and re-applies the worktree's tree
                 // AFTER the parent has been restored, leaving the
                 // parent dirty and breaking the stash pop.
+                //
+                // The spawn + register MUST happen atomically under
+                // the lock, AND we must verify the watcher entry is
+                // still live AFTER the lock. Otherwise `stop()` can
+                // slip in between batch arrival and registration:
+                //   1. batch arrives, watcher about to spawn syncTask
+                //   2. stop() removes our watcherTask, reads empty
+                //      activeSyncTasks, proceeds to restoreParent
+                //   3. watcher finally spawns syncTask → read-tree
+                //      lands AFTER restore and corrupts the parent.
+                // Guarding on `watcherTasks[assocID] != nil` inside
+                // the same lock closes the race: stop's first lock
+                // (`watcherTasks.removeValue`) and our spawn-or-abort
+                // check are now totally ordered.
                 let assocID = association.id
-                let syncTask = Task { [weak self] in
-                    guard let self else { return }
-                    await handleBatch(associationID: assocID, batch: batch)
+                let syncTask: Task<Void, Never>? = lock.withLock {
+                    guard watcherTasks[assocID] != nil else { return nil }
+                    let task = Task { [weak self] in
+                        guard let self else { return }
+                        await handleBatch(associationID: assocID, batch: batch)
+                    }
+                    activeSyncTasks[assocID] = task
+                    return task
                 }
-                lock.withLock { activeSyncTasks[assocID] = syncTask }
+                guard let syncTask else { return }
                 await syncTask.value
                 // The watcher loop is serial — only one batch can be
                 // in flight per session at a time. If `stop()` already

@@ -1510,6 +1510,11 @@ struct AppReducer {
                 let paneIDs = workspace.layout.allPaneIDs
                     + workspace.parkedPanes.map(\.id)
                 let assocIDs = workspace.repoAssociations.map(\.id)
+                // Capture associations with live graft sessions BEFORE
+                // removal so we can issue `forceStop` for each — head
+                // watcher cancellation alone leaves the graft mirroring
+                // a worktree whose association is gone.
+                let liveGraftAssocIDs = assocIDs.filter { state.graft.sessions[id: $0] != nil }
                 state.workspaces.remove(id: id)
                 state.topLevelOrder.removeAll { $0 == .workspace(id) }
                 for groupID in state.groups.ids {
@@ -1536,6 +1541,7 @@ struct AppReducer {
                 }
 
                 let stopEffects = assocIDs.map { Effect.send(Action.stopHeadWatcher(associationID: $0)) }
+                let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 return .merge(
                     [
                         .run { _ in
@@ -1544,7 +1550,7 @@ struct AppReducer {
                             }
                         },
                         .send(.persistState)
-                    ] + stopEffects
+                    ] + stopEffects + graftStopEffects
                 )
 
             case .moveWorkspace(let id, let toIndex):
@@ -1754,10 +1760,18 @@ struct AppReducer {
                 guard ids.count < state.workspaces.count else { return .none }
 
                 var panesToDestroy: [UUID] = []
+                // Capture associations with live graft sessions BEFORE
+                // removal — otherwise the graft keeps mirroring a
+                // worktree whose association is gone with no UI/CLI
+                // path to stop it.
+                var liveGraftAssocIDs: [UUID] = []
                 for id in ids {
                     guard let workspace = state.workspaces[id: id] else { continue }
                     panesToDestroy.append(contentsOf: workspace.layout.allPaneIDs)
                     panesToDestroy.append(contentsOf: workspace.parkedPanes.map(\.id))
+                    liveGraftAssocIDs.append(contentsOf: workspace.repoAssociations
+                        .map(\.id)
+                        .filter { state.graft.sessions[id: $0] != nil })
                     state.workspaces.remove(id: id)
                 }
                 let removedSet = Set(ids)
@@ -1785,13 +1799,16 @@ struct AppReducer {
                 state.lastSelectionAnchor = nil
 
                 let paneIDs = panesToDestroy
+                let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 return .merge(
-                    .run { _ in
-                        for paneID in paneIDs {
-                            await surfaceManager.destroySurface(paneID: paneID)
-                        }
-                    },
-                    .send(.persistState)
+                    [
+                        .run { _ in
+                            for paneID in paneIDs {
+                                await surfaceManager.destroySurface(paneID: paneID)
+                            }
+                        },
+                        .send(.persistState)
+                    ] + graftStopEffects
                 )
 
             case .toggleGroupCollapse(let groupID):
@@ -1958,10 +1975,18 @@ struct AppReducer {
                     // Drop each child workspace. Mirrors `deleteWorkspace` so
                     // surfaces are destroyed and downstream state stays clean.
                     var paneIDs: [UUID] = []
+                    // Capture associations with live graft sessions
+                    // BEFORE removal so we can issue `forceStop` for
+                    // each — otherwise grafts on child workspaces
+                    // keep running with no way to stop them.
+                    var liveGraftAssocIDs: [UUID] = []
                     for wsID in childIDs {
                         guard let workspace = state.workspaces[id: wsID] else { continue }
                         paneIDs.append(contentsOf: workspace.layout.allPaneIDs)
                         paneIDs.append(contentsOf: workspace.parkedPanes.map(\.id))
+                        liveGraftAssocIDs.append(contentsOf: workspace.repoAssociations
+                            .map(\.id)
+                            .filter { state.graft.sessions[id: $0] != nil })
                         state.workspaces.remove(id: wsID)
                     }
                     let removedSet = Set(childIDs)
@@ -1984,13 +2009,16 @@ struct AppReducer {
                     state.groupDeleteConfirmation = nil
 
                     let captured = paneIDs
+                    let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                     return .merge(
-                        .run { _ in
-                            for paneID in captured {
-                                await surfaceManager.destroySurface(paneID: paneID)
-                            }
-                        },
-                        .send(.persistState)
+                        [
+                            .run { _ in
+                                for paneID in captured {
+                                    await surfaceManager.destroySurface(paneID: paneID)
+                                }
+                            },
+                            .send(.persistState)
+                        ] + graftStopEffects
                     )
                 } else {
                     // Promote children to the top level, in order, at the
@@ -2166,8 +2194,15 @@ struct AppReducer {
 
             case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry):
                 if workspaces.isEmpty {
-                    // First launch — create a default workspace
-                    return .send(.createWorkspace(name: "Default"))
+                    // First launch — create a default workspace and
+                    // still hand off to GraftFeature so its updates
+                    // subscription installs. Without this, a CLI-
+                    // started graft on first run would be invisible
+                    // to status / stop / quit-flush.
+                    return .merge(
+                        .send(.createWorkspace(name: "Default")),
+                        .send(.graft(.onAppLaunched(parentRepoRoots: [])))
+                    )
                 }
                 state.workspaces = workspaces
                 state.groups = groups
@@ -3221,7 +3256,13 @@ struct AppReducer {
                 let stopEffects = removedAssociationIDs.map {
                     Effect.send(Action.stopHeadWatcher(associationID: $0))
                 }
-                return .merge(stopEffects + [.send(.persistState)])
+                // Stop any live graft sessions on removed associations.
+                // Without this, removing the repo leaves grafts mirroring
+                // a worktree whose association is gone.
+                let graftStopEffects = removedAssociationIDs
+                    .filter { state.graft.sessions[id: $0] != nil }
+                    .map { Effect.send(Action.graft(.forceStop($0))) }
+                return .merge(stopEffects + graftStopEffects + [.send(.persistState)])
 
             case .renameRepo(let id, let name):
                 state.repoRegistry[id: id]?.name = name
@@ -3292,8 +3333,13 @@ struct AppReducer {
                 state.workspaces[id: workspaceID]?.repoAssociations.remove(id: associationID)
                 state.gitStatuses.removeValue(forKey: associationID)
 
+                // `forceStop` (not `toggleGraft`) because the
+                // association is being deleted entirely. `toggleGraft`
+                // would retry-start a graft when the existing session
+                // is in `.error` state, which is wrong here — the
+                // worktree is going away.
                 let graftStop: Effect<Action> = needsGraftStop
-                    ? .send(.graft(.toggleGraft(assoc)))
+                    ? .send(.graft(.forceStop(associationID)))
                     : .none
 
                 if deleteWorktree {
@@ -3474,7 +3520,14 @@ struct AppReducer {
 
                 if removedRepoIDs.isEmpty { return .none }
                 let stopEffects = stoppedAssocIDs.map { Effect.send(Action.stopHeadWatcher(associationID: $0)) }
-                return .merge(stopEffects + [.send(.persistState)])
+                // Stop any live graft sessions for auto-unlinked
+                // associations. Otherwise a graft set up against an
+                // auto-linked worktree keeps mirroring after the pane
+                // moves out of that worktree.
+                let graftStopEffects = stoppedAssocIDs
+                    .filter { state.graft.sessions[id: $0] != nil }
+                    .map { Effect.send(Action.graft(.forceStop($0))) }
+                return .merge(stopEffects + graftStopEffects + [.send(.persistState)])
 
             case .repoRemoteURLResolved(let repoID, let url):
                 state.repoRegistry[id: repoID]?.remoteURL = url
