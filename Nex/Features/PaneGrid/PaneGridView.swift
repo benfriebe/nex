@@ -32,6 +32,15 @@ struct PaneGridView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
+    /// Sidecar state for `.web` panes in this workspace. Keyed by pane id.
+    var webPanes: [UUID: WebPaneState] = [:]
+    /// URL bar focus token bumped by ⌘L. Used by `WebPaneView` to
+    /// promote the URL bar to first responder for the matching pane.
+    var webPaneURLFocusToken: [UUID: UInt64] = [:]
+    var onWebNavigate: ((UUID, String) -> Void)?
+    var onWebBack: ((UUID) -> Void)?
+    var onWebForward: ((UUID) -> Void)?
+    var onWebReload: ((UUID) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -211,6 +220,17 @@ struct PaneGridView: View {
                     backgroundOpacity: ghosttyConfig.backgroundOpacity,
                     fontSize: pane.markdownFontSize
                 )
+            case .web:
+                WebPaneView(
+                    paneID: pane.id,
+                    tab: webPanes[pane.id]?.activeTab,
+                    isFocused: pane.id == focusedPaneID,
+                    focusURLBarToken: webPaneURLFocusToken[pane.id] ?? 0,
+                    onNavigate: { url in onWebNavigate?(pane.id, url) },
+                    onBack: { onWebBack?(pane.id) },
+                    onForward: { onWebForward?(pane.id) },
+                    onReload: { onWebReload?(pane.id) }
+                )
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -229,7 +249,7 @@ struct PaneGridView: View {
             }
         }
         .background {
-            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff {
+            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }

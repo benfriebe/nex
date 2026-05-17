@@ -180,6 +180,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v12_web_pane_url") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("webURL") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "webURL", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -215,6 +224,10 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var status: String
     var createdAt: Double
     var lastActivityAt: Double
+    /// Last-known URL for a `.web` pane (Phase 1: single-tab v1).
+    /// Always nil for other pane types and for private web panes
+    /// (whose contents intentionally do not survive restart).
+    var webURL: String?
 }
 
 struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {

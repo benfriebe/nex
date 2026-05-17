@@ -101,6 +101,9 @@ func printUsage() {
       nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft status [--json]
+      nex web open <url>
+      nex web url|back|forward|reload [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
+      nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
     \n
     """, stderr)
 }
@@ -748,6 +751,235 @@ func handlePane(_ args: inout ArraySlice<String>) {
     }
 }
 
+// MARK: - web (top-level subcommand)
+
+func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex web open <url>
+      nex web url      [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web back     [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web forward  [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web reload   [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
+      nex web capture  [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
+
+    When invoked from outside a Nex pane, --target must be a UUID
+    or --workspace <name-or-id> must be passed (label resolution
+    needs an explicit workspace scope).
+    \n
+    """, stream)
+}
+
+/// Apply the `--target` / `--workspace` / `NEX_PANE_ID` rule (issue
+/// #92): label targets need either an origin pane or an explicit
+/// workspace; UUID targets always resolve globally. Returns the
+/// payload extension; exits non-zero on rule violation.
+private func attachWebTargetScope(
+    _ payload: inout [String: Any],
+    target: String?,
+    workspace: String?,
+    command: String
+) {
+    if let target {
+        payload["target"] = target
+    }
+    if let workspace {
+        payload["workspace"] = workspace
+    }
+    if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+       !originPaneID.isEmpty {
+        payload["pane_id"] = originPaneID
+    }
+
+    // Enforce the external-caller workspace rule before sending so
+    // failures surface as a clear CLI message rather than a server
+    // error round-trip.
+    let isUUIDTarget = target.flatMap { UUID(uuidString: $0) } != nil
+    let hasOrigin = ProcessInfo.processInfo.environment["NEX_PANE_ID"]?.isEmpty == false
+    if let target, !isUUIDTarget, workspace == nil, !hasOrigin {
+        fputs("nex web \(command): --target by label requires --workspace <name-or-id> when called outside a Nex pane\n", stderr)
+        exit(1)
+    }
+    // No target and no origin pane = no resolvable pane.
+    if target == nil, !hasOrigin {
+        fputs("nex web \(command): no --target supplied and NEX_PANE_ID is not set\n", stderr)
+        exit(1)
+    }
+}
+
+func handleWeb(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        printWebUsage(stream: stderr)
+        exit(1)
+    }
+
+    if action == "-h" || action == "--help" || action == "help" {
+        printWebUsage(stream: stdout)
+        exit(0)
+    }
+
+    switch action {
+    case "open":
+        guard let url = args.popFirst(), !url.isEmpty else {
+            fputs("Usage: nex web open <url>\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-open",
+            "url": url
+        ]
+        if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+           !originPaneID.isEmpty {
+            payload["pane_id"] = originPaneID
+        }
+        sendWebReplyAndPrintBasic(payload, command: "open")
+
+    case "url":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        var payload: [String: Any] = ["command": "web-url"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "url")
+        sendWebReplyAndPrintURL(payload)
+
+    case "back":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        var payload: [String: Any] = ["command": "web-back"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "back")
+        sendWebReplyAndPrintBasic(payload, command: "back")
+
+    case "forward":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        var payload: [String: Any] = ["command": "web-forward"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "forward")
+        sendWebReplyAndPrintBasic(payload, command: "forward")
+
+    case "reload":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let hard = popSwitch("--hard", from: &args)
+        var payload: [String: Any] = ["command": "web-reload"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "reload")
+        if hard { payload["hard"] = true }
+        sendWebReplyAndPrintBasic(payload, command: "reload")
+
+    case "capture":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let mode = parseFlag("--mode", from: &args) ?? "meta"
+        let allowed: Set = ["meta", "text", "screenshot"]
+        guard allowed.contains(mode) else {
+            fputs("nex web capture: unknown --mode '\(mode)' (allowed: meta, text, screenshot)\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-capture",
+            "mode": mode
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "capture")
+        sendWebReplyAndPrintCapture(payload)
+
+    default:
+        fputs("Unknown web action: \(action)\n", stderr)
+        printWebUsage(stream: stderr)
+        exit(1)
+    }
+}
+
+private func sendWebReplyAndPrintBasic(_ payload: [String: Any], command: String) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web \(command): \(msg)\n", stderr)
+        exit(1)
+    }
+    let paneID = (json["pane_id"] as? String) ?? "?"
+    let extra = if let url = json["url"] as? String { " (\(url))" } else { "" }
+    print("\(command) ok: \(paneID)\(extra)")
+}
+
+private func sendWebReplyAndPrintURL(_ payload: [String: Any]) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web url: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web url: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web url: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web url: \(msg)\n", stderr)
+        exit(1)
+    }
+    let url = (json["url"] as? String) ?? ""
+    let title = (json["title"] as? String) ?? ""
+    if !title.isEmpty {
+        print("\(url)\t\(title)")
+    } else {
+        print(url)
+    }
+}
+
+private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web capture: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web capture: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web capture: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web capture: \(msg)\n", stderr)
+        exit(1)
+    }
+    let mode = (json["mode"] as? String) ?? "meta"
+    switch mode {
+    case "text":
+        if let text = json["text"] as? String { print(text) }
+    case "screenshot":
+        if let path = json["path"] as? String {
+            print(path)
+        } else if let b64 = json["png_base64"] as? String {
+            // Inline: print to stdout — the caller can pipe to `base64 -D > out.png`.
+            print(b64)
+        }
+    default:
+        // meta — print URL + title + byte_count
+        let url = (json["url"] as? String) ?? ""
+        let title = (json["title"] as? String) ?? ""
+        print("url:    \(url)")
+        if !title.isEmpty {
+            print("title:  \(title)")
+        }
+        if let bytes = json["byte_count"] as? Int {
+            print("bytes:  \(bytes)")
+        }
+    }
+}
+
 // MARK: - pane list
 
 func handlePaneList(_ args: inout ArraySlice<String>) {
@@ -1313,6 +1545,8 @@ case "diff":
     handleDiff(&args)
 case "graft":
     handleGraft(&args)
+case "web":
+    handleWeb(&args)
 default:
     fputs("Unknown command: \(subcommand)\n", stderr)
     printUsage()

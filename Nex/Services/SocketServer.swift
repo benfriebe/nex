@@ -84,6 +84,25 @@ enum SocketMessage: Equatable {
     case graftStop(workspace: String?, repo: String?, paneID: UUID?)
     /// `nex graft status` — list active sessions across all workspaces.
     case graftStatus
+
+    // Web pane commands (Phase 1). `web` is a first-class top-level
+    // CLI verb (not a `pane` subcommand), so the wire names follow
+    // suit: `web-open` / `web-url` / etc.
+
+    /// Open a new `.web` pane with the given URL. `paneID` (from
+    /// `NEX_PANE_ID`) is informational; opening always creates a new
+    /// pane in the active workspace, mirroring `nex diff`.
+    case webOpen(paneID: UUID?, url: String)
+    /// Read the active tab's current URL + title for the resolved pane.
+    case webURL(paneID: UUID?, target: String?, workspace: String?)
+    case webBack(paneID: UUID?, target: String?, workspace: String?)
+    case webForward(paneID: UUID?, target: String?, workspace: String?)
+    case webReload(paneID: UUID?, target: String?, workspace: String?, hard: Bool)
+    /// `mode` is one of `meta`, `text`, `screenshot`. `meta` is the
+    /// cheap default — URL + title + byte counts; `text` returns the
+    /// visible page text; `screenshot` returns a PNG (inline base64
+    /// under 1 MB, else a `/tmp` path).
+    case webCapture(paneID: UUID?, target: String?, workspace: String?, mode: String)
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -92,7 +111,9 @@ enum SocketMessage: Equatable {
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
-    "graft-start", "graft-stop", "graft-status"
+    "graft-start", "graft-stop", "graft-status",
+    "web-open", "web-url", "web-back",
+    "web-forward", "web-reload", "web-capture"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -491,6 +512,12 @@ final class SocketServer: Sendable {
         var scrollback: Bool?
         /// `graft-start` / `graft-stop` — repo name or path scope.
         var repo: String?
+        /// `web-open` / `web-url` etc. — destination URL or
+        /// (for capture) the visible-text/screenshot/meta mode.
+        var url: String?
+        var mode: String?
+        /// `web-reload --hard`.
+        var hard: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -506,6 +533,7 @@ final class SocketServer: Sendable {
             case targetPath = "target_path"
             case lines, scrollback
             case repo
+            case url, mode, hard
         }
     }
 
@@ -622,6 +650,58 @@ final class SocketServer: Sendable {
 
         if wire.command == "graft-status" {
             return (.graftStatus, wire)
+        }
+
+        if wire.command == "web-open" {
+            guard let url = wire.url, !url.isEmpty else { return nil }
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.webOpen(paneID: paneID, url: url), wire)
+        }
+
+        if wire.command == "web-url" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard paneID != nil || target != nil else { return nil }
+            return (.webURL(paneID: paneID, target: target, workspace: workspace), wire)
+        }
+
+        if wire.command == "web-back" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard paneID != nil || target != nil else { return nil }
+            return (.webBack(paneID: paneID, target: target, workspace: workspace), wire)
+        }
+
+        if wire.command == "web-forward" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard paneID != nil || target != nil else { return nil }
+            return (.webForward(paneID: paneID, target: target, workspace: workspace), wire)
+        }
+
+        if wire.command == "web-reload" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard paneID != nil || target != nil else { return nil }
+            return (.webReload(
+                paneID: paneID, target: target, workspace: workspace,
+                hard: wire.hard ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-capture" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let mode = (wire.mode?.isEmpty == true) ? "meta" : (wire.mode ?? "meta")
+            guard paneID != nil || target != nil else { return nil }
+            return (.webCapture(
+                paneID: paneID, target: target, workspace: workspace, mode: mode
+            ), wire)
         }
 
         if wire.command == "pane-send-key" {

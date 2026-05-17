@@ -184,12 +184,81 @@ final class PaneShortcutMonitor {
         // the dispatcher order ever changes.
         if store.globalHotkey == trigger { return false }
 
+        // Web pane priority layer: when the focused pane is a `.web`
+        // pane, consult a hard-coded ⌘L / ⌘R / ⌘[ / ⌘] map *before*
+        // falling through to the normal keybinding lookup. This way
+        // the global defaults (close pane / focus prev / focus next /
+        // markdown font) keep working for every other pane type while
+        // web panes get browser-style shortcuts.
+        if let consumed = handleWebPanePriorityShortcut(
+            event: event,
+            trigger: trigger,
+            activeWorkspaceID: activeID
+        ) {
+            return consumed
+        }
+
         guard let action = store.keybindings.action(for: trigger) else { return false }
 
         // Menu bar actions are handled by SwiftUI Commands — don't consume here.
         if action.isMenuBarAction { return false }
 
         return dispatchAction(action, activeWorkspaceID: activeID)
+    }
+
+    /// Phase 1 web priority layer. Returns:
+    /// - `true`  — event consumed by a web action
+    /// - `false` — event consumed by an intentional fall-through
+    ///   (e.g. URL bar editing + ⌘[ shouldn't trip back)
+    /// - `nil`   — not applicable, the main layer should run
+    private func handleWebPanePriorityShortcut(
+        event _: NSEvent,
+        trigger: KeyTrigger,
+        activeWorkspaceID id: UUID
+    ) -> Bool? {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID,
+              let pane = workspace.panes[id: focusedID],
+              pane.type == .web else { return nil }
+
+        // ⌘ alone, no shift / ctrl / option.
+        let isPlainCommand = trigger.modifiers == .command
+        // ⌘[ / ⌘] — only intercept when the URL bar isn't editing.
+        // The bar is an NSTextField, which becomes the window's
+        // firstResponder via its NSText editor when typing.
+        let urlBarIsEditing: Bool = {
+            guard let keyWindow = NSApp.keyWindow,
+                  let responder = keyWindow.firstResponder else { return false }
+            return responder is NSText
+        }()
+
+        switch (trigger.keyCode, isPlainCommand) {
+        case (37, true): // ⌘L
+            store.send(.webPaneFocusURLBar(paneID: focusedID))
+            return true
+        case (15, true): // ⌘R
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneReload(paneID: focusedID, hard: false)
+            )))
+            return true
+        case (33, true): // ⌘[
+            if urlBarIsEditing { return nil } // fall through to focusPreviousPane
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneBack(paneID: focusedID)
+            )))
+            return true
+        case (30, true): // ⌘]
+            if urlBarIsEditing { return nil }
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneForward(paneID: focusedID)
+            )))
+            return true
+        default:
+            return nil
+        }
     }
 
     // MARK: - Action Dispatch
@@ -287,9 +356,52 @@ final class PaneShortcutMonitor {
         case .openDiff:
             return handleOpenDiff(activeWorkspaceID: id)
 
+        case .openWebPane:
+            // Open a fresh web pane on a blank URL — user can type
+            // one in the URL bar. Matches what ⌘L does for a brand-new
+            // pane. No `--here` semantics here; that's reserved for
+            // the explicit CLI flow.
+            store.send(.openWebPanePath(url: "", fromPaneID: nil))
+            return true
+
+        case .webFocusURLBar:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .webPaneFocusURLBar(paneID: paneID)
+            }
+
+        case .webBack:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneBack(paneID: paneID)))
+            }
+
+        case .webForward:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneForward(paneID: paneID)))
+            }
+
+        case .webReload:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneReload(paneID: paneID, hard: false)))
+            }
+
         default:
             return false
         }
+    }
+
+    /// Run a web-pane action only when the focused pane is `.web`,
+    /// returning false (so the keybinding can fall through to a
+    /// non-web default) otherwise. Mirrors `handleMarkdownFontSize`.
+    private func handleWebAction(
+        activeWorkspaceID id: UUID,
+        _ build: (UUID) -> AppReducer.Action
+    ) -> Bool {
+        guard let workspace = store.workspaces[id: id],
+              let focusedID = workspace.focusedPaneID,
+              workspace.panes[id: focusedID]?.type == .web
+        else { return false }
+        store.send(build(focusedID))
+        return true
     }
 
     // MARK: - Conditional Handlers

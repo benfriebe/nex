@@ -43,6 +43,11 @@ struct PaneHeaderView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .frame(width: 10, height: 10)
+            } else if pane.type == .web {
+                Image(systemName: "globe")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
             } else {
                 Circle()
                     .fill(statusDotColor)

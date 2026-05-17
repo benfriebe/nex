@@ -30,6 +30,7 @@ struct NexApp: App {
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
                 .environment(\.ghosttyConfig, .liveValue)
+                .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
                 .frame(minWidth: 600, minHeight: 400)
                 .onAppear {

@@ -9,6 +9,11 @@ struct ClosedPaneSnapshot: Equatable {
     var scratchpadContent: String?
     var claudeSessionID: String?
     var markdownFontSize: Double = 14
+    /// Captured web-pane sidecar at the moment of close, so
+    /// `reopenClosedPane` can restore the same URL/tab set. Nil for
+    /// non-web panes and for closed private panes (which intentionally
+    /// drop their tabs at quit/close time).
+    var webState: WebPaneState?
 }
 
 @Reducer
@@ -35,6 +40,11 @@ struct WorkspaceFeature {
         /// restarts. A `Pane` lives in exactly one of `panes` or
         /// `parkedPanes` at any time.
         var parkedPanes: IdentifiedArrayOf<Pane> = []
+        /// Sidecar state for `.web` panes — tab list, active tab,
+        /// private flag. Kept off `Pane` itself so non-web consumers
+        /// don't need to learn the type. Mirrors `parkedPanes`'s
+        /// "lives alongside `panes`" model.
+        var webPanes: [UUID: WebPaneState] = [:]
         var zoomedPaneID: UUID?
         var savedLayout: PaneLayout?
         var searchingPaneID: UUID?
@@ -82,7 +92,8 @@ struct WorkspaceFeature {
             repoAssociations: IdentifiedArrayOf<RepoAssociation> = [],
             createdAt: Date,
             lastAccessedAt: Date,
-            labels: [String] = []
+            labels: [String] = [],
+            webPanes: [UUID: WebPaneState] = [:]
         ) {
             self.id = id
             self.name = name
@@ -95,6 +106,7 @@ struct WorkspaceFeature {
             self.createdAt = createdAt
             self.lastAccessedAt = lastAccessedAt
             self.labels = labels
+            self.webPanes = webPanes
         }
 
         /// Read a pane wherever it lives — visible layout or the
@@ -183,6 +195,31 @@ struct WorkspaceFeature {
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String, reusePaneID: UUID? = nil)
         case openDiffPane(repoPath: String, targetPath: String?, reusePaneID: UUID? = nil)
+        /// Open a web pane. Splits off the focused pane like
+        /// `openDiffPane`, or replaces the focused pane (`reusePaneID`)
+        /// when invoked via `nex open --here`-style flows. `isPrivate`
+        /// is wired through Phase 5; Phase 1 always passes `false`.
+        /// `paneID`/`tabID` are pre-allocated by the caller so the
+        /// CLI reply (`nex web open`) can echo a concrete pane id
+        /// before the workspace effect runs.
+        case openWebPane(
+            paneID: UUID,
+            tabID: UUID,
+            url: String,
+            reusePaneID: UUID? = nil,
+            isPrivate: Bool = false
+        )
+        /// Tell the coordinator to navigate the active tab. The
+        /// coordinator updates the WebView; the URL bar follows via
+        /// the `stateDidChangeNotification` published from KVO.
+        case webPaneNavigate(paneID: UUID, url: String)
+        case webPaneBack(paneID: UUID)
+        case webPaneForward(paneID: UUID)
+        case webPaneReload(paneID: UUID, hard: Bool = false)
+        /// Mirror coordinator-reported URL/title changes into state so
+        /// persistence keeps a fresh URL even when the user navigates
+        /// without typing in the URL bar.
+        case webPaneStateChanged(paneID: UUID, tabID: UUID, url: String, title: String)
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -227,6 +264,7 @@ struct WorkspaceFeature {
     @Dependency(\.ghosttyConfig) var ghosttyConfig
     @Dependency(\.gitService) var gitService
     @Dependency(\.editorService) var editorService
+    @Dependency(\.webPaneStore) var webPaneStore
     @Dependency(\.date.now) var now
     @Dependency(\.uuid) var uuid
 
@@ -475,6 +513,136 @@ struct WorkspaceFeature {
                 state.currentLayoutIndex = nil
                 return branchEffect
 
+            case .openWebPane(let newPaneID, let tabID, let url, let reusePaneID, let isPrivate):
+                let normalized = WebPaneCoordinator.normalizeURLInput(url)
+                let tab = WebTab(id: tabID, url: normalized)
+                let newPane = Pane(
+                    id: newPaneID,
+                    type: .web,
+                    title: "Web",
+                    workingDirectory: NSHomeDirectory(),
+                    createdAt: now,
+                    lastActivityAt: now
+                )
+
+                state.webPanes[newPaneID] = WebPaneState(
+                    tabs: [tab],
+                    activeTabID: tab.id,
+                    isPrivate: isPrivate
+                )
+
+                if let reusePaneID, let oldPane = state.panes[id: reusePaneID] {
+                    if state.searchingPaneID == reusePaneID {
+                        state.searchingPaneID = nil
+                        state.searchNeedle = ""
+                        state.searchTotal = nil
+                        state.searchSelected = nil
+                    }
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    var linkedPane = newPane
+                    linkedPane.parkedSourcePaneID = reusePaneID
+                    state.layout = state.layout.replacing(paneID: reusePaneID, with: .leaf(newPaneID))
+                    state.panes.remove(id: reusePaneID)
+                    state.parkedPanes.append(oldPane)
+                    state.panes.append(linkedPane)
+                    state.setFocus(newPaneID)
+                    state.currentLayoutIndex = nil
+                    return .none
+                }
+
+                if let sourceID = state.focusedPaneID {
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    let (newLayout, _) = state.layout.splitting(
+                        paneID: sourceID,
+                        direction: .horizontal,
+                        newPaneID: newPaneID
+                    )
+                    state.layout = newLayout
+                } else {
+                    state.layout = .leaf(newPaneID)
+                }
+                state.panes.append(newPane)
+                state.setFocus(newPaneID)
+                state.currentLayoutIndex = nil
+                return .none
+
+            case .webPaneNavigate(let paneID, let url):
+                guard let webState = state.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let normalized = WebPaneCoordinator.normalizeURLInput(url)
+                // Mirror into state so a save right now persists the
+                // intended URL even before the coordinator's KVO
+                // notification round-trips.
+                if var ws = state.webPanes[paneID] {
+                    if let idx = ws.tabs.firstIndex(where: { $0.id == tab.id }) {
+                        ws.tabs[idx].url = normalized
+                    }
+                    state.webPanes[paneID] = ws
+                }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        let coord = store.coordinator(for: paneID)
+                        _ = coord.navigate(tab: tab, to: normalized)
+                    }
+                }
+
+            case .webPaneBack(let paneID):
+                guard let webState = state.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        _ = store.coordinator(for: paneID).goBack(tabID: tab.id)
+                    }
+                }
+
+            case .webPaneForward(let paneID):
+                guard let webState = state.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        _ = store.coordinator(for: paneID).goForward(tabID: tab.id)
+                    }
+                }
+
+            case .webPaneReload(let paneID, let hard):
+                guard let webState = state.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        _ = store.coordinator(for: paneID).reload(tabID: tab.id, hard: hard)
+                    }
+                }
+
+            case .webPaneStateChanged(let paneID, let tabID, let url, let title):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                guard let idx = webState.tabs.firstIndex(where: { $0.id == tabID }) else { return .none }
+                // Only overwrite the URL when the coordinator reports
+                // something non-empty (about:blank arrives as "" early
+                // in load and would otherwise wipe the persisted URL).
+                let newURL = url.isEmpty ? webState.tabs[idx].url : url
+                guard webState.tabs[idx].url != newURL || webState.tabs[idx].title != title else {
+                    return .none
+                }
+                webState.tabs[idx].url = newURL
+                webState.tabs[idx].title = title
+                state.webPanes[paneID] = webState
+                if !title.isEmpty {
+                    state.mutatePane(id: paneID) { $0.title = title }
+                }
+                return .none
+
             case .createScratchpad:
                 let newPaneID = uuid()
                 let newPane = Pane(
@@ -563,7 +731,19 @@ struct WorkspaceFeature {
                 // scenes, alongside stale SurfaceManager bookkeeping.
                 let hasBackingSurface = paneType == .shell
                     || (state.panes[id: paneID]?.isUsingExternalEditor ?? false)
+                let isWebPane = paneType == .web
                 if let pane = state.panes[id: paneID] {
+                    // For web panes the sidecar holds the URL — capture
+                    // it into the snapshot so `reopenClosedPane` can
+                    // rebuild the same tab list. Private panes get a
+                    // nil webState so reopen restores a blank tab.
+                    let snapshotWebState: WebPaneState? = {
+                        guard pane.type == .web,
+                              let ws = state.webPanes[paneID],
+                              !ws.isPrivate
+                        else { return nil }
+                        return ws
+                    }()
                     state.recentlyClosedPanes.append(
                         ClosedPaneSnapshot(
                             workingDirectory: pane.workingDirectory,
@@ -572,12 +752,16 @@ struct WorkspaceFeature {
                             filePath: pane.filePath,
                             scratchpadContent: pane.scratchpadContent,
                             claudeSessionID: pane.claudeSessionID,
-                            markdownFontSize: pane.markdownFontSize
+                            markdownFontSize: pane.markdownFontSize,
+                            webState: snapshotWebState
                         )
                     )
                     if state.recentlyClosedPanes.count > 10 {
                         state.recentlyClosedPanes.removeFirst()
                     }
+                }
+                if isWebPane {
+                    state.webPanes.removeValue(forKey: paneID)
                 }
                 state.panes.remove(id: paneID)
                 let newLayout = state.layout.removing(paneID: paneID)
@@ -600,8 +784,24 @@ struct WorkspaceFeature {
                 }
 
                 if hasBackingSurface {
+                    let store = webPaneStore
+                    if isWebPane {
+                        // Defensive — web panes never set hasBackingSurface
+                        // today, but if that ever changes the destroy
+                        // still has to run on the main actor.
+                        return .run { _ in
+                            await surfaceManager.destroySurface(paneID: paneID)
+                            await store.destroyCoordinator(paneID: paneID)
+                        }
+                    }
                     return .run { _ in
                         await surfaceManager.destroySurface(paneID: paneID)
+                    }
+                }
+                if isWebPane {
+                    let store = webPaneStore
+                    return .run { _ in
+                        await store.destroyCoordinator(paneID: paneID)
                     }
                 }
                 return .none
@@ -1045,11 +1245,15 @@ struct WorkspaceFeature {
                 )
                 state.layout = newLayout
                 state.panes.append(newPane)
+                if snapshot.type == .web, let webState = snapshot.webState {
+                    state.webPanes[newPaneID] = webState
+                }
                 state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
 
-                // Markdown, scratchpad, and diff panes don't need a surface
-                if snapshot.type == .markdown || snapshot.type == .scratchpad || snapshot.type == .diff {
+                // Non-shell pane types don't need a ghostty surface
+                if snapshot.type == .markdown || snapshot.type == .scratchpad
+                    || snapshot.type == .diff || snapshot.type == .web {
                     return .none
                 }
 

@@ -36,6 +36,12 @@ struct AppReducer {
         var globalHotkeyHideOnRepress: Bool = true
         var globalHotkeyRegistrationError: String?
 
+        /// Per-web-pane monotonic counter used as the URL bar focus
+        /// token. The priority key layer bumps this when ⌘L fires on
+        /// a focused web pane; `WebPaneView` picks up the change and
+        /// promotes its URL bar to first responder.
+        var webPaneURLFocusTokens: [UUID: UInt64] = [:]
+
         /// Collision between the current global hotkey and an in-app
         /// keybinding. Computed so it always reflects the latest state —
         /// `keybindings` and `globalHotkey` can land in state in either
@@ -159,6 +165,7 @@ struct AppReducer {
                     case .markdown: "doc.text"
                     case .scratchpad: "note.text"
                     case .diff: "plusminus"
+                    case .web: "globe"
                     }
                     items.append(CommandPaletteItem(
                         id: "pane:\(paneID)",
@@ -411,6 +418,10 @@ struct AppReducer {
         case openFile
         case openFileAtPath(String, fromPaneID: UUID?)
         case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
+        /// Open a web pane in the active workspace.
+        case openWebPanePath(url: String, fromPaneID: UUID?)
+        /// Bump the URL bar focus token for a web pane (⌘L).
+        case webPaneFocusURLBar(paneID: UUID)
 
         // Inspector + Git Status
         case toggleInspector
@@ -478,6 +489,7 @@ struct AppReducer {
     @Dependency(\.ghosttyConfig) var ghosttyConfig
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.graftService) var graftService
+    @Dependency(\.webPaneStore) var webPaneStore
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
 
@@ -1355,6 +1367,246 @@ struct AppReducer {
         reply?.send(payload)
         reply?.close()
         return .none
+    }
+
+    // MARK: - Web pane handlers (Phase 1)
+
+    enum WebNavAction { case back, forward, reload, reloadHard }
+
+    /// Open a new `.web` pane in the active workspace. Mirrors the
+    /// shape of `handlePaneList` — single JSON reply, then close.
+    /// Allocates the new pane (and active-tab) UUIDs up front so the
+    /// reply payload can echo a concrete `pane_id` *before* the
+    /// workspace effect runs and the CLI can print/script against it.
+    func handleWebOpen(
+        state: State,
+        paneID _: UUID?,
+        url: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let activeID = state.activeWorkspaceID else {
+            reply?.send(["ok": false, "error": "no active workspace"])
+            reply?.close()
+            return .none
+        }
+        let normalized = WebPaneCoordinator.normalizeURLInput(url)
+        let newPaneID = uuid()
+        let newTabID = uuid()
+        reply?.send([
+            "ok": true,
+            "pane_id": newPaneID.uuidString,
+            "tab_id": newTabID.uuidString,
+            "url": normalized,
+            "workspace_id": activeID.uuidString
+        ])
+        reply?.close()
+        return .send(.workspaces(.element(
+            id: activeID,
+            action: .openWebPane(
+                paneID: newPaneID,
+                tabID: newTabID,
+                url: url,
+                reusePaneID: nil,
+                isPrivate: false
+            )
+        )))
+    }
+
+    /// Resolve a pane-target reference to a `.web` pane. Replies with
+    /// the structured error on a miss and returns nil so the caller
+    /// can short-circuit cleanly.
+    private func resolveWebPane(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> (paneID: UUID, workspace: WorkspaceFeature.State, webState: WebPaneState)? {
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolvedID, let ws):
+            guard let pane = ws.panes[id: resolvedID] else {
+                reply?.send(["ok": false, "error": "pane not found: \(resolvedID.uuidString)"])
+                reply?.close()
+                return nil
+            }
+            guard pane.type == .web else {
+                reply?.send(["ok": false, "error": "pane is not a web pane (type: \(pane.type.rawValue))"])
+                reply?.close()
+                return nil
+            }
+            guard let webState = ws.webPanes[resolvedID] else {
+                reply?.send(["ok": false, "error": "web pane state missing for \(resolvedID.uuidString)"])
+                reply?.close()
+                return nil
+            }
+            return (resolvedID, ws, webState)
+        case .error(let message):
+            reply?.send(["ok": false, "error": message])
+            reply?.close()
+            return nil
+        }
+    }
+
+    func handleWebURL(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+
+        // Destructure into Sendable locals — Swift 6 strict
+        // concurrency rejects capturing the resolved tuple
+        // (which carries WorkspaceFeature.State) in a @Sendable
+        // closure.
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = resolved.webState.activeTab?.id
+        let fallbackURL = resolved.webState.activeTab?.url ?? ""
+        let fallbackTitle = resolved.webState.activeTab?.title ?? ""
+
+        return .run { _ in
+            let snapshot: (url: String, title: String)? = await MainActor.run {
+                guard let tabID else { return nil }
+                return store.coordinatorIfExists(for: resolvedPaneID)?
+                    .currentURLAndTitle(tabID: tabID)
+            }
+            let url = snapshot?.url.isEmpty == false ? snapshot!.url : fallbackURL
+            let title = snapshot?.title.isEmpty == false ? snapshot!.title : fallbackTitle
+            reply?.send([
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "url": url,
+                "title": title
+            ])
+            reply?.close()
+        }
+    }
+
+    func handleWebNav(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        action: WebNavAction,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+
+        reply?.send([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString
+        ])
+        reply?.close()
+
+        let wsID = resolved.workspace.id
+        let paneID = resolved.paneID
+        switch action {
+        case .back:
+            return .send(.workspaces(.element(id: wsID, action: .webPaneBack(paneID: paneID))))
+        case .forward:
+            return .send(.workspaces(.element(id: wsID, action: .webPaneForward(paneID: paneID))))
+        case .reload:
+            return .send(.workspaces(.element(id: wsID, action: .webPaneReload(paneID: paneID, hard: false))))
+        case .reloadHard:
+            return .send(.workspaces(.element(id: wsID, action: .webPaneReload(paneID: paneID, hard: true))))
+        }
+    }
+
+    func handleWebCapture(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        mode: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        guard let tab = resolved.webState.activeTab else {
+            reply?.send(["ok": false, "error": "web pane has no active tab"])
+            reply?.close()
+            return .none
+        }
+
+        guard let captureMode = WebCaptureMode(rawValue: mode) else {
+            reply?.send(["ok": false, "error": "unknown capture mode '\(mode)' (allowed: meta, text, screenshot)"])
+            reply?.close()
+            return .none
+        }
+
+        // Destructure into Sendable locals for the .run closure
+        // (Swift 6 strict concurrency disallows capturing the
+        // resolved tuple, which carries WorkspaceFeature.State).
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = tab.id
+        let tabURL = tab.url
+        let tabTitle = tab.title
+
+        return .run { _ in
+            let snapshot: (url: String, title: String) = await MainActor.run {
+                store.coordinator(for: resolvedPaneID).currentURLAndTitle(tabID: tabID)
+                    ?? (tabURL, tabTitle)
+            }
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "url": snapshot.url,
+                "title": snapshot.title,
+                "mode": captureMode.rawValue
+            ]
+            switch captureMode {
+            case .meta:
+                break
+            case .text:
+                let text = await store.coordinator(for: resolvedPaneID).captureText(tabID: tabID)
+                payload["text"] = text
+                payload["byte_count"] = text.utf8.count
+            case .screenshot:
+                let pngData = await store.coordinator(for: resolvedPaneID).captureScreenshot(tabID: tabID)
+                if let pngData {
+                    let inlineThreshold = 1_000_000 // 1 MB
+                    if pngData.count <= inlineThreshold {
+                        payload["png_base64"] = pngData.base64EncodedString()
+                        payload["byte_count"] = pngData.count
+                    } else {
+                        // Per-app temporary directory — OS prunes it
+                        // automatically (vs. `/tmp` where files lingered
+                        // until reboot).
+                        let ts = Int(Date().timeIntervalSince1970)
+                        let url = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("nex-web-capture-\(resolvedPaneID.uuidString)-\(ts).png")
+                        if (try? pngData.write(to: url)) != nil {
+                            payload["path"] = url.path
+                            payload["byte_count"] = pngData.count
+                        } else {
+                            payload["ok"] = false
+                            payload["error"] = "failed to write screenshot to \(url.path)"
+                        }
+                    }
+                } else {
+                    payload["ok"] = false
+                    payload["error"] = "screenshot capture failed"
+                }
+            }
+            reply?.send(payload)
+            reply?.close()
+        }
     }
 
     /// Returns the last `n` lines of `text`, joined by `\n`. Preserves
@@ -2696,6 +2948,23 @@ struct AppReducer {
                     action: .openMarkdownFile(filePath: resolvedPath)
                 )))
 
+            case .openWebPanePath(let url, _):
+                guard let activeID = state.activeWorkspaceID else { return .none }
+                return .send(.workspaces(.element(
+                    id: activeID,
+                    action: .openWebPane(
+                        paneID: uuid(),
+                        tabID: uuid(),
+                        url: url,
+                        reusePaneID: nil,
+                        isPrivate: false
+                    )
+                )))
+
+            case .webPaneFocusURLBar(let paneID):
+                state.webPaneURLFocusTokens[paneID, default: 0] &+= 1
+                return .none
+
             case .openDiffPath(let repoPath, let targetPath, let fromPaneID):
                 guard let activeID = state.activeWorkspaceID else { return .none }
                 let workspace = state.workspaces[id: activeID]
@@ -2939,8 +3208,23 @@ struct AppReducer {
 
                     let sourceWSID = sourceWS.id
 
+                    // Capture web sidecar before removal so it can
+                    // ride along to the target workspace below. The
+                    // Pane struct doesn't carry tab/URL state for
+                    // `.web` panes — it lives in `webPanes[paneID]`
+                    // on the workspace, and the move must transfer
+                    // it explicitly or the target ends up with a
+                    // blank pane and `nex web url` fails with
+                    // "web pane state missing".
+                    let webStateToTransfer: WebPaneState? = pane.type == .web
+                        ? sourceWS.webPanes[paneID]
+                        : nil
+
                     // Remove from source
                     state.workspaces[id: sourceWSID]?.panes.remove(id: paneID)
+                    if webStateToTransfer != nil {
+                        state.workspaces[id: sourceWSID]?.webPanes.removeValue(forKey: paneID)
+                    }
                     let newSourceLayout = state.workspaces[id: sourceWSID]!.layout.removing(paneID: paneID)
                     state.workspaces[id: sourceWSID]?.layout = newSourceLayout
                     state.workspaces[id: sourceWSID]?.currentLayoutIndex = nil
@@ -2977,6 +3261,9 @@ struct AppReducer {
 
                     // Add to target
                     state.workspaces[id: targetWSID]?.panes.append(pane)
+                    if let webStateToTransfer {
+                        state.workspaces[id: targetWSID]?.webPanes[paneID] = webStateToTransfer
+                    }
 
                     let targetLayout = state.workspaces[id: targetWSID]?.layout ?? .empty
                     if targetLayout.isEmpty {
@@ -3134,6 +3421,58 @@ struct AppReducer {
 
                 case .graftStatus:
                     return handleGraftStatus(state: state, reply: reply)
+
+                case .webOpen(let paneID, let url):
+                    return handleWebOpen(state: state, paneID: paneID, url: url, reply: reply)
+
+                case .webURL(let paneID, let target, let workspaceFilter):
+                    return handleWebURL(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
+
+                case .webBack(let paneID, let target, let workspaceFilter):
+                    return handleWebNav(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        action: .back,
+                        reply: reply
+                    )
+
+                case .webForward(let paneID, let target, let workspaceFilter):
+                    return handleWebNav(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        action: .forward,
+                        reply: reply
+                    )
+
+                case .webReload(let paneID, let target, let workspaceFilter, let hard):
+                    return handleWebNav(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        action: hard ? .reloadHard : .reload,
+                        reply: reply
+                    )
+
+                case .webCapture(let paneID, let target, let workspaceFilter, let mode):
+                    return handleWebCapture(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        mode: mode,
+                        reply: reply
+                    )
                 }
 
             // MARK: - Cross-Workspace Surface Notifications

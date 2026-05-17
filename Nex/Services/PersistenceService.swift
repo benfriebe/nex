@@ -115,6 +115,7 @@ actor PersistenceService {
                         .fetchAll(db)
 
                     var panes = IdentifiedArrayOf<Pane>()
+                    var webPanes: [UUID: WebPaneState] = [:]
                     for pr in paneRecords {
                         guard let paneID = UUID(uuidString: pr.id) else { continue }
                         let paneType = PaneType(rawValue: pr.type) ?? .shell
@@ -132,6 +133,21 @@ actor PersistenceService {
                             lastActivityAt: Date(timeIntervalSince1970: pr.lastActivityAt)
                         )
                         panes.append(pane)
+                        if paneType == .web {
+                            // Phase 1: hydrate a single-tab web state
+                            // from the persisted URL. Empty/nil URL =
+                            // blank pane (e.g. private pane on restore).
+                            let url = pr.webURL ?? ""
+                            if !url.isEmpty {
+                                let tab = WebTab(url: url)
+                                webPanes[paneID] = WebPaneState(
+                                    tabs: [tab],
+                                    activeTabID: tab.id
+                                )
+                            } else {
+                                webPanes[paneID] = WebPaneState()
+                            }
+                        }
                     }
 
                     // Load repo associations for this workspace
@@ -182,7 +198,8 @@ actor PersistenceService {
                         repoAssociations: repoAssociations,
                         createdAt: Date(timeIntervalSince1970: record.createdAt),
                         lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
-                        labels: labels
+                        labels: labels,
+                        webPanes: webPanes
                     )
                     workspaces.append(workspace)
                 }
@@ -294,7 +311,17 @@ struct PersistenceSnapshot {
 
         pnRecords = state.workspaces.flatMap { workspace in
             workspace.panes.map { pane in
-                PaneRecord(
+                // Phase 1 web persistence: store only the active tab's
+                // URL. Private panes intentionally drop their URL so
+                // restart restores them blank.
+                let webURL: String? = if pane.type == .web,
+                                         let webState = workspace.webPanes[pane.id],
+                                         !webState.isPrivate {
+                    webState.activeTab?.url
+                } else {
+                    nil
+                }
+                return PaneRecord(
                     id: pane.id.uuidString,
                     workspaceID: workspace.id.uuidString,
                     label: pane.label,
@@ -305,7 +332,8 @@ struct PersistenceSnapshot {
                     claudeSessionID: pane.claudeSessionID,
                     status: pane.status.rawValue,
                     createdAt: pane.createdAt.timeIntervalSince1970,
-                    lastActivityAt: pane.lastActivityAt.timeIntervalSince1970
+                    lastActivityAt: pane.lastActivityAt.timeIntervalSince1970,
+                    webURL: webURL
                 )
             }
         }

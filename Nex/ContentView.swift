@@ -115,6 +115,32 @@ struct ContentView: View {
                                 ),
                                 reply: nil
                             ))
+                        },
+                        webPanes: workspace.webPanes,
+                        webPaneURLFocusToken: store.webPaneURLFocusTokens,
+                        onWebNavigate: { paneID, url in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneNavigate(paneID: paneID, url: url)
+                            )))
+                        },
+                        onWebBack: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneBack(paneID: paneID)
+                            )))
+                        },
+                        onWebForward: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneForward(paneID: paneID)
+                            )))
+                        },
+                        onWebReload: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneReload(paneID: paneID, hard: false)
+                            )))
                         }
                     )
                 } else {
@@ -238,6 +264,28 @@ struct ContentView: View {
                       let paneID = surfaceManager.paneID(for: surface) else { return }
                 // Route through AppReducer for cross-workspace support
                 store.send(.surfaceTitleChanged(paneID: paneID, title: title))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.stateDidChangeNotification)) { notification in
+                // WKWebView KVO fired for url/title — push the new
+                // values into the workspace reducer so persistence,
+                // close/reopen snapshots, pane titles, and the CLI
+                // `nex web url` reply stay in sync with what the
+                // user actually has on screen (link clicks, back/
+                // forward, redirects, etc.).
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let tabID = info["tabID"] as? UUID else { return }
+                let url = (info["url"] as? String) ?? ""
+                let title = (info["title"] as? String) ?? ""
+                guard let workspace = store.workspaces.first(where: {
+                    $0.webPanes[paneID] != nil
+                }) else { return }
+                store.send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webPaneStateChanged(
+                        paneID: paneID, tabID: tabID, url: url, title: title
+                    )
+                )))
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfacePwdNotification)) { notification in
                 guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,

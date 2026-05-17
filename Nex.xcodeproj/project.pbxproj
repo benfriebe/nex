@@ -33,6 +33,7 @@
 		2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */; };
 		2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000C46C62FB60503295A92E8 /* GhosttyApp.swift */; };
 		2D8754E0B3E9AD185D7EB6B0 /* ConfigParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4114D723403D4FF8F4AC1B /* ConfigParser.swift */; };
+		2F440D3EB93B6C127A1FF003 /* WebPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A97924791DAA26F0E4B0BA /* WebPaneView.swift */; };
 		3B60C0FC48A2AAF6282CAB40 /* WorkspaceListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */; };
 		3C74513CA9D5FD60E672B477 /* CommandPaletteItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */; };
 		3DF88C2A2966C7B0209E22FE /* RepoPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0689D085597FF9C7F4D87401 /* RepoPickerView.swift */; };
@@ -55,6 +56,7 @@
 		5CFC8C5F96B371044A5ABE91 /* QuitConfirmationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD202733564AC92AEC00A0C /* QuitConfirmationTests.swift */; };
 		62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E820170ADF2ADB58B8079 /* GitServiceTests.swift */; };
 		62BC1CC522515C8E6A99F508 /* GitHeadWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */; };
+		630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B04ED477C0C51A44953A8C /* WebPaneState.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
 		692A08796F7DF555CFAF0653 /* MarkdownFindScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */; };
 		696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */; };
@@ -90,6 +92,9 @@
 		A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309F641591BB580429299666 /* ConfigParserTests.swift */; };
 		A33EF4059D3F3479ED5C9EE2 /* WorkspaceGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */; };
 		A3B349AFCABD43FDC2F97A2A /* EditorService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0CED7EFE254E4491327CAE0 /* EditorService.swift */; };
+		A60D7684F5DA8DD340A04A01 /* WebPaneCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC5A9C48821CE81CCB7FFB5 /* WebPaneCoordinator.swift */; };
+		A8626EC08DC12588F912E1EF /* WebPaneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A94E80914F7411EED712E5 /* WebPaneStore.swift */; };
+		A895048D11AFDC1FDA5DF846 /* WebPaneChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DFA60F59651234F0F59BE9 /* WebPaneChrome.swift */; };
 		A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */; };
 		AC234A5AAADE90A7EC7BB5F8 /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */; };
 		AF0F22742F34298F1E06A238 /* WorkspaceGroupSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9F7D5571F89D43BC6C76928 /* WorkspaceGroupSocketTests.swift */; };
@@ -200,6 +205,7 @@
 		36F691F3442E4E1BBC495C78 /* GraftFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftFeatureTests.swift; sourceTree = "<group>"; };
 		3714AA1F15C85762BF36B1FE /* NexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexApp.swift; sourceTree = "<group>"; };
 		377C07C6C4B00D0699682EA3 /* PaneType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneType.swift; sourceTree = "<group>"; };
+		37B04ED477C0C51A44953A8C /* WebPaneState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneState.swift; sourceTree = "<group>"; };
 		37DDBBE36E6F9BC00B9EB07E /* MarkdownFindController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFindController.swift; sourceTree = "<group>"; };
 		3879BA745F8737CA5872F80D /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
 		396BAB6F7BCAE4EEF2ADEFAF /* DiffHTMLRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffHTMLRendererTests.swift; sourceTree = "<group>"; };
@@ -209,6 +215,7 @@
 		42A24C1FEC6EA31096603326 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
 		452A1B196F8438AD7A7DAC0A /* PaneSendKeyReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSendKeyReplyTests.swift; sourceTree = "<group>"; };
+		45DFA60F59651234F0F59BE9 /* WebPaneChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneChrome.swift; sourceTree = "<group>"; };
 		4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCheckboxRenderingTests.swift; sourceTree = "<group>"; };
 		4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
 		4F0D3AB3067CDBF5A490F532 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
@@ -247,7 +254,9 @@
 		94CA6C20BB3882E02348ADF4 /* SurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceView.swift; sourceTree = "<group>"; };
 		94D09D767C96B3F96E4DF7C5 /* WindowSpacesBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSpacesBindingTests.swift; sourceTree = "<group>"; };
 		96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
+		98A97924791DAA26F0E4B0BA /* WebPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneView.swift; sourceTree = "<group>"; };
 		9D96CD47FF756C95404DF4F6 /* Pane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pane.swift; sourceTree = "<group>"; };
+		A0A94E80914F7411EED712E5 /* WebPaneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneStore.swift; sourceTree = "<group>"; };
 		A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutTests.swift; sourceTree = "<group>"; };
 		A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigClient.swift; sourceTree = "<group>"; };
@@ -302,6 +311,7 @@
 		F90FF9C2E7F0BC50E51C47DE /* RepoRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryView.swift; sourceTree = "<group>"; };
 		F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneListTests.swift; sourceTree = "<group>"; };
+		FDC5A9C48821CE81CCB7FFB5 /* WebPaneCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneCoordinator.swift; sourceTree = "<group>"; };
 		FF88062F290789D98B545AC6 /* WorkspaceGroupCRUDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupCRUDTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -506,6 +516,7 @@
 				0E3C930E9EEBE1D0094A6538 /* ScratchpadPane */,
 				3C80F4E7F9BFB46382583CF8 /* Settings */,
 				C07DAE9A20D318288C360D1B /* StatusBar */,
+				8C7E8AA61857407F1760CCCF /* WebPane */,
 				7D8D8A8C5E2891A6686932C2 /* Workspace */,
 			);
 			path = Features;
@@ -561,6 +572,18 @@
 				1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */,
 			);
 			path = DiffPane;
+			sourceTree = "<group>";
+		};
+		8C7E8AA61857407F1760CCCF /* WebPane */ = {
+			isa = PBXGroup;
+			children = (
+				45DFA60F59651234F0F59BE9 /* WebPaneChrome.swift */,
+				FDC5A9C48821CE81CCB7FFB5 /* WebPaneCoordinator.swift */,
+				37B04ED477C0C51A44953A8C /* WebPaneState.swift */,
+				A0A94E80914F7411EED712E5 /* WebPaneStore.swift */,
+				98A97924791DAA26F0E4B0BA /* WebPaneView.swift */,
+			);
+			path = WebPane;
 			sourceTree = "<group>";
 		};
 		9405054AFE00CF7F6065B578 /* Graft */ = {
@@ -890,6 +913,11 @@
 				B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */,
 				A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */,
 				B167B81282ADF716B21B1679 /* VibrancyView.swift in Sources */,
+				A895048D11AFDC1FDA5DF846 /* WebPaneChrome.swift in Sources */,
+				A60D7684F5DA8DD340A04A01 /* WebPaneCoordinator.swift in Sources */,
+				630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */,
+				A8626EC08DC12588F912E1EF /* WebPaneStore.swift in Sources */,
+				2F440D3EB93B6C127A1FF003 /* WebPaneView.swift in Sources */,
 				EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */,
 				4AF9CB9A4E7CE871FBE1A6F2 /* WorkspaceColor.swift in Sources */,
 				B4846A1AC5C67E51AFA9C846 /* WorkspaceDropTarget.swift in Sources */,
