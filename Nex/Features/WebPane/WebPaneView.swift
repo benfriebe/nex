@@ -45,9 +45,16 @@ struct WebPaneView: View {
     let onBatchRowTapped: (UUID) -> Void
     let onBatchSend: () -> Void
     let onBatchCancel: () -> Void
+    let favourites: [Favourite]
+    let onToggleFavourite: (String, String) -> Void
+    let onOpenFavourite: (String) -> Void
 
     @Environment(\.webPaneStore) private var webPaneStore
     @State private var displayedURL: String = ""
+    /// Title that pairs with `displayedURL`. Updated from the same
+    /// stateDidChange notification so the star toggle never saves a
+    /// stale title under a newly-navigated URL.
+    @State private var displayedTitle: String = ""
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
     @State private var isLoading: Bool = false
@@ -85,7 +92,12 @@ struct WebPaneView: View {
                 onDisarmInspectorPickup: onDisarmInspectorPickup,
                 batchInspectActive: batchInspect != nil,
                 onStartBatchInspect: onStartBatchInspect,
-                focusRequestToken: focusURLBarToken
+                focusRequestToken: focusURLBarToken,
+                favourites: favourites,
+                onToggleStar: {
+                    onToggleFavourite(displayedURL, displayedTitle)
+                },
+                onOpenFavourite: onOpenFavourite
             )
 
             if let batchInspect {
@@ -123,7 +135,15 @@ struct WebPaneView: View {
                 let firedTab = info["tabID"] as? UUID,
                 firedTab == active?.id
             else { return }
-            displayedURL = (info["url"] as? String) ?? displayedURL
+            // Ignore the empty/about:blank placeholders WebKit surfaces
+            // during a failed or in-progress load — otherwise a broken
+            // URL would persist as "about:blank" in the URL bar
+            // (mirrors the guard in WorkspaceFeature.webPaneStateChanged).
+            if let rawURL = info["url"] as? String,
+               !rawURL.isEmpty, rawURL != "about:blank" {
+                displayedURL = rawURL
+                displayedTitle = (info["title"] as? String) ?? ""
+            }
             refreshNavState()
         }
     }
@@ -164,6 +184,7 @@ struct WebPaneView: View {
     private func refreshState() {
         guard let tab = activeTab else {
             displayedURL = ""
+            displayedTitle = ""
             canGoBack = false
             canGoForward = false
             return
@@ -171,8 +192,10 @@ struct WebPaneView: View {
         let coord = webPaneStore.coordinatorIfExists(for: paneID)
         if let snapshot = coord?.currentURLAndTitle(tabID: tab.id), !snapshot.url.isEmpty {
             displayedURL = snapshot.url
+            displayedTitle = snapshot.title
         } else {
             displayedURL = tab.url
+            displayedTitle = tab.title
         }
         refreshNavState()
     }

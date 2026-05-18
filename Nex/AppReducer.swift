@@ -48,6 +48,8 @@ struct AppReducer {
         /// not state worth surfacing to the view layer or persisting.
         var webInspectArmedSubmit: [UUID: Bool] = [:]
 
+        var favourites: [Favourite] = []
+
         /// Collision between the current global hotkey and an in-app
         /// keybinding. Computed so it always reflects the latest state —
         /// `keybindings` and `globalHotkey` can land in state in either
@@ -487,6 +489,16 @@ struct AppReducer {
         /// the popover + focus ring (page side).
         case webBatchDismissPopover(paneID: UUID)
 
+        // MARK: - Web favourites
+
+        case favouritesLoaded([Favourite])
+        case removeFavourite(id: UUID)
+        case renameFavourite(id: UUID, title: String)
+        case moveFavourite(fromIndex: Int, toIndex: Int)
+        /// Star toggle: add when missing, remove when present.
+        /// URL match is case-insensitive with trailing-slash stripped.
+        case toggleFavourite(url: String, title: String)
+
         // Inspector + Git Status
         case toggleInspector
         case refreshGitStatus
@@ -556,6 +568,7 @@ struct AppReducer {
     @Dependency(\.webPaneStore) var webPaneStore
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.userDefaults) var userDefaults
 
     private enum GitStatusTimerID: Hashable { case timer }
     private enum AutoLinkResolveID: Hashable { case pane(UUID) }
@@ -592,6 +605,13 @@ struct AppReducer {
             await surfaceManager.focus(paneID: paneID)
         }
         .cancellable(id: PaletteFocusID.pending, cancelInFlight: true)
+    }
+
+    private func persistFavourites(_ favourites: [Favourite]) -> Effect<Action> {
+        let json = FavouritesStorage.encode(favourites)
+        return .run { [userDefaults] _ in
+            userDefaults.setString(json, FavouritesStorage.defaultsKey)
+        }
     }
 
     /// Coalesce rapid `cd`s before scanning the directory for a repo root.
@@ -2108,6 +2128,10 @@ struct AppReducer {
                             globalHotkey: config.globalHotkey,
                             globalHotkeyHideOnRepress: config.globalHotkeyHideOnRepress
                         ))
+                    },
+                    .run { [userDefaults] send in
+                        let json = userDefaults.stringForKey(FavouritesStorage.defaultsKey)
+                        await send(.favouritesLoaded(FavouritesStorage.decode(json)))
                     }
                 )
 
@@ -3186,6 +3210,41 @@ struct AppReducer {
                     ?? state.workspaces[id: item.workspaceID]?.focusedPaneID
                 effects.append(scheduleFocusAfterPaletteClose(paneID: targetPaneID))
                 return .merge(effects)
+
+            // MARK: - Web favourites
+
+            case .favouritesLoaded(let list):
+                state.favourites = list
+                return .none
+
+            case .removeFavourite(let id):
+                guard let idx = state.favourites.firstIndex(where: { $0.id == id })
+                else { return .none }
+                state.favourites.remove(at: idx)
+                return persistFavourites(state.favourites)
+
+            case .renameFavourite(let id, let title):
+                guard let idx = state.favourites.firstIndex(where: { $0.id == id })
+                else { return .none }
+                state.favourites[idx].title = title
+                return persistFavourites(state.favourites)
+
+            case .moveFavourite(let from, let to):
+                guard from >= 0, from < state.favourites.count,
+                      to >= 0, to <= state.favourites.count, from != to
+                else { return .none }
+                state.favourites.move(fromOffsets: IndexSet(integer: from), toOffset: to)
+                return persistFavourites(state.favourites)
+
+            case .toggleFavourite(let url, let title):
+                let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return .none }
+                if let existing = state.favourites.firstMatching(url: trimmed) {
+                    state.favourites.removeAll { $0.id == existing.id }
+                } else {
+                    state.favourites.append(Favourite(id: uuid(), url: trimmed, title: title))
+                }
+                return persistFavourites(state.favourites)
 
             // MARK: - Keybindings
 

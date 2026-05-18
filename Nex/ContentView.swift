@@ -200,6 +200,16 @@ struct ContentView: View {
                         },
                         onWebBatchCancel: { paneID in
                             store.send(.webBatchInspectCancel(paneID: paneID))
+                        },
+                        favourites: store.favourites,
+                        onToggleFavourite: { url, title in
+                            store.send(.toggleFavourite(url: url, title: title))
+                        },
+                        onOpenFavourite: { paneID, url in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneNavigate(paneID: paneID, url: url)
+                            )))
                         }
                     )
                 } else {

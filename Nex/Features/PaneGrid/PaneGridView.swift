@@ -55,6 +55,10 @@ struct PaneGridView: View {
     var onWebBatchRowTapped: ((UUID, UUID) -> Void)?
     var onWebBatchSend: ((UUID) -> Void)?
     var onWebBatchCancel: ((UUID) -> Void)?
+    /// Global web favourites — surfaced in every web pane's chrome.
+    var favourites: [Favourite] = []
+    var onToggleFavourite: ((String, String) -> Void)?
+    var onOpenFavourite: ((UUID, String) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -268,7 +272,14 @@ struct PaneGridView: View {
                         onWebBatchRowTapped?(pane.id, itemID)
                     },
                     onBatchSend: { onWebBatchSend?(pane.id) },
-                    onBatchCancel: { onWebBatchCancel?(pane.id) }
+                    onBatchCancel: { onWebBatchCancel?(pane.id) },
+                    favourites: favourites,
+                    onToggleFavourite: { url, title in
+                        onToggleFavourite?(url, title)
+                    },
+                    onOpenFavourite: { url in
+                        onOpenFavourite?(pane.id, url)
+                    }
                 )
             }
         }

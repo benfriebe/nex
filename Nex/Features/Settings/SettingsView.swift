@@ -2,31 +2,47 @@ import AppKit
 import ComposableArchitecture
 import SwiftUI
 
+/// Identifier for the Settings TabView's tabs, used for deep-linking
+/// from the web pane's "Manage favourites…" menu.
+enum SettingsTab: Hashable { case general, appearance, repos, keybindings, web }
+
 struct SettingsView: View {
     let store: StoreOf<AppReducer>
 
+    @State private var selectedTab: SettingsTab = .general
+
     var body: some View {
         WithPerceptionTracking {
-            TabView {
+            TabView(selection: $selectedTab) {
                 GeneralSettingsView(appStore: store)
                     .tabItem {
                         Label("General", systemImage: "gear")
                     }
+                    .tag(SettingsTab.general)
 
                 AppearanceSettingsView(store: store.scope(state: \.settings, action: \.settings))
                     .tabItem {
                         Label("Appearance", systemImage: "paintbrush")
                     }
+                    .tag(SettingsTab.appearance)
 
                 RepoRegistryView(store: store)
                     .tabItem {
                         Label("Repositories", systemImage: "externaldrive")
                     }
+                    .tag(SettingsTab.repos)
 
                 KeybindingsSettingsView(store: store)
                     .tabItem {
                         Label("Keybindings", systemImage: "command")
                     }
+                    .tag(SettingsTab.keybindings)
+
+                WebFavouritesSettingsView(store: store)
+                    .tabItem {
+                        Label("Web", systemImage: "globe")
+                    }
+                    .tag(SettingsTab.web)
             }
             .frame(
                 minWidth: 500, idealWidth: 600, maxWidth: .infinity,
@@ -39,6 +55,22 @@ struct SettingsView: View {
             // would leave the toggle stale until next launch (issue #129).
             .onReceive(NotificationCenter.default.publisher(for: QuitGate.confirmQuitChangedNotification)) { _ in
                 store.send(.settings(.refreshConfirmQuitWhenActive))
+            }
+            // Deep-link from a web pane's "Manage favourites…" menu.
+            // `pendingSettingsTab` covers cold-open (notification has
+            // no listener yet); `.onReceive` covers re-opens of an
+            // already-mounted Settings scene.
+            .onAppear {
+                if let pending = WebPaneChrome.pendingSettingsTab {
+                    selectedTab = pending
+                    WebPaneChrome.pendingSettingsTab = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneChrome.openSettingsTabNotification)) { note in
+                if let tab = note.object as? SettingsTab {
+                    selectedTab = tab
+                }
+                WebPaneChrome.pendingSettingsTab = nil
             }
         }
     }
@@ -282,5 +314,107 @@ private struct AppearanceSettingsView: View {
                 }
             }
         )
+    }
+}
+
+private struct WebFavouritesSettingsView: View {
+    let store: StoreOf<AppReducer>
+    @State private var selection: Favourite.ID?
+
+    var body: some View {
+        WithPerceptionTracking {
+            VStack(spacing: 0) {
+                if store.favourites.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "star")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.tertiary)
+                        Text("No favourites yet")
+                            .foregroundStyle(.secondary)
+                        Text("Click the star button in a web pane's URL bar to save one.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(selection: $selection) {
+                        ForEach(store.favourites) { fav in
+                            FavouriteRow(
+                                favourite: fav,
+                                onRename: { newTitle in
+                                    store.send(.renameFavourite(id: fav.id, title: newTitle))
+                                },
+                                onRemove: {
+                                    store.send(.removeFavourite(id: fav.id))
+                                }
+                            )
+                            .tag(fav.id)
+                        }
+                        .onMove { source, destination in
+                            guard let from = source.first else { return }
+                            store.send(.moveFavourite(fromIndex: from, toIndex: destination))
+                        }
+                    }
+                    .listStyle(.inset)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct FavouriteRow: View {
+    let favourite: Favourite
+    let onRename: (String) -> Void
+    let onRemove: () -> Void
+
+    @State private var editingTitle: String
+    @FocusState private var isFocused: Bool
+
+    init(favourite: Favourite, onRename: @escaping (String) -> Void, onRemove: @escaping () -> Void) {
+        self.favourite = favourite
+        self.onRename = onRename
+        self.onRemove = onRemove
+        _editingTitle = State(initialValue: favourite.title)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "star.fill")
+                .foregroundStyle(Color.yellow)
+                .font(.system(size: 11))
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Title", text: $editingTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, weight: .medium))
+                    .focused($isFocused)
+                    .onSubmit(commitRename)
+                    .onChange(of: isFocused) { _, focused in
+                        if !focused { commitRename() }
+                    }
+                Text(favourite.url)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button(action: onRemove) {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove favourite")
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func commitRename() {
+        let trimmed = editingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed != favourite.title {
+            onRename(trimmed)
+        }
     }
 }

@@ -41,6 +41,14 @@ struct WebPaneChrome: View {
     /// Set non-nil to programmatically promote the URL bar to first
     /// responder (consumed by the priority key layer for ⌘L).
     let focusRequestToken: UInt64
+    var favourites: [Favourite] = []
+    var onToggleStar: (() -> Void)?
+    var onOpenFavourite: ((String) -> Void)?
+
+    /// `showSettingsWindow:` via `NSApp.sendAction` with a nil target
+    /// doesn't always reach the Settings scene through the responder
+    /// chain; `openSettings()` is the supported entry point.
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +62,60 @@ struct WebPaneChrome: View {
             Divider()
         }
     }
+
+    private var bookmarksMenuButton: some View {
+        Menu {
+            if favourites.isEmpty {
+                Text("No favourites yet")
+                Text("Click the star to save the current page")
+                    .font(.caption)
+            } else {
+                ForEach(favourites) { fav in
+                    Button(Self.truncatedMenuLabel(fav.displayLabel)) {
+                        onOpenFavourite?(fav.url)
+                    }
+                }
+            }
+            Divider()
+            Button("Manage favourites…") {
+                // Stash for cold-open (no listener yet); also post so
+                // an already-mounted Settings scene flips immediately.
+                WebPaneChrome.pendingSettingsTab = .web
+                openSettings()
+                NotificationCenter.default.post(
+                    name: WebPaneChrome.openSettingsTabNotification, object: SettingsTab.web
+                )
+            }
+        } label: {
+            Image(systemName: "book")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 22, height: 22)
+        .opacity(0.8)
+        .help("Bookmarks")
+    }
+
+    /// Mid-truncates with `…` so both ends of a long page title stay
+    /// visible in the menu (a leading-only ellipsis loses the host;
+    /// trailing-only loses the page name). Full title is in Settings.
+    static func truncatedMenuLabel(_ label: String, max: Int = 50) -> String {
+        guard label.count > max else { return label }
+        let head = label.prefix(max / 2)
+        let tail = label.suffix(max / 2 - 1)
+        return "\(head)…\(tail)"
+    }
+
+    static let openSettingsTabNotification = Notification.Name("nex.settings.openTab")
+
+    /// Cross-scene hand-off: the notification posted alongside
+    /// `openSettings()` doesn't reach a Settings view that hasn't
+    /// mounted yet, so the requested tab is also stashed here and
+    /// consumed by `SettingsView.onAppear`.
+    nonisolated(unsafe) static var pendingSettingsTab: SettingsTab?
 
     private var navAndURLBar: some View {
         HStack(spacing: 6) {
@@ -93,9 +155,14 @@ struct WebPaneChrome: View {
                 initialURL: displayedURL,
                 paneID: paneID,
                 focusRequestToken: focusRequestToken,
-                onSubmit: onNavigate
+                onSubmit: onNavigate,
+                isStarred: favourites.firstMatching(url: displayedURL) != nil,
+                canStar: !displayedURL.isEmpty,
+                onToggleStar: onToggleStar
             )
             .frame(maxWidth: .infinity)
+
+            bookmarksMenuButton
 
             Button(action: onTabNew) {
                 Image(systemName: "plus")
@@ -268,11 +335,65 @@ private struct WebTabPill: View {
 
 // MARK: - URL bar
 
-/// `NSTextField`-backed URL bar. SwiftUI's `TextField` doesn't expose
-/// first-responder control cleanly, and we need that for ⌘L (focus URL
-/// bar) and for the "select-all-on-focus" behaviour every browser
-/// gives you. Using AppKit directly avoids ad-hoc workarounds.
-struct WebURLBar: NSViewRepresentable {
+/// Composite URL bar: an unbezeled `NSTextField` plus a trailing star
+/// toggle, both wrapped in a single rounded border so the star looks
+/// embedded inside the URL bar rather than hovering next to it. The
+/// AppKit field is kept (rather than swapping to SwiftUI's TextField)
+/// because we need first-responder + select-all-on-focus for ⌘L —
+/// see `WebURLField` below.
+struct WebURLBar: View {
+    let initialURL: String
+    let paneID: UUID
+    let focusRequestToken: UInt64
+    let onSubmit: (String) -> Void
+    /// Star state for the embedded toggle. Star is shown disabled
+    /// (and unclickable) when the URL is empty so a brand-new tab
+    /// can't get a meaningless favourite.
+    var isStarred: Bool = false
+    var canStar: Bool = false
+    var onToggleStar: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            WebURLField(
+                initialURL: initialURL,
+                paneID: paneID,
+                focusRequestToken: focusRequestToken,
+                onSubmit: onSubmit
+            )
+            .padding(.leading, 6)
+            .frame(maxWidth: .infinity)
+
+            Button(action: { onToggleStar?() }) {
+                Image(systemName: isStarred ? "star.fill" : "star")
+                    .font(.system(size: 10, weight: .medium))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+                    .foregroundStyle(isStarred ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canStar)
+            .opacity(canStar ? 1.0 : 0.3)
+            .help(isStarred ? "Remove from favourites" : "Add to favourites")
+            .padding(.trailing, 3)
+        }
+        .frame(height: 21)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
+        )
+    }
+}
+
+/// The actual text field. Kept as a thin `NSViewRepresentable` so
+/// `WebURLBar` can compose it with the star button under a shared
+/// SwiftUI border without giving up first-responder control or the
+/// select-all-on-focus behaviour.
+struct WebURLField: NSViewRepresentable {
     let initialURL: String
     let paneID: UUID
     let focusRequestToken: UInt64
@@ -284,11 +405,12 @@ struct WebURLBar: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
-        field.isBezeled = true
-        field.bezelStyle = .roundedBezel
+        field.isBezeled = false
+        field.isBordered = false
         field.isEditable = true
         field.isSelectable = true
-        field.drawsBackground = true
+        field.drawsBackground = false
+        field.focusRingType = .none
         field.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         field.placeholderString = "Enter URL"
         field.stringValue = initialURL

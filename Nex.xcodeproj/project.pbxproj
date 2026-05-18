@@ -48,6 +48,7 @@
 		4A2AC027454C7CBDF4B312C9 /* CoreText.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F71D541343DA67CDCADA821 /* CoreText.framework */; };
 		4AF9CB9A4E7CE871FBE1A6F2 /* WorkspaceColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4B95F852C737F18989F8FA /* WorkspaceColor.swift */; };
 		4D7F4ECDA338E826904B584E /* PaneLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */; };
+		503C106566E08F34EDBC80D0 /* Favourites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54EECDF8241787F53AC4EA24 /* Favourites.swift */; };
 		5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3879BA745F8737CA5872F80D /* DatabaseService.swift */; };
 		52D4477AF5CCF1724D609119 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EFC4D8E9A152683486EC7F29 /* Sparkle */; };
 		539AACF3A856FD51EC92A6F1 /* WebPaneBatchMarkerScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579D8D40F1D9930845C3B0C9 /* WebPaneBatchMarkerScript.swift */; };
@@ -229,6 +230,7 @@
 		4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
 		4F0D3AB3067CDBF5A490F532 /* NewWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkspaceSheet.swift; sourceTree = "<group>"; };
 		523DE37561222E411737C3F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		54EECDF8241787F53AC4EA24 /* Favourites.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Favourites.swift; sourceTree = "<group>"; };
 		579D8D40F1D9930845C3B0C9 /* WebPaneBatchMarkerScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneBatchMarkerScript.swift; sourceTree = "<group>"; };
 		57C59BDCBA03302FC7FDE16B /* WorkspaceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInspectorView.swift; sourceTree = "<group>"; };
 		5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusNotifyingTextView.swift; sourceTree = "<group>"; };
@@ -595,6 +597,7 @@
 		8C7E8AA61857407F1760CCCF /* WebPane */ = {
 			isa = PBXGroup;
 			children = (
+				54EECDF8241787F53AC4EA24 /* Favourites.swift */,
 				BF16F0C4A6A8BF8151651F53 /* InspectPayloadSanitiser.swift */,
 				1D792DEC74448D403CE1A96D /* RingBuffer.swift */,
 				998480F19F798025639D20A7 /* WebBatchInspectPanel.swift */,
@@ -875,6 +878,7 @@
 				77FB1142F26F5C33539E3F23 /* DiffHTMLRenderer.swift in Sources */,
 				7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */,
 				A3B349AFCABD43FDC2F97A2A /* EditorService.swift in Sources */,
+				503C106566E08F34EDBC80D0 /* Favourites.swift in Sources */,
 				9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */,
 				2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */,
 				ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */,
