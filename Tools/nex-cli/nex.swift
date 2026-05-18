@@ -766,6 +766,9 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web tab-new     [<url>] [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--no-focus]
       nex web tab-close   <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web tab-select  <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web console     [--target ...] [--workspace ...] [--since N] [--level log|debug|info|warn|error] [--clear] [--json]
+      nex web inspect     [--target ...] [--workspace ...] [--send-to <pane>] [--submit] [--disarm]
+      nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -934,6 +937,55 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tab-select")
         sendWebReplyAndPrintBasic(payload, command: "tab-select")
 
+    case "console":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let sinceArg = parseFlag("--since", from: &args)
+        let level = parseFlag("--level", from: &args)
+        let clear = popSwitch("--clear", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var payload: [String: Any] = ["command": "web-console"]
+        if let sinceArg, let parsed = UInt64(sinceArg) {
+            payload["since"] = parsed
+        } else if let sinceArg {
+            fputs("nex web console: --since must be an unsigned integer (got '\(sinceArg)')\n", stderr)
+            exit(1)
+        }
+        if let level {
+            let allowed: Set = ["log", "debug", "info", "warn", "error"]
+            guard allowed.contains(level) else {
+                fputs("nex web console: --level must be one of log|debug|info|warn|error\n", stderr)
+                exit(1)
+            }
+            payload["level"] = level
+        }
+        if clear { payload["clear"] = true }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "console")
+        sendWebReplyAndPrintConsole(payload, asJSON: asJSON)
+
+    case "inspect":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let sendTo = parseFlag("--send-to", from: &args)
+        let submit = popSwitch("--submit", from: &args)
+        let disarm = popSwitch("--disarm", from: &args)
+        var payload: [String: Any] = ["command": "web-inspect"]
+        if let sendTo { payload["send_to"] = sendTo }
+        if submit { payload["submit"] = true }
+        if disarm { payload["disarm"] = true }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "inspect")
+        sendWebReplyAndPrintInspect(payload)
+
+    case "inspect-result":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let clear = popSwitch("--clear", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var payload: [String: Any] = ["command": "web-inspect-result"]
+        if clear { payload["clear"] = true }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "inspect-result")
+        sendWebReplyAndPrintInspectResult(payload, asJSON: asJSON)
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
@@ -1071,6 +1123,117 @@ private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
         if let bytes = json["byte_count"] as? Int {
             print("bytes:  \(bytes)")
         }
+    }
+}
+
+private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web console: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web console: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web console: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web console: \(msg)\n", stderr)
+        exit(1)
+    }
+    let lines = (json["lines"] as? [[String: Any]]) ?? []
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    if let dropped = json["dropped"] as? Int, dropped > 0 {
+        fputs("(dropped \(dropped) lines before this batch — buffer was full)\n", stderr)
+    }
+    for line in lines {
+        let seq = (line["seq"] as? UInt64) ?? 0
+        let level = (line["level"] as? String) ?? "log"
+        let message = (line["message"] as? String) ?? ""
+        print("[\(seq)] \(level): \(message)")
+    }
+    if let next = json["next_since"] as? UInt64 {
+        fputs("(next_since=\(next))\n", stderr)
+    }
+}
+
+private func sendWebReplyAndPrintInspect(_ payload: [String: Any]) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web inspect: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web inspect: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web inspect: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web inspect: \(msg)\n", stderr)
+        exit(1)
+    }
+    let paneID = (json["pane_id"] as? String) ?? "?"
+    let armed = (json["armed"] as? Bool) ?? false
+    if !armed {
+        print("inspect disarmed: \(paneID)")
+        return
+    }
+    let sendTo = (json["send_to"] as? String) ?? ""
+    if sendTo.isEmpty {
+        print("inspect armed: \(paneID) — click an element in the web pane to capture")
+    } else {
+        let submit = (json["submit"] as? Bool) ?? false
+        print("inspect armed: \(paneID) → will paste to \(sendTo)\(submit ? " (+submit)" : "")")
+    }
+}
+
+private func sendWebReplyAndPrintInspectResult(_ payload: [String: Any], asJSON: Bool) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web inspect-result: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web inspect-result: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web inspect-result: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web inspect-result: \(msg)\n", stderr)
+        exit(1)
+    }
+    let results = (json["results"] as? [[String: Any]]) ?? []
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: results, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    if results.isEmpty {
+        print("(no pending inspect results)")
+        return
+    }
+    for result in results {
+        let selector = (result["selector"] as? String) ?? ""
+        let url = (result["url"] as? String) ?? ""
+        let tag = (result["tag"] as? String) ?? ""
+        print("\(tag)  \(selector)  (\(url))")
     }
 }
 

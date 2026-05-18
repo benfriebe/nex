@@ -117,6 +117,30 @@ enum SocketMessage: Equatable {
     /// `pane close` for that.
     case webTabClose(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
     case webTabSelect(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
+
+    // Phase 3 — console + inspector
+
+    /// Drain the console ring buffer of the resolved web pane.
+    /// `since` is the last seq the caller has already seen (0 = full
+    /// buffer). `level` filters to a single severity. `clear` empties
+    /// the buffer after the read so the next call starts fresh.
+    case webConsole(
+        paneID: UUID?, target: String?, workspace: String?,
+        since: UInt64, level: String?, clear: Bool
+    )
+    /// Arm the picker for the resolved pane's active tab. `sendTo`
+    /// is an optional pane target (label or UUID) into which the
+    /// next click's payload gets pasted. `submit` controls whether
+    /// the paste ends with an Enter keystroke (default: false).
+    /// `disarm` disarms an existing arm without picking.
+    case webInspect(
+        paneID: UUID?, target: String?, workspace: String?,
+        sendTo: String?, submit: Bool, disarm: Bool
+    )
+    /// Drain the per-pane inspect-result queue without arming.
+    case webInspectResult(
+        paneID: UUID?, target: String?, workspace: String?, clear: Bool
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -128,7 +152,8 @@ private let replyCommandAllowlist: Set<String> = [
     "graft-start", "graft-stop", "graft-status",
     "web-open", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
-    "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select"
+    "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
+    "web-console", "web-inspect", "web-inspect-result"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -553,6 +578,18 @@ final class SocketServer: Sendable {
         var tab: String?
         /// `web-tab-new --no-focus` → false.
         var makeActive: Bool?
+        /// `web-console --since`. Default 0 = full buffer.
+        var since: UInt64?
+        /// `web-console --level`. Optional severity filter.
+        var level: String?
+        /// `web-console --clear`, `web-inspect-result --clear`.
+        var clear: Bool?
+        /// `web-inspect --send-to <pane-target>`.
+        var sendTo: String?
+        /// `web-inspect --submit`. Default false (paste only).
+        var submit: Bool?
+        /// `web-inspect --disarm`.
+        var disarm: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -571,6 +608,9 @@ final class SocketServer: Sendable {
             case url, mode, hard
             case tab
             case makeActive = "make_active"
+            case since, level, clear
+            case sendTo = "send_to"
+            case submit, disarm
         }
     }
 
@@ -769,6 +809,40 @@ final class SocketServer: Sendable {
                   let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
             return (.webTabSelect(
                 paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
+            ), wire)
+        }
+
+        if wire.command == "web-console" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webConsole(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                since: wire.since ?? 0,
+                level: (wire.level?.isEmpty == true) ? nil : wire.level,
+                clear: wire.clear ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-inspect" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webInspect(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                sendTo: (wire.sendTo?.isEmpty == true) ? nil : wire.sendTo,
+                submit: wire.submit ?? false,
+                disarm: wire.disarm ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-inspect-result" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webInspectResult(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                clear: wire.clear ?? false
             ), wire)
         }
 

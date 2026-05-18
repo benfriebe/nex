@@ -44,6 +44,17 @@ struct PaneGridView: View {
     var onWebTabSelect: ((UUID, UUID) -> Void)?
     var onWebTabClose: ((UUID, UUID) -> Void)?
     var onWebTabNew: ((UUID) -> Void)?
+    /// UI element-pickup arm. `paneID` is the source web pane;
+    /// `sendTo` is the destination pane (nil = queue locally).
+    var onWebArmInspectorPickup: ((UUID, UUID?) -> Void)?
+    var onWebDisarmInspectorPickup: ((UUID) -> Void)?
+    /// Begin a batch-annotate session on the source web pane.
+    var onWebStartBatchInspect: ((UUID, UUID?) -> Void)?
+    var onWebBatchItemCommentChanged: ((UUID, UUID, String) -> Void)?
+    var onWebBatchItemRemoved: ((UUID, UUID) -> Void)?
+    var onWebBatchRowTapped: ((UUID, UUID) -> Void)?
+    var onWebBatchSend: ((UUID) -> Void)?
+    var onWebBatchCancel: ((UUID) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -236,7 +247,28 @@ struct PaneGridView: View {
                     onReload: { onWebReload?(pane.id) },
                     onTabSelect: { tabID in onWebTabSelect?(pane.id, tabID) },
                     onTabClose: { tabID in onWebTabClose?(pane.id, tabID) },
-                    onTabNew: { onWebTabNew?(pane.id) }
+                    onTabNew: { onWebTabNew?(pane.id) },
+                    availableInspectTargets: inspectTargets(excluding: pane.id),
+                    inspectorArmed: webPanes[pane.id]?.inspectorArmed ?? false,
+                    onArmInspectorPickup: { sendTo in
+                        onWebArmInspectorPickup?(pane.id, sendTo)
+                    },
+                    onDisarmInspectorPickup: { onWebDisarmInspectorPickup?(pane.id) },
+                    batchInspect: webPanes[pane.id]?.batchInspect,
+                    onStartBatchInspect: { sendTo in
+                        onWebStartBatchInspect?(pane.id, sendTo)
+                    },
+                    onBatchItemCommentChanged: { itemID, comment in
+                        onWebBatchItemCommentChanged?(pane.id, itemID, comment)
+                    },
+                    onBatchItemRemoved: { itemID in
+                        onWebBatchItemRemoved?(pane.id, itemID)
+                    },
+                    onBatchRowTapped: { itemID in
+                        onWebBatchRowTapped?(pane.id, itemID)
+                    },
+                    onBatchSend: { onWebBatchSend?(pane.id) },
+                    onBatchCancel: { onWebBatchCancel?(pane.id) }
                 )
             }
         }
@@ -336,6 +368,32 @@ struct PaneGridView: View {
             .frame(width: overlayRect.width, height: overlayRect.height)
             .offset(x: overlayRect.origin.x, y: overlayRect.origin.y)
             .allowsHitTesting(false)
+    }
+
+    /// Build the dropdown entries for the web pane's inspect-pickup
+    /// button: every other shell pane in the same workspace,
+    /// labelled by its tag (or working-directory tail when no tag is
+    /// set). The source web pane is excluded so users don't
+    /// accidentally pipe the payload back into the page they're
+    /// inspecting, and non-shell panes (markdown / scratchpad / diff
+    /// / web) are filtered out because they have no terminal surface
+    /// for `paneSendText` to write to.
+    private func inspectTargets(excluding sourcePaneID: UUID) -> [InspectTargetOption] {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        return panes.compactMap { pane -> InspectTargetOption? in
+            guard pane.id != sourcePaneID else { return nil }
+            guard pane.type == .shell else { return nil }
+            let label: String = {
+                if let tag = pane.label, !tag.isEmpty { return tag }
+                var cwd = pane.workingDirectory
+                if !home.isEmpty, cwd.hasPrefix(home) {
+                    cwd = "~" + cwd.dropFirst(home.count)
+                }
+                let lastComponent = (cwd as NSString).lastPathComponent
+                return "shell: \(lastComponent)"
+            }()
+            return InspectTargetOption(id: pane.id, label: label)
+        }
     }
 
     private func postMarkdownCopy(_ paneID: UUID, kind: MarkdownCopyKind) {

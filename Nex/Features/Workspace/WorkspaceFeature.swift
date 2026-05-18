@@ -247,6 +247,50 @@ struct WorkspaceFeature {
         /// Cycle by signed offset. `+1` next, `-1` prev. Wraps around.
         case webPaneTabCycle(paneID: UUID, offset: Int)
         case webPaneTabReorder(paneID: UUID, orderedTabIDs: [UUID])
+        /// Append a captured console line to the pane's ring buffer.
+        /// Dispatched from `ContentView` when the coordinator posts a
+        /// `consoleLineNotification`.
+        case webConsoleLineReceived(paneID: UUID, line: ConsoleLine)
+        /// Drop everything from the pane's console buffer (the
+        /// `--clear` flag on `nex web console`). `seq` keeps counting.
+        case webConsoleClear(paneID: UUID)
+        /// Reset the pane's `droppedSinceLastDrain` counter to 0.
+        /// Dispatched by `handleWebConsole` right after the reply
+        /// goes out — without this, every subsequent
+        /// `nex web console` call would re-report the same stale
+        /// drop count.
+        case webConsoleAcknowledgeDrops(paneID: UUID)
+        /// Arm the picker for `paneID`, recording the destination
+        /// pane id (if `--send-to` was supplied) plus the nonce the
+        /// coordinator handed back. The coordinator has already
+        /// asked the in-page JS to listen; this action just records
+        /// the bookkeeping side so a delivered inspect-result can be
+        /// routed.
+        case webInspectArmedFor(paneID: UUID, sendTo: UUID?, nonce: String)
+        /// Symmetric tear-down. Called when the coordinator reports a
+        /// delivered click (auto-disarm) or when an explicit disarm
+        /// is dispatched (tab close, target gone).
+        case webInspectDisarm(paneID: UUID)
+        /// A picker-captured payload arrived. Pushed onto the per-
+        /// pane queue so `nex web inspect-result` can drain it.
+        case webInspectResultReceived(paneID: UUID, result: InspectResult)
+        /// Drop everything from the pane's inspect-result queue.
+        case webInspectResultClear(paneID: UUID)
+        /// Begin a batch-annotate session. Records the destination
+        /// pane on `WebPaneState.batchInspect`; the AppReducer is
+        /// responsible for arming the picker with `sticky: true`.
+        case webBatchInspectBegin(paneID: UUID, sendTo: UUID?)
+        case webBatchItemAdded(paneID: UUID, item: BatchInspectItem)
+        case webBatchItemCommentChanged(paneID: UUID, itemID: UUID, comment: String)
+        case webBatchItemRemoved(paneID: UUID, itemID: UUID)
+        /// Tear down the batch session without sending. The
+        /// AppReducer also disarms the sticky picker.
+        case webBatchInspectCleared(paneID: UUID)
+        /// Focus an item in the active batch — used by both the
+        /// list-row tap (which then highlights on page) and the
+        /// page-side marker click (which then highlights the row).
+        /// Pass nil to clear the focus highlight.
+        case webBatchItemFocused(paneID: UUID, itemID: UUID?)
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -656,9 +700,11 @@ struct WorkspaceFeature {
                 guard var webState = state.webPanes[paneID] else { return .none }
                 guard let idx = webState.index(of: tabID) else { return .none }
                 // Only overwrite the URL when the coordinator reports
-                // something non-empty (about:blank arrives as "" early
-                // in load and would otherwise wipe the persisted URL).
-                let newURL = url.isEmpty ? webState.tabs[idx].url : url
+                // something meaningful. about:blank shows up early in
+                // a load and again on WKWebView's revert after a
+                // failed navigation; both would wipe the URL bar.
+                let isPlaceholder = url.isEmpty || url == "about:blank"
+                let newURL = isPlaceholder ? webState.tabs[idx].url : url
                 guard webState.tabs[idx].url != newURL || webState.tabs[idx].title != title else {
                     return .none
                 }
@@ -749,6 +795,103 @@ struct WorkspaceFeature {
                 guard Set(orderedTabIDs) == Set(currentOrder),
                       orderedTabIDs.count == webState.tabs.count else { return .none }
                 webState.tabs = orderedTabIDs.compactMap { id in webState.tabs.first(where: { $0.id == id }) }
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webConsoleLineReceived(let paneID, let line):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.consoleBuffer.append(line)
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webConsoleClear(let paneID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.consoleBuffer.clear()
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webConsoleAcknowledgeDrops(let paneID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                _ = webState.consoleBuffer.acknowledgeDrops()
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webInspectArmedFor(let paneID, let sendTo, let nonce):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.inspectorArmed = true
+                webState.pendingInspectSendTo = sendTo
+                webState.pendingInspectNonce = nonce
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webInspectDisarm(let paneID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.inspectorArmed = false
+                webState.pendingInspectSendTo = nil
+                webState.pendingInspectNonce = nil
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webInspectResultReceived(let paneID, let result):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.inspectResultQueue.append(result)
+                // Cap the queue. 32 entries is generous for the
+                // interactive workflow — agents that don't drain
+                // quickly should use `--clear` on `nex web inspect-result`.
+                if webState.inspectResultQueue.count > 32 {
+                    webState.inspectResultQueue.removeFirst(
+                        webState.inspectResultQueue.count - 32
+                    )
+                }
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webInspectResultClear(let paneID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.inspectResultQueue.removeAll()
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchInspectBegin(let paneID, let sendTo):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.batchInspect = BatchInspectState(sendTo: sendTo, items: [])
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchItemAdded(let paneID, let item):
+                guard var webState = state.webPanes[paneID],
+                      webState.batchInspect != nil else { return .none }
+                webState.batchInspect?.items.append(item)
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchItemCommentChanged(let paneID, let itemID, let comment):
+                guard var webState = state.webPanes[paneID],
+                      var batch = webState.batchInspect,
+                      let idx = batch.items.firstIndex(where: { $0.id == itemID })
+                else { return .none }
+                batch.items[idx].comment = comment
+                webState.batchInspect = batch
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchItemRemoved(let paneID, let itemID):
+                guard var webState = state.webPanes[paneID],
+                      webState.batchInspect != nil else { return .none }
+                webState.batchInspect?.items.removeAll { $0.id == itemID }
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchInspectCleared(let paneID):
+                guard var webState = state.webPanes[paneID] else { return .none }
+                webState.batchInspect = nil
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchItemFocused(let paneID, let itemID):
+                guard var webState = state.webPanes[paneID],
+                      webState.batchInspect != nil else { return .none }
+                webState.batchInspect?.focusedItemID = itemID
                 state.webPanes[paneID] = webState
                 return .none
 

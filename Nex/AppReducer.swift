@@ -41,6 +41,12 @@ struct AppReducer {
         /// a focused web pane; `WebPaneView` picks up the change and
         /// promotes its URL bar to first responder.
         var webPaneURLFocusTokens: [UUID: UInt64] = [:]
+        /// Phase 3: per-pane "submit after paste" flag set at arm
+        /// time by `nex web inspect --submit`. Kept on AppReducer
+        /// (rather than WebPaneState) because it's purely a hint to
+        /// the in-flight `paneSendText` call after the next click —
+        /// not state worth surfacing to the view layer or persisting.
+        var webInspectArmedSubmit: [UUID: Bool] = [:]
 
         /// Collision between the current global hotkey and an in-app
         /// keybinding. Computed so it always reflects the latest state —
@@ -432,6 +438,54 @@ struct AppReducer {
         /// through to the workspace's closePane when only one tab
         /// remains.
         case webPaneTabCloseActiveFocused
+        /// Sanitised inspect payload from the picker. Dispatched by
+        /// `ContentView` (after running the raw dictionary through
+        /// `InspectPayloadSanitiser.decode`). The reducer queues the
+        /// result on the pane and, if a pending `--send-to` is set,
+        /// pastes the formatted text into the destination pane via
+        /// `paneSendText`.
+        case webInspectPayloadReceived(paneID: UUID, result: InspectResult)
+        /// Stash whether the current inspect arm should submit (press
+        /// Enter) after the delivered paste. Cleared after every
+        /// delivery. Phase 3 ships paste-only by default.
+        case setWebInspectArmedSubmit(paneID: UUID, submit: Bool)
+        /// UI-driven equivalent of `nex web inspect --send-to <pane>`.
+        /// Asks the coordinator to arm the picker on the named pane's
+        /// active tab and stash the destination so the next click's
+        /// payload is sanitised + pasted via `paneSendText`. `sendTo`
+        /// nil = just arm, drop the result into the inspect queue for
+        /// later draining by the CLI.
+        case webPaneArmInspectorViaUI(paneID: UUID, sendTo: UUID?)
+        /// Symmetric disarm for the UI flow.
+        case webPaneDisarmInspectorViaUI(paneID: UUID)
+        /// Begin a batch-annotate session for `paneID`. Arms the
+        /// picker in sticky mode so each click adds another item;
+        /// the user finalises via `webBatchInspectSend` or aborts
+        /// via `webBatchInspectCancel`.
+        case webBatchInspectStart(paneID: UUID, sendTo: UUID?)
+        /// Format all collected items and paste them into the
+        /// destination pane (or queue locally when sendTo is nil),
+        /// then disarm the picker and clear batch state.
+        case webBatchInspectSend(paneID: UUID)
+        case webBatchInspectCancel(paneID: UUID)
+        /// Focus a batch item from either side of the list↔page sync.
+        /// `origin == .panel` came from a panel-row tap → highlight
+        /// the badge on the page. `origin == .page` came from a
+        /// page-marker click → highlight the row in the panel only
+        /// (no need to scroll the page again).
+        case webBatchFocusItem(paneID: UUID, itemID: UUID, origin: BatchFocusOrigin)
+        /// Push the current batch's marker list to the page after a
+        /// state change. Internal — fired from reducers that mutate
+        /// the items / batch state.
+        case syncBatchMarkers(paneID: UUID)
+        /// Push a single comment edit from the panel side into the
+        /// page popover. The JS skips the update if its textarea is
+        /// currently focused so the user's caret stays put.
+        case pushBatchCommentToPage(paneID: UUID, itemID: UUID, comment: String)
+        /// User clicked Done (or pressed Esc) in the page popover.
+        /// Clears the focused-item highlight (panel side) and hides
+        /// the popover + focus ring (page side).
+        case webBatchDismissPopover(paneID: UUID)
 
         // Inspector + Git Status
         case toggleInspector
@@ -1103,15 +1157,24 @@ struct AppReducer {
         reply?.send(payload)
         reply?.close()
 
+        return paneSendText(paneID: resolvedID, text: text, bare: bare)
+    }
+
+    /// Write `text` to a pane's PTY. `bare: true` writes the bytes
+    /// verbatim; `bare: false` follows up with an Enter keystroke so
+    /// the receiver runs it as a command. Factored out of
+    /// `handlePaneSend` so the Phase 3 element picker can reuse the
+    /// same PTY-write path without going through `sendCommand`
+    /// directly. The picker defaults to `bare: true` (paste-only,
+    /// the safe default) and only flips to `bare: false` when the
+    /// arming call passed `--submit`.
+    func paneSendText(paneID: UUID, text: String, bare: Bool) -> Effect<Action> {
         let mgr = surfaceManager
         return .run { _ in
             if bare {
-                // Compose-mode: write text only, no Enter. Caller is
-                // expected to follow up with `pane send-key` to drive
-                // the input (autocomplete, multi-key sequences, ...).
-                await mgr.sendText(to: resolvedID, text: text)
+                await mgr.sendText(to: paneID, text: text)
             } else {
-                await mgr.sendCommand(to: resolvedID, command: text)
+                await mgr.sendCommand(to: paneID, command: text)
             }
         }
     }
@@ -1435,24 +1498,20 @@ struct AppReducer {
         switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
         case .found(let resolvedID, let ws):
             guard let pane = ws.panes[id: resolvedID] else {
-                reply?.send(["ok": false, "error": "pane not found: \(resolvedID.uuidString)"])
-                reply?.close()
+                reply?.error("pane not found: \(resolvedID.uuidString)")
                 return nil
             }
             guard pane.type == .web else {
-                reply?.send(["ok": false, "error": "pane is not a web pane (type: \(pane.type.rawValue))"])
-                reply?.close()
+                reply?.error("pane is not a web pane (type: \(pane.type.rawValue))")
                 return nil
             }
             guard let webState = ws.webPanes[resolvedID] else {
-                reply?.send(["ok": false, "error": "web pane state missing for \(resolvedID.uuidString)"])
-                reply?.close()
+                reply?.error("web pane state missing for \(resolvedID.uuidString)")
                 return nil
             }
             return (resolvedID, ws, webState)
         case .error(let message):
-            reply?.send(["ok": false, "error": message])
-            reply?.close()
+            reply?.error(message)
             return nil
         }
     }
@@ -1488,14 +1547,13 @@ struct AppReducer {
             }
             let url = snapshot?.url.isEmpty == false ? snapshot!.url : fallbackURL
             let title = snapshot?.title.isEmpty == false ? snapshot!.title : fallbackTitle
-            reply?.send([
+            reply?.sendAndClose([
                 "ok": true,
                 "pane_id": resolvedPaneID.uuidString,
                 "workspace_id": workspaceID.uuidString,
                 "url": url,
                 "title": title
             ])
-            reply?.close()
         }
     }
 
@@ -1512,12 +1570,11 @@ struct AppReducer {
             workspaceFilter: workspaceFilter, reply: reply
         ) else { return .none }
 
-        reply?.send([
+        reply?.sendAndClose([
             "ok": true,
             "pane_id": resolved.paneID.uuidString,
             "workspace_id": resolved.workspace.id.uuidString
         ])
-        reply?.close()
 
         let wsID = resolved.workspace.id
         let paneID = resolved.paneID
@@ -1546,14 +1603,12 @@ struct AppReducer {
             workspaceFilter: workspaceFilter, reply: reply
         ) else { return .none }
         guard let tab = resolved.webState.activeTab else {
-            reply?.send(["ok": false, "error": "web pane has no active tab"])
-            reply?.close()
+            reply?.error("web pane has no active tab")
             return .none
         }
 
         guard let captureMode = WebCaptureMode(rawValue: mode) else {
-            reply?.send(["ok": false, "error": "unknown capture mode '\(mode)' (allowed: meta, text, screenshot)"])
-            reply?.close()
+            reply?.error("unknown capture mode '\(mode)' (allowed: meta, text, screenshot)")
             return .none
         }
 
@@ -1614,8 +1669,7 @@ struct AppReducer {
                     payload["error"] = "screenshot capture failed"
                 }
             }
-            reply?.send(payload)
-            reply?.close()
+            reply?.sendAndClose(payload)
         }
     }
 
@@ -1777,6 +1831,236 @@ struct AppReducer {
                 action: .webPaneTabSelect(paneID: resolved.paneID, tabID: tabID)
             )))
         }
+    }
+
+    // MARK: - Web pane console + inspector handlers (Phase 3)
+
+    private func consoleLineJSON(_ entry: RingBuffer<ConsoleLine>.Entry) -> [String: Any] {
+        let line = entry.value
+        var dict: [String: Any] = [
+            "seq": entry.seq,
+            "tab_id": line.tabID.uuidString,
+            "level": line.level.rawValue,
+            "message": line.message,
+            "url": line.url,
+            "captured_at": InspectPayloadSanitiser.isoFormatter.string(from: line.capturedAt)
+        ]
+        if let n = line.lineNumber { dict["line"] = n }
+        if let n = line.columnNumber { dict["column"] = n }
+        return dict
+    }
+
+    private func inspectResultJSON(_ result: InspectResult) -> [String: Any] {
+        var dict: [String: Any] = [
+            "tab_id": result.tabID.uuidString,
+            "selector": result.selector,
+            "xpath": result.xpath,
+            "tag": result.tag,
+            "id": result.elementID,
+            "url": result.url,
+            "text": result.text,
+            "attributes": result.attributes,
+            "rect": [
+                "x": result.rect.origin.x,
+                "y": result.rect.origin.y,
+                "w": result.rect.size.width,
+                "h": result.rect.size.height
+            ],
+            "captured_at": InspectPayloadSanitiser.isoFormatter.string(from: result.capturedAt)
+        ]
+        if !result.outerHTML.isEmpty { dict["outer_html"] = result.outerHTML }
+        if !result.contextHTML.isEmpty { dict["context_html"] = result.contextHTML }
+        if !result.comment.isEmpty { dict["comment"] = result.comment }
+        return dict
+    }
+
+    func handleWebConsole(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        since: UInt64,
+        level: String?,
+        clear: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let entries = resolved.webState.consoleBuffer.entries(since: since)
+        let filtered: [RingBuffer<ConsoleLine>.Entry] = if let level {
+            entries.filter { $0.value.level.rawValue == level }
+        } else {
+            entries
+        }
+        let nextSeq = resolved.webState.consoleBuffer.nextSeq
+        let dropped = resolved.webState.consoleBuffer.droppedSinceLastDrain
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "lines": filtered.map(consoleLineJSON),
+            "next_since": nextSeq,
+            "dropped": dropped
+        ])
+        // Acknowledge the reported drops so the next call only
+        // surfaces drops that accumulated after this drain. Always
+        // dispatched, even when `dropped == 0`, so the reducer
+        // doesn't have to branch on it.
+        var effects: [Effect<Action>] = [
+            .send(.workspaces(.element(
+                id: resolved.workspace.id,
+                action: .webConsoleAcknowledgeDrops(paneID: resolved.paneID)
+            )))
+        ]
+        if clear {
+            effects.append(.send(.workspaces(.element(
+                id: resolved.workspace.id,
+                action: .webConsoleClear(paneID: resolved.paneID)
+            ))))
+        }
+        return .merge(effects)
+    }
+
+    func handleWebInspect(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        sendTo: String?,
+        submit: Bool,
+        disarm: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+
+        // Explicit disarm path: no arming, just clear server-side
+        // state and the in-page picker.
+        if disarm {
+            reply?.sendAndClose([
+                "ok": true,
+                "pane_id": resolved.paneID.uuidString,
+                "armed": false
+            ])
+            let resolvedPaneID = resolved.paneID
+            let store = webPaneStore
+            return .merge(
+                .send(.workspaces(.element(
+                    id: resolved.workspace.id,
+                    action: .webInspectDisarm(paneID: resolvedPaneID)
+                ))),
+                .run { _ in
+                    await MainActor.run {
+                        store.coordinatorIfExists(for: resolvedPaneID)?.disarmInspector()
+                    }
+                }
+            )
+        }
+
+        guard let tab = resolved.webState.activeTab else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+
+        // Resolve `--send-to` to a concrete pane UUID up front so we
+        // can report a clear error before arming. Only `.shell` panes
+        // have a terminal surface that `paneSendText` can write to —
+        // markdown / scratchpad / diff / web destinations would
+        // silently no-op inside `SurfaceManager.sendText`, so reject
+        // them here with a typed error instead.
+        let sendToPaneID: UUID?
+        if let sendTo {
+            switch resolvePaneTarget(
+                state: state, paneID: paneID, target: sendTo,
+                workspaceFilter: workspaceFilter
+            ) {
+            case .found(let resolvedID, let workspace):
+                guard let destPane = workspace.panes[id: resolvedID] else {
+                    reply?.error("--send-to: pane not found: \(resolvedID.uuidString)")
+                    return .none
+                }
+                guard destPane.type == .shell else {
+                    reply?.error(
+                        "--send-to: destination must be a shell pane (got: \(destPane.type.rawValue))"
+                    )
+                    return .none
+                }
+                sendToPaneID = resolvedID
+            case .error(let message):
+                reply?.error("--send-to: \(message)")
+                return .none
+            }
+        } else {
+            sendToPaneID = nil
+        }
+
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let store = webPaneStore
+        let tabID = tab.id
+
+        return .run { send in
+            // Arm the in-page picker on the main actor and read back
+            // the nonce. Hop to MainActor.run synchronously so we
+            // can return the nonce before the reply lands.
+            let nonce: String? = await MainActor.run {
+                store.coordinator(for: resolvedPaneID).armInspector(tabID: tabID)
+            }
+            guard let nonce else {
+                reply?.error("failed to arm inspector for active tab")
+                return
+            }
+            await send(.workspaces(.element(
+                id: workspaceID,
+                action: .webInspectArmedFor(
+                    paneID: resolvedPaneID,
+                    sendTo: sendToPaneID,
+                    nonce: nonce
+                )
+            )))
+            if submit {
+                await send(.setWebInspectArmedSubmit(paneID: resolvedPaneID, submit: true))
+            }
+            reply?.sendAndClose([
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "tab_id": tabID.uuidString,
+                "armed": true,
+                "send_to": sendToPaneID?.uuidString ?? "",
+                "submit": submit
+            ])
+        }
+    }
+
+    func handleWebInspectResult(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        clear: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "results": resolved.webState.inspectResultQueue.map(inspectResultJSON)
+        ])
+        if clear {
+            return .send(.workspaces(.element(
+                id: resolved.workspace.id,
+                action: .webInspectResultClear(paneID: resolved.paneID)
+            )))
+        }
+        return .none
     }
 
     /// Returns the last `n` lines of `text`, joined by `\n`. Preserves
@@ -3136,9 +3420,7 @@ struct AppReducer {
                 return .none
 
             case .webPaneOpenNewTab(let paneID, let url):
-                guard let workspace = state.workspaces.first(where: { $0.webPanes[paneID] != nil }) else {
-                    return .none
-                }
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 let newTabID = uuid()
                 return .send(.workspaces(.element(
                     id: workspace.id,
@@ -3171,6 +3453,288 @@ struct AppReducer {
                     id: activeID,
                     action: .webPaneTabClose(paneID: focusedID, tabID: activeTabID)
                 )))
+
+            case .setWebInspectArmedSubmit(let paneID, let submit):
+                if submit {
+                    state.webInspectArmedSubmit[paneID] = true
+                } else {
+                    state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                }
+                return .none
+
+            case .webPaneArmInspectorViaUI(let paneID, let sendTo):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                let tabID = tab.id
+                return .run { send in
+                    let nonce: String? = await MainActor.run {
+                        store.coordinator(for: paneID).armInspector(tabID: tabID)
+                    }
+                    guard let nonce else { return }
+                    await send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webInspectArmedFor(
+                            paneID: paneID, sendTo: sendTo, nonce: nonce
+                        )
+                    )))
+                }
+
+            case .webPaneDisarmInspectorViaUI(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webInspectDisarm(paneID: paneID)
+                    ))),
+                    .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.disarmInspector()
+                        }
+                    }
+                )
+
+            case .webBatchInspectStart(let paneID, let sendTo):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                let tabID = tab.id
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webBatchInspectBegin(paneID: paneID, sendTo: sendTo)
+                    ))),
+                    .send(.syncBatchMarkers(paneID: paneID)),
+                    .run { send in
+                        let nonce: String? = await MainActor.run {
+                            store.coordinator(for: paneID).armInspector(tabID: tabID, sticky: true)
+                        }
+                        guard let nonce else { return }
+                        await send(.workspaces(.element(
+                            id: workspaceID,
+                            action: .webInspectArmedFor(
+                                paneID: paneID, sendTo: sendTo, nonce: nonce
+                            )
+                        )))
+                    }
+                )
+
+            case .webBatchInspectCancel(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webBatchInspectCleared(paneID: paneID)
+                    ))),
+                    .send(.syncBatchMarkers(paneID: paneID)),
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webInspectDisarm(paneID: paneID)
+                    ))),
+                    .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.disarmInspector()
+                        }
+                    }
+                )
+
+            case .webBatchInspectSend(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                guard let batch = workspace.webPanes[paneID]?.batchInspect else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                let submit = state.webInspectArmedSubmit[paneID] ?? false
+                state.webInspectArmedSubmit.removeValue(forKey: paneID)
+
+                var effects: [Effect<Action>] = [
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webBatchInspectCleared(paneID: paneID)
+                    ))),
+                    .send(.syncBatchMarkers(paneID: paneID)),
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webInspectDisarm(paneID: paneID)
+                    ))),
+                    .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.disarmInspector()
+                        }
+                    }
+                ]
+                // Empty batch — nothing to send, just tear down.
+                if batch.items.isEmpty {
+                    return .merge(effects)
+                }
+                if let sendTo = batch.sendTo {
+                    let formatted = InspectPayloadSanitiser.formatBatchForPaste(batch.items)
+                    effects.append(paneSendText(paneID: sendTo, text: formatted, bare: !submit))
+                } else {
+                    // No destination — queue each item locally for
+                    // `nex web inspect-result` to drain. Stamp the
+                    // per-item comment onto the result before
+                    // enqueueing so `inspectResultJSON` surfaces it
+                    // (the single-shot picker path always leaves
+                    // `comment` empty).
+                    for item in batch.items {
+                        var annotated = item.result
+                        annotated.comment = item.comment
+                        effects.append(.send(.workspaces(.element(
+                            id: workspaceID,
+                            action: .webInspectResultReceived(
+                                paneID: paneID, result: annotated
+                            )
+                        ))))
+                    }
+                }
+                return .merge(effects)
+
+            case .webBatchFocusItem(let paneID, let itemID, let origin):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                guard let webState = workspace.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let store = webPaneStore
+                let tabID = tab.id
+                // Push the focus ring + badge pulse onto the page
+                // regardless of origin — the persistent ring is the
+                // primary visual feedback, and re-pulsing the badge
+                // is cheap. `.panel` also scrolls the page; `.page`
+                // skips the scroll since the element is already under
+                // the cursor.
+                let scrollIntoView = origin == .panel
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .webBatchItemFocused(paneID: paneID, itemID: itemID)
+                    ))),
+                    .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?
+                                .highlightBatchMarker(
+                                    tabID: tabID,
+                                    itemID: itemID,
+                                    scrollIntoView: scrollIntoView
+                                )
+                        }
+                    }
+                )
+
+            case .syncBatchMarkers(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let webState = workspace.webPanes[paneID]
+                let tabID = webState?.activeTab?.id
+                let items: [BatchMarkerInput] = (webState?.batchInspect?.items ?? [])
+                    .enumerated()
+                    .map { idx, item in
+                        BatchMarkerInput(
+                            id: item.id,
+                            selector: item.result.selector,
+                            label: String(idx + 1),
+                            comment: item.comment
+                        )
+                    }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        guard let coordinator = store.coordinatorIfExists(for: paneID),
+                              let tabID else { return }
+                        if items.isEmpty {
+                            coordinator.clearBatchMarkers(tabID: tabID)
+                        } else {
+                            coordinator.syncBatchMarkers(tabID: tabID, items: items)
+                        }
+                    }
+                }
+
+            case .pushBatchCommentToPage(let paneID, let itemID, let comment):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                guard let tabID = workspace.webPanes[paneID]?.activeTab?.id else { return .none }
+                let store = webPaneStore
+                return .run { _ in
+                    await MainActor.run {
+                        store.coordinatorIfExists(for: paneID)?
+                            .pushBatchComment(tabID: tabID, itemID: itemID, comment: comment)
+                    }
+                }
+
+            case .webBatchDismissPopover(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let tabID = workspace.webPanes[paneID]?.activeTab?.id
+                let store = webPaneStore
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .webBatchItemFocused(paneID: paneID, itemID: nil)
+                    ))),
+                    .run { _ in
+                        await MainActor.run {
+                            guard let tabID else { return }
+                            store.coordinatorIfExists(for: paneID)?.unfocusBatch(tabID: tabID)
+                        }
+                    }
+                )
+
+            case .webInspectPayloadReceived(let paneID, let result):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let webState = workspace.webPanes[paneID]
+
+                // Batch mode: append to the in-progress batch and
+                // leave the picker armed (sticky) for the next pick.
+                // No paste happens until the user hits Send. Also
+                // refresh the on-page numbered markers so the new
+                // pick gets a badge, then focus the new item so the
+                // page draws its ring and the panel auto-focuses the
+                // comment field.
+                if webState?.batchInspect != nil {
+                    let item = BatchInspectItem(result: result)
+                    return .merge(
+                        .send(.workspaces(.element(
+                            id: workspace.id,
+                            action: .webBatchItemAdded(paneID: paneID, item: item)
+                        ))),
+                        .send(.syncBatchMarkers(paneID: paneID)),
+                        // Origin .page — the click was on the page,
+                        // so we don't re-scroll the element into view
+                        // (it's already where the user clicked).
+                        .send(.webBatchFocusItem(
+                            paneID: paneID, itemID: item.id, origin: .page
+                        ))
+                    )
+                }
+
+                // Single-shot mode: queue on source pane (so
+                // `nex web inspect-result` can drain it later), and
+                // if this arm was set up with `--send-to`, paste the
+                // formatted block into the destination via the
+                // factored paneSendText helper. Submit-after-paste
+                // is recorded out-of-band in `webInspectArmedSubmit`
+                // (Phase 3 ships paste-only as the safe default).
+                let sendTo = webState?.pendingInspectSendTo
+                let submit = state.webInspectArmedSubmit[paneID] ?? false
+                var effects: [Effect<Action>] = [
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .webInspectResultReceived(paneID: paneID, result: result)
+                    ))),
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .webInspectDisarm(paneID: paneID)
+                    )))
+                ]
+                state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                if let sendTo {
+                    let formatted = InspectPayloadSanitiser.formatForPaste(result)
+                    effects.append(paneSendText(paneID: sendTo, text: formatted, bare: !submit))
+                }
+                return .merge(effects)
 
             case .openDiffPath(let repoPath, let targetPath, let fromPaneID):
                 guard let activeID = state.activeWorkspaceID else { return .none }
@@ -3718,6 +4282,40 @@ struct AppReducer {
                         target: target,
                         workspaceFilter: workspaceFilter,
                         tabRef: tabRef,
+                        reply: reply
+                    )
+
+                case .webConsole(let paneID, let target, let workspaceFilter, let since, let level, let clear):
+                    return handleWebConsole(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        since: since,
+                        level: level,
+                        clear: clear,
+                        reply: reply
+                    )
+
+                case .webInspect(let paneID, let target, let workspaceFilter, let sendTo, let submit, let disarm):
+                    return handleWebInspect(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        sendTo: sendTo,
+                        submit: submit,
+                        disarm: disarm,
+                        reply: reply
+                    )
+
+                case .webInspectResult(let paneID, let target, let workspaceFilter, let clear):
+                    return handleWebInspectResult(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        clear: clear,
                         reply: reply
                     )
                 }

@@ -22,6 +22,21 @@ struct WebPaneChrome: View {
     let onTabSelect: (UUID) -> Void
     let onTabClose: (UUID) -> Void
     let onTabNew: () -> Void
+    /// Other panes in the same workspace, available as inspect-pickup
+    /// targets. Empty array hides the menu items (button still
+    /// dispatches a "no-target arm" so the click result lands in the
+    /// inspect queue for later draining).
+    var availableInspectTargets: [InspectTargetOption] = []
+    /// True while the picker is armed for this pane.
+    var inspectorArmed: Bool = false
+    /// Arm the picker; `sendTo` nil means queue-only.
+    var onArmInspectorPickup: ((UUID?) -> Void)?
+    /// Cancel an active arm without picking.
+    var onDisarmInspectorPickup: (() -> Void)?
+    /// True while a batch-annotate session is in progress.
+    var batchInspectActive: Bool = false
+    /// Begin a batch-annotate session for the resolved destination.
+    var onStartBatchInspect: ((UUID?) -> Void)?
 
     /// Set non-nil to programmatically promote the URL bar to first
     /// responder (consumed by the priority key layer for ⌘L).
@@ -92,6 +107,8 @@ struct WebPaneChrome: View {
             .opacity(0.8)
             .help("New tab (⌘T)")
 
+            inspectPickupControl
+
             Button(action: onInspect) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 11, weight: .medium))
@@ -104,6 +121,74 @@ struct WebPaneChrome: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
+    }
+
+    /// Element-pickup control. When unarmed, click opens a menu of
+    /// target panes to send the next click's payload to. When armed,
+    /// click cancels. Mirrors `nex web inspect --send-to <pane>` for
+    /// users who'd rather drive it from the UI.
+    @ViewBuilder
+    private var inspectPickupControl: some View {
+        if inspectorArmed {
+            Button(action: { onDisarmInspectorPickup?() }) {
+                Image(systemName: batchInspectActive ? "scope" : "scope")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+                    .foregroundStyle(Color.accentColor)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.accentColor.opacity(0.18))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(batchInspectActive
+                ? "Cancel batch annotate (Esc in page)"
+                : "Cancel inspect pickup (Esc in page)")
+        } else {
+            Menu {
+                if availableInspectTargets.isEmpty {
+                    Button("Queue locally (no target)") {
+                        onArmInspectorPickup?(nil)
+                    }
+                    Button("Batch annotate (queue locally)") {
+                        onStartBatchInspect?(nil)
+                    }
+                } else {
+                    Section("Send next click to…") {
+                        ForEach(availableInspectTargets) { target in
+                            Button(target.label) {
+                                onArmInspectorPickup?(target.id)
+                            }
+                        }
+                    }
+                    Section("Batch annotate, send to…") {
+                        ForEach(availableInspectTargets) { target in
+                            Button(target.label) {
+                                onStartBatchInspect?(target.id)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Queue locally (no target)") {
+                        onArmInspectorPickup?(nil)
+                    }
+                    Button("Batch annotate (queue locally)") {
+                        onStartBatchInspect?(nil)
+                    }
+                }
+            } label: {
+                Image(systemName: "scope")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22, height: 22)
+            .opacity(0.8)
+            .help("Pick an element & send to another pane")
+        }
     }
 
     private var tabStrip: some View {
@@ -122,6 +207,13 @@ struct WebPaneChrome: View {
             .padding(.bottom, 4)
         }
     }
+}
+
+/// One row in the inspect-pickup menu. `id` is the target pane's
+/// UUID; `label` is what the user sees.
+struct InspectTargetOption: Identifiable, Equatable {
+    let id: UUID
+    let label: String
 }
 
 /// A single tab pill in the strip. Shows the tab's title (or host as

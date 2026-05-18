@@ -5,6 +5,8 @@ DerivedData/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 xcuserdata/
+# xcodegen regenerates schemes from project.yml
+*.xcodeproj/xcshareddata/
 
 # macOS
 .DS_Store
