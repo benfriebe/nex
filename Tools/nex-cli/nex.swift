@@ -200,12 +200,24 @@ func sendJSONAny(_ payload: [String: Any]) {
 /// callers must treat that differently from "empty reply" (which is
 /// data.isEmpty but non-nil, signalling an older server that silently
 /// dropped the request).
-func sendJSONAndReadReply(_ payload: [String: Any]) -> Data? {
+///
+/// `readTimeoutOverride` extends the socket read timeout for commands
+/// that legitimately block server-side longer than `replyTimeoutSeconds`
+/// (currently just `web wait`, where the JS polls up to `--timeout`).
+func sendJSONAndReadReply(
+    _ payload: [String: Any], readTimeoutOverride: Int? = nil
+) -> Data? {
     switch transport {
     case .unix(let path):
-        sendViaUnix(path: path, payload: payload, expectsReply: true)
+        sendViaUnix(
+            path: path, payload: payload, expectsReply: true,
+            readTimeoutOverride: readTimeoutOverride
+        )
     case .tcp(let host, let port):
-        sendViaTCP(host: host, port: port, payload: payload, expectsReply: true)
+        sendViaTCP(
+            host: host, port: port, payload: payload, expectsReply: true,
+            readTimeoutOverride: readTimeoutOverride
+        )
     }
 }
 
@@ -260,7 +272,10 @@ func readUntilEOF(fd: Int32) -> Data? {
 }
 
 @discardableResult
-func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Data? {
+func sendViaUnix(
+    path: String, payload: [String: Any], expectsReply: Bool,
+    readTimeoutOverride: Int? = nil
+) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -302,7 +317,7 @@ func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Da
     }
 
     if expectsReply {
-        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+        setReadTimeout(fd: fd, seconds: readTimeoutOverride ?? replyTimeoutSeconds)
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
@@ -310,7 +325,10 @@ func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Da
 }
 
 @discardableResult
-func sendViaTCP(host: String, port: UInt16, payload: [String: Any], expectsReply: Bool) -> Data? {
+func sendViaTCP(
+    host: String, port: UInt16, payload: [String: Any], expectsReply: Bool,
+    readTimeoutOverride: Int? = nil
+) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -352,7 +370,7 @@ func sendViaTCP(host: String, port: UInt16, payload: [String: Any], expectsReply
     }
 
     if expectsReply {
-        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+        setReadTimeout(fd: fd, seconds: readTimeoutOverride ?? replyTimeoutSeconds)
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
@@ -1250,7 +1268,16 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         if let urlMatch { payload["url_match"] = urlMatch }
         if let forCondition { payload["for"] = forCondition }
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "wait")
-        sendWebReplyAndPrintActuator(payload, command: "wait", asJSON: asJSON)
+        // The server can legitimately hold the reply for the full wait
+        // duration. Pad the socket read timeout past `timeoutSeconds`
+        // so a slow-firing or about-to-timeout condition still gets
+        // its reply through instead of tripping the default 5s
+        // "no response from Nex" error.
+        let readTimeout = max(Int(timeoutSeconds.rounded(.up)) + 5, replyTimeoutSeconds)
+        sendWebReplyAndPrintActuator(
+            payload, command: "wait", asJSON: asJSON,
+            readTimeoutOverride: readTimeout
+        )
 
     default:
         fputs("Unknown web action: \(action)\n", stderr)
@@ -1268,9 +1295,10 @@ func handleWeb(_ args: inout ArraySlice<String>) {
 /// On success, returns the parsed dict ready for verb-specific
 /// rendering.
 private func decodeWebReply(
-    _ payload: [String: Any], command: String, asJSON: Bool
+    _ payload: [String: Any], command: String, asJSON: Bool,
+    readTimeoutOverride: Int? = nil
 ) -> [String: Any] {
-    guard let data = sendJSONAndReadReply(payload) else {
+    guard let data = sendJSONAndReadReply(payload, readTimeoutOverride: readTimeoutOverride) else {
         fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
         exit(1)
     }
@@ -1304,9 +1332,13 @@ private func decodeWebReply(
 /// One-line acknowledgement on success, exit-1 on `ok==false`.
 /// `--json` dumps the full reply payload instead.
 private func sendWebReplyAndPrintActuator(
-    _ payload: [String: Any], command: String, asJSON: Bool
+    _ payload: [String: Any], command: String, asJSON: Bool,
+    readTimeoutOverride: Int? = nil
 ) {
-    let json = decodeWebReply(payload, command: command, asJSON: asJSON)
+    let json = decodeWebReply(
+        payload, command: command, asJSON: asJSON,
+        readTimeoutOverride: readTimeoutOverride
+    )
     if asJSON { return }
     switch command {
     case "click":

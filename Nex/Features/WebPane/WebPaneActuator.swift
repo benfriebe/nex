@@ -41,20 +41,10 @@ enum WebPaneActuator {
         args: [JSValue]
     ) async -> Result {
         let argsJS = args.map(\.jsLiteral).joined(separator: ", ")
-        // Wrap the call so that:
-        //   * a missing __nexAct throws a recognisable string,
-        //   * a thrown JS exception flattens into the reply envelope
-        //     instead of bubbling up to `callAsyncJavaScript` (which
-        //     on some WebKit builds returns nil with no diagnostic),
-        //   * `await` resolves any Promise-returning method (`wait`)
-        //     so the reply value, not the Promise object, is
-        //     serialised,
-        //   * the reply round-trips through JSON.stringify so the
-        //     Swift side gets a single, easy-to-parse string.
-        //
-        // `callAsyncJavaScript` wraps this body in `async function(){
-        // ... }` itself, so the source is the function body — no
-        // outer IIFE.
+        // The catch flattens JS exceptions into the reply envelope
+        // so they don't bubble up as nil from WebKit. The `await`
+        // resolves any Promise-returning method (e.g. `wait`) so the
+        // value, not the Promise object, is serialised.
         let source = """
         try {
             if (!window.__nexAct) {

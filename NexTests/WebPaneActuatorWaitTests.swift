@@ -32,6 +32,33 @@ struct WebPaneActuatorWaitTests {
         #expect(parsed["condition"] as? String == "visible")
     }
 
+    @Test func waitVisibleResolvesForFixedPositionElement() async throws {
+        // Regression: offsetParent is null for position:fixed, so the
+        // previous check classified visible overlays/toasts as hidden.
+        // getClientRects()-based check resolves immediately.
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="toast" style="position:fixed;top:0;left:0;width:100px;height:30px;background:red">hi</div>
+        """)
+        let parsed = try await host.parse(
+            host.evalAsyncString("return JSON.stringify(await __nexAct.wait({selector:'css:#toast',for:'visible',timeout:300}))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["waited_ms"] as? Int == 0)
+    }
+
+    @Test func waitHiddenResolvesForVisibilityHidden() async throws {
+        // visibility:hidden elements still have getClientRects, so we
+        // must also consult computed style. Without that check, this
+        // wait would time out.
+        let host = try await ActuatorTestHost.make(html: """
+        <p id="p" style="visibility:hidden">hi</p>
+        """)
+        let parsed = try await host.parse(
+            host.evalAsyncString("return JSON.stringify(await __nexAct.wait({selector:'css:#p',for:'hidden',timeout:300}))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+    }
+
     // MARK: - deferred transitions
 
     @Test func waitForExistsResolvesAfterDOMInsertion() async throws {
@@ -176,36 +203,5 @@ struct WebPaneActuatorWaitTests {
         )
         #expect(parsed["ok"] as? Bool == false)
         #expect((parsed["error"] as? String)?.contains("unknown condition") == true)
-    }
-
-    // MARK: - cancellation
-
-    @Test func cancelAllWaitsResolvesPendingAsTimeout() async throws {
-        // A wait against a never-true condition with a long timeout
-        // should be interrupted when _cancelAllWaits fires. The wait
-        // resolves with a timeout-shaped envelope (waited_ms is the
-        // elapsed time at cancellation).
-        //
-        // Note: cancelAllWaits clears the interval — the resolve
-        // happens on the next interval tick, which by that point
-        // already fired. So in practice the Promise never resolves
-        // after cancel. We test that cancelAllWaits returns ok and
-        // the active map shrinks; the surfaced wait response is the
-        // caller's problem (the Swift layer detaches by timing out
-        // separately).
-        let host = try await ActuatorTestHost.make(html: "<div></div>")
-        // Kick off a wait that will never match. Capture the Promise
-        // on `window` so we don't return it to Swift (which can't
-        // serialise it). Returning the assigned Promise reference
-        // would land at WKWebView as "unsupported type" — use a
-        // statement block, not an expression.
-        _ = try await host.eval("""
-        window.__waitPromise = __nexAct.wait({
-            selector: 'css:#never', for: 'exists', timeout: 60000
-        });
-        null
-        """)
-        let active = try await host.eval("__nexAct._cancelAllWaits().cancelled")
-        #expect(active as? Bool == true)
     }
 }

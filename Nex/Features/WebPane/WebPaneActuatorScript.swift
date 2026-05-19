@@ -632,10 +632,8 @@ enum WebPaneActuatorScript {
 
         // ---- wait --------------------------------------------------
 
-        // Parse a "value or /regex/flags" string into either a plain
-        // string target or a compiled RegExp. Returns { error } if the
-        // regex didn't compile. Shared by text= and url-match
-        // condition builders.
+        // Parse a "value or /regex/flags" string into a plain string
+        // or compiled RegExp. Shared by text= and url-match.
         function parseValueOrRegex(raw) {
             var s = String(raw);
             if (s.length > 1 && s.charAt(0) === '/') {
@@ -653,26 +651,36 @@ enum WebPaneActuatorScript {
             return { value: s };
         }
 
-        // Map a `for` condition name + opts into a predicate-style
-        // tester: { test() -> bool } on success, { error } on bad
-        // input. Validation lives here so wait()'s body stays small.
+        // Map a `for` condition name + opts into a predicate
+        // { test() -> bool } on success, { error } on bad input.
+        // Per-tick work stays inside test(); per-wait setup (selector
+        // compile, regex parse) is hoisted up so the 100ms poll body
+        // is as cheap as possible.
+        // getClientRects().length === 0 catches display:none on the
+        // element or any ancestor, and detached subtrees. Unlike
+        // offsetParent (which is also null for position:fixed),
+        // getClientRects returns boxes for fixed-position overlays so
+        // toasts/modals are correctly classified as visible.
+        // visibility:hidden elements still have rects, so test it
+        // separately via computed style.
+        function isElementVisible(el) {
+            if (!el || !el.isConnected) return false;
+            if (el.getClientRects().length === 0) return false;
+            return window.getComputedStyle(el).visibility !== 'hidden';
+        }
+
         function makeCondition(name, opts) {
             if (name === 'visible') {
                 if (!opts.selector) return { error: 'for=visible requires selector' };
                 return { test: function() {
-                    var el = find(opts.selector);
-                    // offsetParent is null for display:none subtrees
-                    // and detached elements. <body> itself has a null
-                    // offsetParent but `find` won't return <body> for
-                    // a meaningful selector anyway.
-                    return el != null && el.offsetParent !== null;
+                    return isElementVisible(find(opts.selector));
                 }};
             }
             if (name === 'hidden') {
                 if (!opts.selector) return { error: 'for=hidden requires selector' };
                 return { test: function() {
                     var el = find(opts.selector);
-                    return el == null || el.offsetParent === null;
+                    return el == null || !isElementVisible(el);
                 }};
             }
             if (name === 'exists') {
@@ -685,10 +693,9 @@ enum WebPaneActuatorScript {
                 if (isNaN(target) || target < 0) {
                     return { error: 'invalid count target: ' + name.slice(6) };
                 }
+                var compiled = compile(parseSelector(opts.selector));
+                if (compiled.error) return { error: compiled.error };
                 return { test: function() {
-                    var parsed = parseSelector(opts.selector);
-                    var compiled = compile(parsed);
-                    if (compiled.error) return false;
                     return compiled.fnAll(document).length === target;
                 }};
             }
@@ -700,11 +707,7 @@ enum WebPaneActuatorScript {
                     var el = find(opts.selector);
                     if (!el) return false;
                     var t = trimText(el);
-                    if (matcher.regex) {
-                        matcher.regex.lastIndex = 0;
-                        return matcher.regex.test(t);
-                    }
-                    return t === matcher.value;
+                    return matcher.regex ? matcher.regex.test(t) : t === matcher.value;
                 }};
             }
             if (name === 'url-match') {
@@ -715,45 +718,19 @@ enum WebPaneActuatorScript {
                 if (urlMatcher.error) return urlMatcher;
                 return { test: function() {
                     var href = location.href;
-                    if (urlMatcher.regex) {
-                        urlMatcher.regex.lastIndex = 0;
-                        return urlMatcher.regex.test(href);
-                    }
-                    return href.indexOf(urlMatcher.value) >= 0;
+                    return urlMatcher.regex
+                        ? urlMatcher.regex.test(href)
+                        : href.indexOf(urlMatcher.value) >= 0;
                 }};
             }
             return { error: 'unknown condition: ' + name };
         }
 
-        // Active wait handles for cancellation. Survives navigation
-        // re-injection because the namespace is idempotent — but the
-        // old page's intervals die with the old window anyway, so the
-        // map only matters for cancellation within a single page.
-        var activeWaits = new Map();
-        var waitCounter = 0;
-
-        function cancelWait(handle) {
-            var id = activeWaits.get(handle);
-            if (id != null) {
-                clearInterval(id);
-                activeWaits.delete(handle);
-            }
-        }
-
-        function cancelAllWaits() {
-            activeWaits.forEach(function(id) { clearInterval(id); });
-            activeWaits.clear();
-            return { ok: true, cancelled: true };
-        }
-
         // Server-side polling. Replaces the shell `until ...; do sleep`
         // pattern: one socket roundtrip blocks until the condition
-        // fires or the timeout elapses. Polls at 100ms — fast enough
-        // for typical app transitions, cheap enough to leave running.
+        // fires or the timeout elapses. Polls at 100ms.
         function wait(opts) {
             opts = opts || {};
-            // Default condition: `exists` when only `selector` was
-            // given; `url-match` when only `urlMatch` was given.
             var conditionName = opts.for ||
                 (opts.urlMatch ? 'url-match' : 'exists');
             var condition = makeCondition(conditionName, opts);
@@ -768,18 +745,17 @@ enum WebPaneActuatorScript {
                     resolve({ ok: true, condition: conditionName, waited_ms: 0 });
                     return;
                 }
-                var handle = ++waitCounter;
                 var intervalId = setInterval(function() {
                     var elapsed = Date.now() - startedAt;
                     if (condition.test()) {
-                        cancelWait(handle);
+                        clearInterval(intervalId);
                         resolve({
                             ok: true,
                             condition: conditionName,
                             waited_ms: elapsed
                         });
                     } else if (elapsed >= timeoutMs) {
-                        cancelWait(handle);
+                        clearInterval(intervalId);
                         resolve({
                             ok: false,
                             error: 'timeout',
@@ -788,7 +764,6 @@ enum WebPaneActuatorScript {
                         });
                     }
                 }, 100);
-                activeWaits.set(handle, intervalId);
             });
         }
 
@@ -827,8 +802,7 @@ enum WebPaneActuatorScript {
             _compile: compile,
             _accessibleName: accessibleName,
             _implicitRole: implicitRole,
-            _clipToBytes: clipToBytes,
-            _cancelAllWaits: cancelAllWaits
+            _clipToBytes: clipToBytes
         };
     })();
     """

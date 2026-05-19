@@ -1124,18 +1124,20 @@ final class SocketServer: Sendable {
             guard let scope = parseWebTarget(wire) else { return nil }
             let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
             let urlMatch = (wire.urlMatch?.isEmpty == true) ? nil : wire.urlMatch
-            // Selector OR urlMatch must be present — both nil is a
-            // usage error. The CLI catches this before sending, but
-            // the wire validates too so misuse from other clients
-            // surfaces as a clean rejection rather than a JS-side
-            // "unknown condition" deep in the stack.
-            guard selector != nil || urlMatch != nil else { return nil }
+            // Exactly one of selector / urlMatch must be present. The
+            // CLI catches both-missing and both-present before sending,
+            // but the wire validates too so misuse from other clients
+            // surfaces as a clean rejection — otherwise both-present
+            // would silently pick whichever the JS default rule lands
+            // on, ignoring the other field.
+            switch (selector, urlMatch) {
+            case (nil, nil), (.some, .some): return nil
+            default: break
+            }
             let forCondition = (wire.forCondition?.isEmpty == true)
                 ? nil : wire.forCondition
-            // Default at the wire layer keeps JS-side defaults
-            // authoritative — 0 / nil flows through to the JS
-            // `wait` body which substitutes 10000ms.
-            let timeoutMs = (wire.timeoutMs ?? 0) > 0 ? (wire.timeoutMs ?? 0) : 10000
+            // 0/nil flows through; the JS `wait` body owns the default.
+            let timeoutMs = wire.timeoutMs ?? 0
             return (.webWait(
                 paneID: scope.paneID,
                 target: scope.target,

@@ -1279,12 +1279,12 @@ struct SocketParsingTests {
         {"command":"web-wait","pane_id":"\(Self.paneIDString)","url_match":"/checkout"}
         """)
         let result = SocketServer.parseWireMessage(data)
-        // Missing timeout_ms → server defaults to 10000ms so JS-side
-        // never gets `0` which would be a no-wait.
+        // Missing timeout_ms → 0 flows through; the JS `wait` body
+        // substitutes its 10000ms default.
         #expect(result?.0 == .webWait(
             paneID: Self.paneUUID, target: nil, workspace: nil,
             selector: nil, urlMatch: "/checkout",
-            forCondition: nil, timeoutMs: 10000
+            forCondition: nil, timeoutMs: 0
         ))
     }
 
@@ -1315,6 +1315,16 @@ struct SocketParsingTests {
         {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"","url_match":""}
         """)
         // Both empty → both absent → reject.
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebWaitRejectsBothSelectorAndUrlMatch() {
+        // Both fields populated → reject at the wire. The JS-side
+        // default rule would silently prefer one and ignore the other,
+        // which is confusing for direct socket clients.
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"css:#a","url_match":"/x"}
+        """)
         #expect(SocketServer.parseWireMessage(data) == nil)
     }
 }
