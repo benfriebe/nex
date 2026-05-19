@@ -26,24 +26,22 @@ struct WebPaneView: View {
     let onTabSelect: (UUID) -> Void
     let onTabClose: (UUID) -> Void
     let onTabNew: () -> Void
-    /// Sibling panes in the same workspace, surfaced in the
-    /// element-pickup menu so the user can pick a destination for
-    /// the next click's payload. Empty array hides the per-target
-    /// menu items (the button still arms in queue-only mode).
+    /// Sibling panes in the same workspace, surfaced in the panel's
+    /// destination picker at send time.
     let availableInspectTargets: [InspectTargetOption]
-    /// True while the picker is armed on this pane.
     let inspectorArmed: Bool
-    let onArmInspectorPickup: (UUID?) -> Void
-    let onDisarmInspectorPickup: () -> Void
-    /// Active batch-annotate state. nil = no batch in progress.
+    /// Active batch state. nil = no batch in progress.
     let batchInspect: BatchInspectState?
-    /// Begin a batch with the named destination (nil = local queue).
-    let onStartBatchInspect: (UUID?) -> Void
+    /// Previous batch destination on this pane (in-session memory) —
+    /// seeds the panel's initial picker selection on a second batch.
+    let lastBatchTarget: BatchTargetMemory?
+    let onTogglePickup: () -> Void
     /// Edit / remove individual items, then finalise or cancel.
     let onBatchItemCommentChanged: (UUID, String) -> Void
     let onBatchItemRemoved: (UUID) -> Void
     let onBatchRowTapped: (UUID) -> Void
-    let onBatchSend: () -> Void
+    /// `sendTo` nil → queue locally; non-nil → paste into that pane.
+    let onBatchSend: (UUID?) -> Void
     let onBatchCancel: () -> Void
     let favourites: [Favourite]
     let onToggleFavourite: (String, String) -> Void
@@ -86,12 +84,9 @@ struct WebPaneView: View {
                 onTabSelect: onTabSelect,
                 onTabClose: onTabClose,
                 onTabNew: onTabNew,
-                availableInspectTargets: availableInspectTargets,
                 inspectorArmed: inspectorArmed,
-                onArmInspectorPickup: onArmInspectorPickup,
-                onDisarmInspectorPickup: onDisarmInspectorPickup,
-                batchInspectActive: batchInspect != nil,
-                onStartBatchInspect: onStartBatchInspect,
+                pendingItemCount: batchInspect?.items.count ?? 0,
+                onTogglePickup: onTogglePickup,
                 focusRequestToken: focusURLBarToken,
                 favourites: favourites,
                 onToggleStar: {
@@ -100,16 +95,17 @@ struct WebPaneView: View {
                 onOpenFavourite: onOpenFavourite
             )
 
-            if let batchInspect {
+            if let batchInspect, batchInspect.panelVisible {
                 WebBatchInspectPanel(
                     items: batchInspect.items,
-                    destinationLabel: destinationLabel(for: batchInspect.sendTo),
+                    availableTargets: availableInspectTargets,
                     focusedItemID: batchInspect.focusedItemID,
                     onCommentChanged: onBatchItemCommentChanged,
                     onRemoveItem: onBatchItemRemoved,
                     onRowTapped: onBatchRowTapped,
                     onSend: onBatchSend,
-                    onCancel: onBatchCancel
+                    onCancel: onBatchCancel,
+                    initialSelection: lastBatchTarget
                 )
             }
 
@@ -166,19 +162,6 @@ struct WebPaneView: View {
     private func toggleInspector() {
         guard let tab = activeTab else { return }
         webPaneStore.coordinator(for: paneID).toggleInspector(tabID: tab.id)
-    }
-
-    /// Resolve a batch destination pane id to a human-friendly label
-    /// using the same `availableInspectTargets` list that fills the
-    /// chrome menu. Falls back to the UUID prefix when the target
-    /// isn't (or no longer is) in the list, and the constant
-    /// "(local queue)" when no destination was set.
-    private func destinationLabel(for sendTo: UUID?) -> String {
-        guard let sendTo else { return "(local queue)" }
-        if let match = availableInspectTargets.first(where: { $0.id == sendTo }) {
-            return match.label
-        }
-        return String(sendTo.uuidString.prefix(8))
     }
 
     private func refreshState() {

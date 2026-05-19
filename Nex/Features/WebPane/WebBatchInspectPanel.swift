@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Panel that appears in a web pane while a batch-annotate session
@@ -6,10 +7,9 @@ import SwiftUI
 /// send the whole batch to the configured destination.
 struct WebBatchInspectPanel: View {
     let items: [BatchInspectItem]
-    /// Display label for the destination pane, or "(local queue)"
-    /// when the batch is set to drop into the inspect-result queue
-    /// rather than paste anywhere.
-    let destinationLabel: String
+    /// Other panes available as paste targets. Surfaced in the
+    /// footer's destination picker.
+    let availableTargets: [InspectTargetOption]
     /// Item with the bidirectional focus highlight. Set by either a
     /// row tap or a page-side marker click.
     let focusedItemID: UUID?
@@ -18,8 +18,24 @@ struct WebBatchInspectPanel: View {
     /// Fired on row click → triggers panel-originated focus (also
     /// scrolls + pulses the page-side badge).
     let onRowTapped: (UUID) -> Void
-    let onSend: () -> Void
+    /// Send with the currently-selected destination. nil reserved for
+    /// a future "Local queue" picker entry; currently the picker only
+    /// offers pane targets and Send is disabled until one is selected.
+    let onSend: (UUID?) -> Void
     let onCancel: () -> Void
+    /// Last destination this pane was sent to in the current app
+    /// session, or `nil` on the first batch. Seeds the picker.
+    var initialSelection: BatchTargetMemory?
+
+    @State private var selection: TargetSelection = .unselected
+
+    /// `.unselected` blocks Send so the user can't accidentally
+    /// dispatch a batch to nowhere. Items still survive cancel via the
+    /// CLI's `nex web inspect-result` queue.
+    private enum TargetSelection: Equatable {
+        case unselected
+        case pane(UUID)
+    }
 
     /// Approximate height of one row (chip + selector + comment
     /// field + padding + inter-row spacing). Used to size the
@@ -47,6 +63,32 @@ struct WebBatchInspectPanel: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .top) { Divider() }
+        .onAppear { seedSelection() }
+        // The WKWebView underneath sets `cursor:crosshair` while the
+        // picker is armed. Without an explicit override, NSCursor
+        // would keep crosshair as the user moves into the SwiftUI
+        // panel (AppKit only resets when a fresh cursor-rect view
+        // claims the rect). Force arrow whenever the mouse is over
+        // the panel surface.
+        .onContinuousHover { phase in
+            if case .active = phase { NSCursor.arrow.set() }
+        }
+    }
+
+    /// Seed the picker from the per-pane "last destination" memory.
+    /// First batch of a session stays `.unselected` so the user has
+    /// to pick deliberately; Send is disabled until they do.
+    private func seedSelection() {
+        switch initialSelection {
+        case .none, .local:
+            selection = .unselected
+        case .pane(let id) where availableTargets.contains(where: { $0.id == id }):
+            selection = .pane(id)
+        case .pane:
+            // Remembered pane no longer exists — fall back rather
+            // than holding a dead id.
+            selection = .unselected
+        }
     }
 
     private var header: some View {
@@ -54,11 +96,8 @@ struct WebBatchInspectPanel: View {
             Image(systemName: "scope")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
-            Text("Batch annotate")
+            Text("Element pickup")
                 .font(.system(size: 11, weight: .semibold))
-            Text("→ \(destinationLabel)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
             Spacer()
             Text("\(items.count) item\(items.count == 1 ? "" : "s")")
                 .font(.system(size: 11))
@@ -186,13 +225,88 @@ struct WebBatchInspectPanel: View {
             Button("Cancel", action: onCancel)
                 .buttonStyle(.bordered)
             Spacer()
+            destinationPicker
             Button("Send \(items.count)") {
-                onSend()
+                if case .pane(let id) = selection { onSend(id) }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(items.isEmpty)
+            .disabled(items.isEmpty || selection == .unselected)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        // If the chosen pane disappears mid-batch (closed by the
+        // user), fall back to unselected so they have to reconfirm
+        // instead of silently rerouting to whatever the picker shows.
+        .onChange(of: availableTargets) { _, newTargets in
+            if case .pane(let id) = selection,
+               !newTargets.contains(where: { $0.id == id }) {
+                selection = .unselected
+            }
+        }
+    }
+
+    /// Destination dropdown shown next to the Send button. Rendered
+    /// as a bordered button (rather than `.menuStyle(.borderlessButton)`
+    /// which collapses Text labels to icon-only on macOS) so the
+    /// current pick reads as a button with a label inside.
+    private var destinationPicker: some View {
+        Menu {
+            if availableTargets.isEmpty {
+                Text("No other panes open in this workspace")
+                    .font(.caption)
+            } else {
+                ForEach(availableTargets) { target in
+                    Button {
+                        selection = .pane(target.id)
+                    } label: {
+                        HStack {
+                            Text(target.label)
+                            if selection == .pane(target.id) {
+                                Spacer(); Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(currentTargetLabel)
+                    .foregroundStyle(selection == .unselected ? Color.secondary : Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(minWidth: 140, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(
+                        selection == .unselected
+                            ? Color.accentColor.opacity(0.6)
+                            : Color.secondary.opacity(0.35),
+                        lineWidth: selection == .unselected ? 1.0 : 0.5
+                    )
+            )
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Where to send this batch")
+    }
+
+    private var currentTargetLabel: String {
+        switch selection {
+        case .unselected: "Select destination…"
+        case .pane(let id):
+            availableTargets.first(where: { $0.id == id })?.label ?? "Select destination…"
+        }
     }
 }

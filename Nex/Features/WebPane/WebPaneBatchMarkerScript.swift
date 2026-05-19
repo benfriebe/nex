@@ -150,7 +150,13 @@ enum WebPaneBatchMarkerScript {
                 'pointer-events:auto',
                 'z-index:2147483647',
                 'display:none',
-                'box-sizing:border-box'
+                'box-sizing:border-box',
+                // While the picker is armed, the inspector script
+                // sets `cursor:crosshair` on documentElement, which
+                // the popover would otherwise inherit. Force a
+                // default cursor so hovering the popover (or its
+                // textarea / buttons) shows the right pointer.
+                'cursor:default'
             ].join(';');
 
             popoverLabel = document.createElement('div');

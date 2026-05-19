@@ -279,13 +279,19 @@ struct WorkspaceFeature {
         /// Begin a batch-annotate session. Records the destination
         /// pane on `WebPaneState.batchInspect`; the AppReducer is
         /// responsible for arming the picker with `sticky: true`.
-        case webBatchInspectBegin(paneID: UUID, sendTo: UUID?)
+        case webBatchInspectBegin(paneID: UUID)
         case webBatchItemAdded(paneID: UUID, item: BatchInspectItem)
         case webBatchItemCommentChanged(paneID: UUID, itemID: UUID, comment: String)
         case webBatchItemRemoved(paneID: UUID, itemID: UUID)
         /// Tear down the batch session without sending. The
         /// AppReducer also disarms the sticky picker.
         case webBatchInspectCleared(paneID: UUID)
+        /// Set the panel-visible flag on an active batch. The
+        /// AppReducer pairs this with arming/disarming the picker and
+        /// posting marker show/hide to the page. Used by the scope
+        /// chrome toggle so the user can dismiss the panel without
+        /// losing their pending items.
+        case webBatchPanelVisible(paneID: UUID, visible: Bool)
         /// Focus an item in the active batch — used by both the
         /// list-row tap (which then highlights on page) and the
         /// page-side marker click (which then highlights the row).
@@ -852,9 +858,9 @@ struct WorkspaceFeature {
                 state.webPanes[paneID] = webState
                 return .none
 
-            case .webBatchInspectBegin(let paneID, let sendTo):
+            case .webBatchInspectBegin(let paneID):
                 guard var webState = state.webPanes[paneID] else { return .none }
-                webState.batchInspect = BatchInspectState(sendTo: sendTo, items: [])
+                webState.batchInspect = BatchInspectState(items: [])
                 state.webPanes[paneID] = webState
                 return .none
 
@@ -885,6 +891,14 @@ struct WorkspaceFeature {
             case .webBatchInspectCleared(let paneID):
                 guard var webState = state.webPanes[paneID] else { return .none }
                 webState.batchInspect = nil
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webBatchPanelVisible(let paneID, let visible):
+                guard var webState = state.webPanes[paneID],
+                      let batch = webState.batchInspect,
+                      batch.panelVisible != visible else { return .none }
+                webState.batchInspect?.panelVisible = visible
                 state.webPanes[paneID] = webState
                 return .none
 

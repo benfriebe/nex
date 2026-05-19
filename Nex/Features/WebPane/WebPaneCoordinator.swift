@@ -237,6 +237,13 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         kvoTokens[tab.id] = [urlToken, titleToken]
 
         if let url = URL(string: tab.url) {
+            // Mirror what `navigate(tab:to:)` does so the reload
+            // button and the error stub's Retry anchor have a URL
+            // to fall back to when the initial restore load fails.
+            // Without this seed, `presentLoadFailure` ends up with
+            // an empty `failedURL` and the stub renders with an
+            // empty href; reload() then has nothing to retry.
+            lastAttemptedURL[tab.id] = url.absoluteString
             webView.load(URLRequest(url: url))
         }
         return webView

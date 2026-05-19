@@ -44,16 +44,16 @@ struct PaneGridView: View {
     var onWebTabSelect: ((UUID, UUID) -> Void)?
     var onWebTabClose: ((UUID, UUID) -> Void)?
     var onWebTabNew: ((UUID) -> Void)?
-    /// UI element-pickup arm. `paneID` is the source web pane;
-    /// `sendTo` is the destination pane (nil = queue locally).
-    var onWebArmInspectorPickup: ((UUID, UUID?) -> Void)?
-    var onWebDisarmInspectorPickup: ((UUID) -> Void)?
-    /// Begin a batch-annotate session on the source web pane.
-    var onWebStartBatchInspect: ((UUID, UUID?) -> Void)?
+    /// Toggle the element-pickup panel on a web pane. Reducer-side
+    /// logic decides between start / hide / show based on the
+    /// current state of `batchInspect` and `panelVisible`.
+    var onWebTogglePickup: ((UUID) -> Void)?
     var onWebBatchItemCommentChanged: ((UUID, UUID, String) -> Void)?
     var onWebBatchItemRemoved: ((UUID, UUID) -> Void)?
     var onWebBatchRowTapped: ((UUID, UUID) -> Void)?
-    var onWebBatchSend: ((UUID) -> Void)?
+    /// Send the batch. Second arg is the destination pane id —
+    /// nil = drop into the local inspect-result queue.
+    var onWebBatchSend: ((UUID, UUID?) -> Void)?
     var onWebBatchCancel: ((UUID) -> Void)?
     /// Global web favourites — surfaced in every web pane's chrome.
     var favourites: [Favourite] = []
@@ -253,15 +253,10 @@ struct PaneGridView: View {
                     onTabClose: { tabID in onWebTabClose?(pane.id, tabID) },
                     onTabNew: { onWebTabNew?(pane.id) },
                     availableInspectTargets: inspectTargets(excluding: pane.id),
-                    inspectorArmed: webPanes[pane.id]?.inspectorArmed ?? false,
-                    onArmInspectorPickup: { sendTo in
-                        onWebArmInspectorPickup?(pane.id, sendTo)
-                    },
-                    onDisarmInspectorPickup: { onWebDisarmInspectorPickup?(pane.id) },
+                    inspectorArmed: (webPanes[pane.id]?.batchInspect?.panelVisible) ?? false,
                     batchInspect: webPanes[pane.id]?.batchInspect,
-                    onStartBatchInspect: { sendTo in
-                        onWebStartBatchInspect?(pane.id, sendTo)
-                    },
+                    lastBatchTarget: webPanes[pane.id]?.lastBatchTarget,
+                    onTogglePickup: { onWebTogglePickup?(pane.id) },
                     onBatchItemCommentChanged: { itemID, comment in
                         onWebBatchItemCommentChanged?(pane.id, itemID, comment)
                     },
@@ -271,7 +266,7 @@ struct PaneGridView: View {
                     onBatchRowTapped: { itemID in
                         onWebBatchRowTapped?(pane.id, itemID)
                     },
-                    onBatchSend: { onWebBatchSend?(pane.id) },
+                    onBatchSend: { sendTo in onWebBatchSend?(pane.id, sendTo) },
                     onBatchCancel: { onWebBatchCancel?(pane.id) },
                     favourites: favourites,
                     onToggleFavourite: { url, title in

@@ -157,16 +157,8 @@ struct ContentView: View {
                         onWebTabNew: { paneID in
                             store.send(.webPaneOpenNewTab(paneID: paneID, url: nil))
                         },
-                        onWebArmInspectorPickup: { paneID, sendTo in
-                            store.send(.webPaneArmInspectorViaUI(
-                                paneID: paneID, sendTo: sendTo
-                            ))
-                        },
-                        onWebDisarmInspectorPickup: { paneID in
-                            store.send(.webPaneDisarmInspectorViaUI(paneID: paneID))
-                        },
-                        onWebStartBatchInspect: { paneID, sendTo in
-                            store.send(.webBatchInspectStart(paneID: paneID, sendTo: sendTo))
+                        onWebTogglePickup: { paneID in
+                            store.send(.webBatchInspectToggle(paneID: paneID))
                         },
                         onWebBatchItemCommentChanged: { paneID, itemID, comment in
                             store.send(.workspaces(.element(
@@ -195,8 +187,8 @@ struct ContentView: View {
                                 paneID: paneID, itemID: itemID, origin: .panel
                             ))
                         },
-                        onWebBatchSend: { paneID in
-                            store.send(.webBatchInspectSend(paneID: paneID))
+                        onWebBatchSend: { paneID, sendTo in
+                            store.send(.webBatchInspectSend(paneID: paneID, sendTo: sendTo))
                         },
                         onWebBatchCancel: { paneID in
                             store.send(.webBatchInspectCancel(paneID: paneID))

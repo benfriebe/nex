@@ -451,24 +451,26 @@ struct AppReducer {
         /// Enter) after the delivered paste. Cleared after every
         /// delivery. Phase 3 ships paste-only by default.
         case setWebInspectArmedSubmit(paneID: UUID, submit: Bool)
-        /// UI-driven equivalent of `nex web inspect --send-to <pane>`.
-        /// Asks the coordinator to arm the picker on the named pane's
-        /// active tab and stash the destination so the next click's
-        /// payload is sanitised + pasted via `paneSendText`. `sendTo`
-        /// nil = just arm, drop the result into the inspect queue for
-        /// later draining by the CLI.
-        case webPaneArmInspectorViaUI(paneID: UUID, sendTo: UUID?)
-        /// Symmetric disarm for the UI flow.
-        case webPaneDisarmInspectorViaUI(paneID: UUID)
         /// Begin a batch-annotate session for `paneID`. Arms the
         /// picker in sticky mode so each click adds another item;
         /// the user finalises via `webBatchInspectSend` or aborts
-        /// via `webBatchInspectCancel`.
-        case webBatchInspectStart(paneID: UUID, sendTo: UUID?)
-        /// Format all collected items and paste them into the
-        /// destination pane (or queue locally when sendTo is nil),
-        /// then disarm the picker and clear batch state.
-        case webBatchInspectSend(paneID: UUID)
+        /// via `webBatchInspectCancel`. Destination is picked at
+        /// send time via the panel's footer dropdown.
+        case webBatchInspectStart(paneID: UUID)
+        /// Hide the batch panel without discarding items. Disarms
+        /// the page picker but leaves `batchInspect` in state so the
+        /// next scope-toggle re-opens with the same queue + markers.
+        case webBatchInspectHide(paneID: UUID)
+        /// Re-show a hidden batch panel. Re-arms the picker and
+        /// re-paints the on-page markers from the current items.
+        case webBatchInspectShow(paneID: UUID)
+        /// Toggle from the chrome scope button — routes to start /
+        /// hide / show based on current state.
+        case webBatchInspectToggle(paneID: UUID)
+        /// Format collected items and paste them into `sendTo` (or
+        /// queue locally for `nex web inspect-result` when nil), then
+        /// disarm and clear batch state.
+        case webBatchInspectSend(paneID: UUID, sendTo: UUID?)
         case webBatchInspectCancel(paneID: UUID)
         /// Focus a batch item from either side of the list↔page sync.
         /// `origin == .panel` came from a panel-row tap → highlight
@@ -2068,17 +2070,41 @@ struct AppReducer {
             state: state, paneID: paneID, target: target,
             workspaceFilter: workspaceFilter, reply: reply
         ) else { return .none }
+        // Drain *both* sources: the legacy single-shot queue
+        // (`inspectResultQueue`, written by `nex web inspect`
+        // without `--send-to`) and the batch panel items (the
+        // unified UI queue — items collected via the scope button
+        // that haven't been sent to a target yet). Items annotate
+        // with their per-batch comment before serialising.
+        var results: [InspectResult] = []
+        results.append(contentsOf: resolved.webState.inspectResultQueue)
+        if let batch = resolved.webState.batchInspect {
+            for item in batch.items {
+                var annotated = item.result
+                annotated.comment = item.comment
+                results.append(annotated)
+            }
+        }
         reply?.sendAndClose([
             "ok": true,
             "pane_id": resolved.paneID.uuidString,
             "workspace_id": resolved.workspace.id.uuidString,
-            "results": resolved.webState.inspectResultQueue.map(inspectResultJSON)
+            "results": results.map(inspectResultJSON)
         ])
         if clear {
-            return .send(.workspaces(.element(
-                id: resolved.workspace.id,
-                action: .webInspectResultClear(paneID: resolved.paneID)
-            )))
+            var effects: [Effect<Action>] = [
+                .send(.workspaces(.element(
+                    id: resolved.workspace.id,
+                    action: .webInspectResultClear(paneID: resolved.paneID)
+                )))
+            ]
+            // Only tear down the batch when one exists — `Cancel`
+            // disarms the page picker, and a single-shot inspect may
+            // be armed on this pane independently of any batch.
+            if resolved.webState.batchInspect != nil {
+                effects.append(.send(.webBatchInspectCancel(paneID: resolved.paneID)))
+            }
+            return .merge(effects)
         }
         return .none
     }
@@ -3085,11 +3111,12 @@ struct AppReducer {
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
 
-            case .workspaces(.element(id: let wsID, action: .closePane)):
+            case .workspaces(.element(id: let wsID, action: .closePane(let paneID))):
                 if let renamingPaneID = state.renamingPaneID,
                    !state.workspaces.contains(where: { $0.panes[id: renamingPaneID] != nil }) {
                     state.renamingPaneID = nil
                 }
+                state.webInspectArmedSubmit.removeValue(forKey: paneID)
                 return .merge(
                     .send(.persistState),
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
@@ -3521,31 +3548,56 @@ struct AppReducer {
                 }
                 return .none
 
-            case .webPaneArmInspectorViaUI(let paneID, let sendTo):
+            case .webBatchInspectStart(let paneID):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
                 let store = webPaneStore
                 let workspaceID = workspace.id
                 let tabID = tab.id
-                return .run { send in
-                    let nonce: String? = await MainActor.run {
-                        store.coordinator(for: paneID).armInspector(tabID: tabID)
-                    }
-                    guard let nonce else { return }
-                    await send(.workspaces(.element(
+                return .merge(
+                    .send(.workspaces(.element(
                         id: workspaceID,
-                        action: .webInspectArmedFor(
-                            paneID: paneID, sendTo: sendTo, nonce: nonce
-                        )
-                    )))
+                        action: .webBatchInspectBegin(paneID: paneID)
+                    ))),
+                    .send(.syncBatchMarkers(paneID: paneID)),
+                    .run { send in
+                        let nonce: String? = await MainActor.run {
+                            store.coordinator(for: paneID).armInspector(tabID: tabID, sticky: true)
+                        }
+                        guard let nonce else { return }
+                        await send(.workspaces(.element(
+                            id: workspaceID,
+                            action: .webInspectArmedFor(
+                                paneID: paneID, sendTo: nil, nonce: nonce
+                            )
+                        )))
+                    }
+                )
+
+            case .webBatchInspectToggle(let paneID):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let batch = workspace.webPanes[paneID]?.batchInspect
+                if batch == nil {
+                    return .send(.webBatchInspectStart(paneID: paneID))
+                } else if batch?.panelVisible == true {
+                    return .send(.webBatchInspectHide(paneID: paneID))
+                } else {
+                    return .send(.webBatchInspectShow(paneID: paneID))
                 }
 
-            case .webPaneDisarmInspectorViaUI(let paneID):
+            case .webBatchInspectHide(let paneID):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 let store = webPaneStore
                 let workspaceID = workspace.id
-                state.webInspectArmedSubmit.removeValue(forKey: paneID)
                 return .merge(
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webBatchPanelVisible(paneID: paneID, visible: false)
+                    ))),
+                    // Disarm the page picker and clear the on-page
+                    // markers; the SwiftUI panel + items in state
+                    // remain so the next show restores everything.
+                    .send(.syncBatchMarkers(paneID: paneID)),
                     .send(.workspaces(.element(
                         id: workspaceID,
                         action: .webInspectDisarm(paneID: paneID)
@@ -3557,7 +3609,7 @@ struct AppReducer {
                     }
                 )
 
-            case .webBatchInspectStart(let paneID, let sendTo):
+            case .webBatchInspectShow(let paneID):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
                 let store = webPaneStore
@@ -3566,7 +3618,7 @@ struct AppReducer {
                 return .merge(
                     .send(.workspaces(.element(
                         id: workspaceID,
-                        action: .webBatchInspectBegin(paneID: paneID, sendTo: sendTo)
+                        action: .webBatchPanelVisible(paneID: paneID, visible: true)
                     ))),
                     .send(.syncBatchMarkers(paneID: paneID)),
                     .run { send in
@@ -3577,7 +3629,7 @@ struct AppReducer {
                         await send(.workspaces(.element(
                             id: workspaceID,
                             action: .webInspectArmedFor(
-                                paneID: paneID, sendTo: sendTo, nonce: nonce
+                                paneID: paneID, sendTo: nil, nonce: nonce
                             )
                         )))
                     }
@@ -3605,13 +3657,20 @@ struct AppReducer {
                     }
                 )
 
-            case .webBatchInspectSend(let paneID):
+            case .webBatchInspectSend(let paneID, let sendTo):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 guard let batch = workspace.webPanes[paneID]?.batchInspect else { return .none }
                 let store = webPaneStore
                 let workspaceID = workspace.id
                 let submit = state.webInspectArmedSubmit[paneID] ?? false
                 state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                // Seed `lastBatchTarget` so the next batch on this
+                // pane defaults to the same destination. In-memory
+                // only — fresh launch always starts unselected.
+                if !batch.items.isEmpty {
+                    let memory: BatchTargetMemory = sendTo.map { .pane($0) } ?? .local
+                    state.workspaces[id: workspaceID]?.webPanes[paneID]?.lastBatchTarget = memory
+                }
 
                 var effects: [Effect<Action>] = [
                     .send(.workspaces(.element(
@@ -3633,7 +3692,7 @@ struct AppReducer {
                 if batch.items.isEmpty {
                     return .merge(effects)
                 }
-                if let sendTo = batch.sendTo {
+                if let sendTo {
                     let formatted = InspectPayloadSanitiser.formatBatchForPaste(batch.items)
                     effects.append(paneSendText(paneID: sendTo, text: formatted, bare: !submit))
                 } else {
@@ -3690,7 +3749,11 @@ struct AppReducer {
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 let webState = workspace.webPanes[paneID]
                 let tabID = webState?.activeTab?.id
-                let items: [BatchMarkerInput] = (webState?.batchInspect?.items ?? [])
+                // Hidden panel = no on-page markers either. Items
+                // still live in state for when the user re-opens.
+                let panelVisible = webState?.batchInspect?.panelVisible ?? false
+                let items: [BatchMarkerInput] = panelVisible
+                    ? (webState?.batchInspect?.items ?? [])
                     .enumerated()
                     .map { idx, item in
                         BatchMarkerInput(
@@ -3700,6 +3763,7 @@ struct AppReducer {
                             comment: item.comment
                         )
                     }
+                    : []
                 let store = webPaneStore
                 return .run { _ in
                     await MainActor.run {
@@ -3751,8 +3815,11 @@ struct AppReducer {
                 // refresh the on-page numbered markers so the new
                 // pick gets a badge, then focus the new item so the
                 // page draws its ring and the panel auto-focuses the
-                // comment field.
-                if webState?.batchInspect != nil {
+                // comment field. A hidden batch (panelVisible == false)
+                // is paused — `nex web inspect --send-to` can arm a
+                // single-shot inspect on top, so route the result down
+                // the single-shot path instead of hijacking it.
+                if webState?.batchInspect?.panelVisible == true {
                     let item = BatchInspectItem(result: result)
                     return .merge(
                         .send(.workspaces(.element(

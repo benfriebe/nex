@@ -67,25 +67,25 @@ struct BatchInspectItem: Equatable, Identifiable {
 /// `BatchInspectItem`; the user finalises with `webBatchInspectSend`
 /// or aborts with `webBatchInspectCancel`.
 struct BatchInspectState: Equatable {
-    /// Destination pane id. Nil = queue locally; the batch is
-    /// dropped into the inspect-result queue on Send so
-    /// `nex web inspect-result` can drain it.
-    var sendTo: UUID?
     var items: [BatchInspectItem]
     /// Item currently focused for bidirectional list↔page sync. Set
     /// when the user taps a panel row or clicks a numbered badge on
     /// the page; the row gets a brief highlight, the page scrolls
     /// the matching element into view, and the badge pulses.
     var focusedItemID: UUID?
+    /// Panel on screen + page picker armed. Toggled by the scope
+    /// chrome button; items persist across hide/show. On-page markers
+    /// follow this flag.
+    var panelVisible: Bool
 
     init(
-        sendTo: UUID? = nil,
         items: [BatchInspectItem] = [],
-        focusedItemID: UUID? = nil
+        focusedItemID: UUID? = nil,
+        panelVisible: Bool = true
     ) {
-        self.sendTo = sendTo
         self.items = items
         self.focusedItemID = focusedItemID
+        self.panelVisible = panelVisible
     }
 }
 
@@ -109,6 +109,20 @@ struct InspectResult: Equatable {
     /// "queue locally" path stamps each result with the user's
     /// per-item comment before enqueueing.
     var comment: String = ""
+}
+
+/// Remembered destination from the previous batch in this app
+/// session. Two distinct cases (rather than `Optional<UUID>`) so the
+/// "Local queue" pick is durable: `Optional<UUID>` would collapse it
+/// back to "no selection".
+///
+/// Note: the `.local` case is currently unreachable from the panel
+/// (the picker only offers pane targets and disables Send until one
+/// is picked) but is kept so the eventual "Local queue" picker entry
+/// has a place to land.
+enum BatchTargetMemory: Equatable {
+    case local
+    case pane(UUID)
 }
 
 /// Sidecar state for a `.web` pane. Lives on `WorkspaceFeature.State`
@@ -144,6 +158,12 @@ struct WebPaneState: Equatable {
     /// Active batch-annotate session — see BatchInspectState. nil
     /// when no batch is in progress (the default).
     var batchInspect: BatchInspectState?
+    /// Last destination the user picked for a batch on this pane in
+    /// the current app run. Drives the panel's initial picker
+    /// selection so a second batch defaults to the previous target.
+    /// Nil on the very first batch (and on fresh launch — not
+    /// serialised) so the user must pick deliberately.
+    var lastBatchTarget: BatchTargetMemory?
 
     init(tabs: [WebTab] = [], activeTabID: UUID? = nil, isPrivate: Bool = false) {
         self.tabs = tabs
