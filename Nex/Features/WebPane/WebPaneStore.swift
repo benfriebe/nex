@@ -17,7 +17,7 @@ final class WebPaneStore: Sendable {
     private nonisolated(unsafe) var coordinators: [UUID: WebPaneCoordinator] = [:]
 
     @MainActor
-    func coordinator(for paneID: UUID, isPrivate: Bool = false) -> WebPaneCoordinator {
+    func coordinator(for paneID: UUID, isPrivate: Bool) -> WebPaneCoordinator {
         if let existing = lock.withLock({ coordinators[paneID] }) {
             return existing
         }

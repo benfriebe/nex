@@ -55,6 +55,10 @@ struct PaneGridView: View {
     /// nil = drop into the local inspect-result queue.
     var onWebBatchSend: ((UUID, UUID?) -> Void)?
     var onWebBatchCancel: ((UUID) -> Void)?
+    /// Flip the per-pane private mode flag. Reducer destroys the
+    /// coordinator, the host then rebuilds against the new store on
+    /// the next SwiftUI pass.
+    var onWebTogglePrivate: ((UUID) -> Void)?
     /// Global web favourites — surfaced in every web pane's chrome.
     var favourites: [Favourite] = []
     var onToggleFavourite: ((String, String) -> Void)?
@@ -243,6 +247,7 @@ struct PaneGridView: View {
                     paneID: pane.id,
                     tabs: webPanes[pane.id]?.tabs ?? [],
                     activeTabID: webPanes[pane.id]?.activeTabID,
+                    isPrivate: webPanes[pane.id]?.isPrivate ?? false,
                     isFocused: pane.id == focusedPaneID,
                     focusURLBarToken: webPaneURLFocusToken[pane.id] ?? 0,
                     onNavigate: { url in onWebNavigate?(pane.id, url) },
@@ -252,6 +257,7 @@ struct PaneGridView: View {
                     onTabSelect: { tabID in onWebTabSelect?(pane.id, tabID) },
                     onTabClose: { tabID in onWebTabClose?(pane.id, tabID) },
                     onTabNew: { onWebTabNew?(pane.id) },
+                    onTogglePrivate: { onWebTogglePrivate?(pane.id) },
                     availableInspectTargets: inspectTargets(excluding: pane.id),
                     inspectorArmed: (webPanes[pane.id]?.batchInspect?.panelVisible) ?? false,
                     batchInspect: webPanes[pane.id]?.batchInspect,

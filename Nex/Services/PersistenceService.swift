@@ -159,7 +159,8 @@ actor PersistenceService {
                                 ?? tabs.first?.id
                             webPanes[paneID] = WebPaneState(
                                 tabs: tabs,
-                                activeTabID: activeID
+                                activeTabID: activeID,
+                                isPrivate: pr.webIsPrivate ?? false
                             )
                         }
                     }
@@ -328,21 +329,27 @@ struct PersistenceSnapshot {
                 // Write the full tab list as JSON and the active tab
                 // id. `webURL` is also written as a legacy fallback
                 // for any loader that pre-dates the v13 migration.
-                // Private panes intentionally drop everything so
-                // restart restores them blank.
+                // Private panes intentionally drop tab contents so
+                // restart restores them blank, but the
+                // `webIsPrivate` flag itself is always persisted so
+                // the coordinator rebuilds with a nonPersistent
+                // store on the next load.
                 var webURL: String?
                 var webTabsJSON: String?
                 var webActiveTabID: String?
+                var webIsPrivate: Bool?
                 if pane.type == .web,
-                   let webState = workspace.webPanes[pane.id],
-                   !webState.isPrivate {
-                    webURL = webState.activeTab?.url
-                    if !webState.tabs.isEmpty,
-                       let data = try? webTabsEncoder.encode(webState.tabs),
-                       let json = String(data: data, encoding: .utf8) {
-                        webTabsJSON = json
+                   let webState = workspace.webPanes[pane.id] {
+                    webIsPrivate = webState.isPrivate
+                    if !webState.isPrivate {
+                        webURL = webState.activeTab?.url
+                        if !webState.tabs.isEmpty,
+                           let data = try? webTabsEncoder.encode(webState.tabs),
+                           let json = String(data: data, encoding: .utf8) {
+                            webTabsJSON = json
+                        }
+                        webActiveTabID = webState.activeTabID?.uuidString
                     }
-                    webActiveTabID = webState.activeTabID?.uuidString
                 }
                 return PaneRecord(
                     id: pane.id.uuidString,
@@ -358,7 +365,8 @@ struct PersistenceSnapshot {
                     lastActivityAt: pane.lastActivityAt.timeIntervalSince1970,
                     webURL: webURL,
                     webTabsJSON: webTabsJSON,
-                    webActiveTabID: webActiveTabID
+                    webActiveTabID: webActiveTabID,
+                    webIsPrivate: webIsPrivate
                 )
             }
         }

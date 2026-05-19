@@ -1,6 +1,7 @@
 import AppKit
 import ComposableArchitecture
 import Foundation
+import WebKit
 
 @Reducer
 struct AppReducer {
@@ -472,6 +473,13 @@ struct AppReducer {
         /// disarm and clear batch state.
         case webBatchInspectSend(paneID: UUID, sendTo: UUID?)
         case webBatchInspectCancel(paneID: UUID)
+        /// Set the per-pane private flag. `enabled: nil` flips the
+        /// current value (UI toggle); a concrete value matches the CLI
+        /// `nex web private on|off` path. The reducer destroys the
+        /// pane's coordinator so the next SwiftUI pass rebuilds tabs
+        /// against the new data store. Live JS state is lost; the
+        /// chrome warns the user before sending this.
+        case webPaneSetPrivate(paneID: UUID, enabled: Bool?)
         /// Focus a batch item from either side of the list↔page sync.
         /// `origin == .panel` came from a panel-row tap → highlight
         /// the badge on the page. `origin == .page` came from a
@@ -1477,6 +1485,7 @@ struct AppReducer {
         state: State,
         paneID _: UUID?,
         url: String,
+        isPrivate: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
         guard let activeID = state.activeWorkspaceID else {
@@ -1492,6 +1501,7 @@ struct AppReducer {
             "pane_id": newPaneID.uuidString,
             "tab_id": newTabID.uuidString,
             "url": normalized,
+            "private": isPrivate,
             "workspace_id": activeID.uuidString
         ])
         reply?.close()
@@ -1502,7 +1512,7 @@ struct AppReducer {
                 tabID: newTabID,
                 url: url,
                 reusePaneID: nil,
-                isPrivate: false
+                isPrivate: isPrivate
             )
         )))
     }
@@ -1643,10 +1653,11 @@ struct AppReducer {
         let tabID = tab.id
         let tabURL = tab.url
         let tabTitle = tab.title
+        let isPrivate = resolved.webState.isPrivate
 
         return .run { _ in
             let snapshot: (url: String, title: String) = await MainActor.run {
-                store.coordinator(for: resolvedPaneID).currentURLAndTitle(tabID: tabID)
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).currentURLAndTitle(tabID: tabID)
                     ?? (tabURL, tabTitle)
             }
             var payload: [String: Any] = [
@@ -1661,11 +1672,11 @@ struct AppReducer {
             case .meta:
                 break
             case .text:
-                let text = await store.coordinator(for: resolvedPaneID).captureText(tabID: tabID)
+                let text = await store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).captureText(tabID: tabID)
                 payload["text"] = text
                 payload["byte_count"] = text.utf8.count
             case .screenshot:
-                let pngData = await store.coordinator(for: resolvedPaneID).captureScreenshot(tabID: tabID)
+                let pngData = await store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).captureScreenshot(tabID: tabID)
                 if let pngData {
                     let inlineThreshold = 1_000_000 // 1 MB
                     if pngData.count <= inlineThreshold {
@@ -2024,13 +2035,14 @@ struct AppReducer {
         let workspaceID = resolved.workspace.id
         let store = webPaneStore
         let tabID = tab.id
+        let isPrivate = resolved.webState.isPrivate
 
         return .run { send in
             // Arm the in-page picker on the main actor and read back
             // the nonce. Hop to MainActor.run synchronously so we
             // can return the nonce before the reply lands.
             let nonce: String? = await MainActor.run {
-                store.coordinator(for: resolvedPaneID).armInspector(tabID: tabID)
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).armInspector(tabID: tabID)
             }
             guard let nonce else {
                 reply?.error("failed to arm inspector for active tab")
@@ -2107,6 +2119,201 @@ struct AppReducer {
             return .merge(effects)
         }
         return .none
+    }
+
+    // MARK: - Web pane storage / cookies handlers (Phase 5)
+
+    func handleWebPrivate(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        enabled: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let already = resolved.webState.isPrivate == enabled
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "private": enabled,
+            "changed": !already
+        ])
+        if already { return .none }
+        return .send(.webPaneSetPrivate(paneID: resolved.paneID, enabled: enabled))
+    }
+
+    func handleWebCookiesList(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let isPrivate = resolved.webState.isPrivate
+        return .run { _ in
+            let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    guard let coord = store.coordinatorIfExists(for: resolvedPaneID) else {
+                        continuation.resume(returning: [])
+                        return
+                    }
+                    coord.dataStore.httpCookieStore.getAllCookies { result in
+                        continuation.resume(returning: result)
+                    }
+                }
+            }
+            let payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "private": isPrivate,
+                "cookies": cookies.map(Self.cookieJSON)
+            ]
+            reply?.sendAndClose(payload)
+        }
+    }
+
+    func handleWebCookiesClear(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        domain: String?,
+        all: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        if all, domain != nil {
+            reply?.error("--all and --domain are mutually exclusive")
+            return .none
+        }
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        return .run { _ in
+            let removed: Int = await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    guard let coord = store.coordinatorIfExists(for: resolvedPaneID) else {
+                        continuation.resume(returning: 0)
+                        return
+                    }
+                    let dataStore = coord.dataStore
+                    if all {
+                        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+                        dataStore.removeData(ofTypes: types, modifiedSince: .distantPast) {
+                            // Count is unknown for the omnibus
+                            // removeData path; report -1 so callers
+                            // can distinguish from "0 cookies matched".
+                            continuation.resume(returning: -1)
+                        }
+                        return
+                    }
+                    let needle = domain.map(HTTPCookie.canonicalDomain)
+                    dataStore.httpCookieStore.deleteAll(
+                        matching: { cookie in
+                            guard let needle else { return true }
+                            return HTTPCookie.canonicalDomain(cookie.domain) == needle
+                        },
+                        completion: { count in continuation.resume(returning: count) }
+                    )
+                }
+            }
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString
+            ]
+            if all {
+                payload["cleared_site_data"] = true
+            } else {
+                payload["deleted"] = removed
+                if let domain {
+                    payload["domain"] = domain
+                }
+            }
+            reply?.sendAndClose(payload)
+        }
+    }
+
+    func handleWebCookiesDelete(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        name: String,
+        domain: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        return .run { _ in
+            let removed: Int = await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    guard let coord = store.coordinatorIfExists(for: resolvedPaneID) else {
+                        continuation.resume(returning: 0)
+                        return
+                    }
+                    let needle = domain.map(HTTPCookie.canonicalDomain)
+                    coord.dataStore.httpCookieStore.deleteAll(
+                        matching: { cookie in
+                            guard cookie.name == name else { return false }
+                            guard let needle else { return true }
+                            return HTTPCookie.canonicalDomain(cookie.domain) == needle
+                        },
+                        completion: { count in continuation.resume(returning: count) }
+                    )
+                }
+            }
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "deleted": removed,
+                "name": name
+            ]
+            if let domain {
+                payload["domain"] = domain
+            }
+            reply?.sendAndClose(payload)
+        }
+    }
+
+    private static func cookieJSON(_ cookie: HTTPCookie) -> [String: Any] {
+        var dict: [String: Any] = [
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path,
+            "is_secure": cookie.isSecure,
+            "is_http_only": cookie.isHTTPOnly
+        ]
+        if let expires = cookie.expiresDate {
+            dict["expires"] = expires.timeIntervalSince1970
+        }
+        if cookie.isSessionOnly {
+            dict["session_only"] = true
+        }
+        return dict
     }
 
     /// Returns the last `n` lines of `text`, joined by `\n`. Preserves
@@ -3550,10 +3757,12 @@ struct AppReducer {
 
             case .webBatchInspectStart(let paneID):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
-                guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
+                guard let webState = workspace.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
                 let store = webPaneStore
                 let workspaceID = workspace.id
                 let tabID = tab.id
+                let isPrivate = webState.isPrivate
                 return .merge(
                     .send(.workspaces(.element(
                         id: workspaceID,
@@ -3562,7 +3771,7 @@ struct AppReducer {
                     .send(.syncBatchMarkers(paneID: paneID)),
                     .run { send in
                         let nonce: String? = await MainActor.run {
-                            store.coordinator(for: paneID).armInspector(tabID: tabID, sticky: true)
+                            store.coordinator(for: paneID, isPrivate: isPrivate).armInspector(tabID: tabID, sticky: true)
                         }
                         guard let nonce else { return }
                         await send(.workspaces(.element(
@@ -3611,10 +3820,12 @@ struct AppReducer {
 
             case .webBatchInspectShow(let paneID):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
-                guard let tab = workspace.webPanes[paneID]?.activeTab else { return .none }
+                guard let webState = workspace.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
                 let store = webPaneStore
                 let workspaceID = workspace.id
                 let tabID = tab.id
+                let isPrivate = webState.isPrivate
                 return .merge(
                     .send(.workspaces(.element(
                         id: workspaceID,
@@ -3623,7 +3834,7 @@ struct AppReducer {
                     .send(.syncBatchMarkers(paneID: paneID)),
                     .run { send in
                         let nonce: String? = await MainActor.run {
-                            store.coordinator(for: paneID).armInspector(tabID: tabID, sticky: true)
+                            store.coordinator(for: paneID, isPrivate: isPrivate).armInspector(tabID: tabID, sticky: true)
                         }
                         guard let nonce else { return }
                         await send(.workspaces(.element(
@@ -3632,6 +3843,30 @@ struct AppReducer {
                                 paneID: paneID, sendTo: nil, nonce: nonce
                             )
                         )))
+                    }
+                )
+
+            case .webPaneSetPrivate(let paneID, let enabledOpt):
+                guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
+                let current = workspace.webPanes[paneID]?.isPrivate ?? false
+                let enabled = enabledOpt ?? !current
+                guard current != enabled else { return .none }
+                let store = webPaneStore
+                let workspaceID = workspace.id
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspaceID,
+                        action: .webPaneSetIsPrivate(paneID: paneID, enabled: enabled)
+                    ))),
+                    // Destroy the coordinator so the host's next pass
+                    // builds a fresh one against the new data store.
+                    // The host's mismatch check would catch this too,
+                    // but doing it here keeps the teardown ordered
+                    // with the state flip.
+                    .run { _ in
+                        await MainActor.run {
+                            store.destroyCoordinator(paneID: paneID)
+                        }
                     }
                 )
 
@@ -4319,8 +4554,14 @@ struct AppReducer {
                 case .graftStatus:
                     return handleGraftStatus(state: state, reply: reply)
 
-                case .webOpen(let paneID, let url):
-                    return handleWebOpen(state: state, paneID: paneID, url: url, reply: reply)
+                case .webOpen(let paneID, let url, let isPrivate):
+                    return handleWebOpen(
+                        state: state,
+                        paneID: paneID,
+                        url: url,
+                        isPrivate: isPrivate,
+                        reply: reply
+                    )
 
                 case .webURL(let paneID, let target, let workspaceFilter):
                     return handleWebURL(
@@ -4442,6 +4683,47 @@ struct AppReducer {
                         target: target,
                         workspaceFilter: workspaceFilter,
                         clear: clear,
+                        reply: reply
+                    )
+
+                case .webPrivate(let paneID, let target, let workspaceFilter, let enabled):
+                    return handleWebPrivate(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        enabled: enabled,
+                        reply: reply
+                    )
+
+                case .webCookiesList(let paneID, let target, let workspaceFilter):
+                    return handleWebCookiesList(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
+
+                case .webCookiesClear(let paneID, let target, let workspaceFilter, let domain, let all):
+                    return handleWebCookiesClear(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        domain: domain,
+                        all: all,
+                        reply: reply
+                    )
+
+                case .webCookiesDelete(let paneID, let target, let workspaceFilter, let name, let domain):
+                    return handleWebCookiesDelete(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        name: name,
+                        domain: domain,
                         reply: reply
                     )
                 }

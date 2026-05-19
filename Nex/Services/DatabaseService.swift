@@ -203,6 +203,21 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Phase 5: per-pane private mode. Private panes survive
+        // restart as the pane (still .web, still flagged private) but
+        // their tabs/URLs and on-disk cookies do not — `webURL` and
+        // `webTabsJSON` are written nil for private panes; only the
+        // flag persists so the coordinator rebuilds with a
+        // nonPersistent data store on restore.
+        migrator.registerMigration("v14_web_pane_private") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("webIsPrivate") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "webIsPrivate", .boolean)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -247,6 +262,11 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var webTabsJSON: String?
     /// Id of the active tab; nil falls back to `tabs.first`.
     var webActiveTabID: String?
+    /// Per-pane private mode (Phase 5). When true the pane uses a
+    /// `WKWebsiteDataStore.nonPersistent()` store and saves with no
+    /// URL or tabs, so reopen restores a blank pane that still
+    /// remembers it is private.
+    var webIsPrivate: Bool?
 }
 
 struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {

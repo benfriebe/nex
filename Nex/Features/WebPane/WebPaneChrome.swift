@@ -14,11 +14,19 @@ struct WebPaneChrome: View {
     /// All open tabs. Used by the tab strip to render pills.
     let tabs: [WebTab]
     let activeTabID: UUID?
+    /// True when the pane is running against a `nonPersistent()`
+    /// data store — surfaced as a filled-lock icon on the storage
+    /// chrome button.
+    var isPrivate: Bool = false
+    /// True while the storage / cookies disclosure panel is open
+    /// (the button shows accent fill while the panel is visible).
+    var storagePanelVisible: Bool = false
     let onBack: () -> Void
     let onForward: () -> Void
     let onReload: () -> Void
     let onNavigate: (String) -> Void
     let onInspect: () -> Void
+    var onToggleStoragePanel: (() -> Void)?
     let onTabSelect: (UUID) -> Void
     let onTabClose: (UUID) -> Void
     let onTabNew: () -> Void
@@ -169,6 +177,8 @@ struct WebPaneChrome: View {
 
             inspectPickupControl
 
+            storageControl
+
             Button(action: onInspect) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 11, weight: .medium))
@@ -181,6 +191,26 @@ struct WebPaneChrome: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
+    }
+
+    private var storageControl: some View {
+        Button(action: { onToggleStoragePanel?() }) {
+            Image(systemName: isPrivate ? "lock.fill" : "lock")
+                .font(.system(size: 11, weight: storagePanelVisible ? .semibold : .medium))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+                .foregroundStyle(
+                    (isPrivate || storagePanelVisible)
+                        ? Color.accentColor
+                        : Color.primary.opacity(0.8)
+                )
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(storagePanelVisible ? Color.accentColor.opacity(0.18) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(isPrivate ? "Storage (private mode)" : "Storage / cookies")
     }
 
     private var inspectPickupControl: some View {

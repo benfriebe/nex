@@ -101,9 +101,11 @@ func printUsage() {
       nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft status [--json]
-      nex web open <url>
+      nex web open [--private] <url>
       nex web url|back|forward|reload [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
       nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
+      nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web cookies list|clear|delete [...]
     \n
     """, stderr)
 }
@@ -756,7 +758,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
 func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
     fputs("""
     Usage:
-      nex web open <url>
+      nex web open [--private] <url>
       nex web url      [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web back     [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web forward  [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -769,6 +771,8 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web console     [--target ...] [--workspace ...] [--since N] [--level log|debug|info|warn|error] [--clear] [--json]
       nex web inspect     [--target ...] [--workspace ...] [--send-to <pane>] [--submit] [--disarm]
       nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
+      nex web private    on|off [--target ...] [--workspace ...]
+      nex web cookies    list|clear|delete [...]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -827,14 +831,18 @@ func handleWeb(_ args: inout ArraySlice<String>) {
 
     switch action {
     case "open":
+        let isPrivate = popSwitch("--private", from: &args)
         guard let url = args.popFirst(), !url.isEmpty else {
-            fputs("Usage: nex web open <url>\n", stderr)
+            fputs("Usage: nex web open [--private] <url>\n", stderr)
             exit(1)
         }
         var payload: [String: Any] = [
             "command": "web-open",
             "url": url
         ]
+        if isPrivate {
+            payload["private"] = true
+        }
         if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
            !originPaneID.isEmpty {
             payload["pane_id"] = originPaneID
@@ -985,6 +993,33 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         if clear { payload["clear"] = true }
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "inspect-result")
         sendWebReplyAndPrintInspectResult(payload, asJSON: asJSON)
+
+    case "private":
+        guard let mode = args.popFirst(), !mode.isEmpty else {
+            fputs("Usage: nex web private on|off [--target X] [--workspace Y]\n", stderr)
+            exit(1)
+        }
+        let enabled: Bool
+        switch mode.lowercased() {
+        case "on", "true", "1", "yes":
+            enabled = true
+        case "off", "false", "0", "no":
+            enabled = false
+        default:
+            fputs("nex web private: expected 'on' or 'off' (got '\(mode)')\n", stderr)
+            exit(1)
+        }
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        var payload: [String: Any] = [
+            "command": "web-private",
+            "private": enabled
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "private")
+        sendWebReplyAndPrintPrivate(payload)
+
+    case "cookies":
+        handleWebCookies(&args)
 
     default:
         fputs("Unknown web action: \(action)\n", stderr)
@@ -1235,6 +1270,176 @@ private func sendWebReplyAndPrintInspectResult(_ payload: [String: Any], asJSON:
         let tag = (result["tag"] as? String) ?? ""
         print("\(tag)  \(selector)  (\(url))")
     }
+}
+
+// MARK: - web private + cookies
+
+func handleWebCookies(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        printWebCookiesUsage(stream: stderr)
+        exit(1)
+    }
+    if action == "-h" || action == "--help" || action == "help" {
+        printWebCookiesUsage(stream: stdout)
+        exit(0)
+    }
+
+    switch action {
+    case "list":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var payload: [String: Any] = ["command": "web-cookies-list"]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "cookies list")
+        sendWebReplyAndPrintCookies(payload, asJSON: asJSON)
+
+    case "clear":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let domain = parseFlag("--domain", from: &args)
+        let all = popSwitch("--all", from: &args)
+        if all, domain != nil {
+            fputs("nex web cookies clear: --all and --domain are mutually exclusive\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = ["command": "web-cookies-clear"]
+        if let domain { payload["domain"] = domain }
+        if all { payload["all"] = true }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "cookies clear")
+        sendWebReplyAndPrintCookiesClear(payload, all: all)
+
+    case "delete":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let domain = parseFlag("--domain", from: &args)
+        guard let name = parseFlag("--name", from: &args) ?? args.popFirst(),
+              !name.isEmpty else {
+            fputs("Usage: nex web cookies delete <name> [--domain <d>] [--target X] [--workspace Y]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-cookies-delete",
+            "name": name
+        ]
+        if let domain { payload["domain"] = domain }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "cookies delete")
+        sendWebReplyAndPrintCookiesDelete(payload)
+
+    default:
+        fputs("Unknown cookies action: \(action)\n", stderr)
+        printWebCookiesUsage(stream: stderr)
+        exit(1)
+    }
+}
+
+private func printWebCookiesUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex web cookies list   [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--json]
+      nex web cookies clear  [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--domain <d>] [--all]
+      nex web cookies delete <name> [--domain <d>] [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+
+    --all on `clear` removes cookies AND caches/local storage/indexed db for
+    this pane's data store. Without --domain, `clear` removes every cookie.
+    \n
+    """, stream)
+}
+
+/// Send `payload` to Nex and decode the reply for a `nex web ...` command.
+/// Exits non-zero with a structured stderr message on transport failure,
+/// empty reply, invalid JSON, or `ok=false`. `command` is the label used in
+/// error messages (e.g. "private", "cookies list").
+private func readWebReplyOrExit(_ payload: [String: Any], command: String) -> [String: Any] {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex web \(command): \(msg)\n", stderr)
+        exit(1)
+    }
+    return json
+}
+
+private func sendWebReplyAndPrintPrivate(_ payload: [String: Any]) {
+    let json = readWebReplyOrExit(payload, command: "private")
+    let isPrivate = (json["private"] as? Bool) ?? false
+    let changed = (json["changed"] as? Bool) ?? false
+    let paneID = (json["pane_id"] as? String) ?? "?"
+    let suffix = changed ? "" : " (no change)"
+    print("private \(isPrivate ? "on" : "off"): \(paneID)\(suffix)")
+}
+
+private func sendWebReplyAndPrintCookies(_ payload: [String: Any], asJSON: Bool) {
+    let json = readWebReplyOrExit(payload, command: "cookies list")
+    let cookies = (json["cookies"] as? [[String: Any]]) ?? []
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: cookies, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    if cookies.isEmpty {
+        print("(no cookies)")
+        return
+    }
+    print("DOMAIN                     NAME                 VALUE")
+    let sorted = cookies.sorted {
+        let a = ($0["domain"] as? String) ?? ""
+        let b = ($1["domain"] as? String) ?? ""
+        if a != b { return a < b }
+        return (($0["name"] as? String) ?? "") < (($1["name"] as? String) ?? "")
+    }
+    for cookie in sorted {
+        let domain = (cookie["domain"] as? String) ?? ""
+        let name = (cookie["name"] as? String) ?? ""
+        let value = (cookie["value"] as? String) ?? ""
+        let domainClipped = domain.count > 24 ? String(domain.prefix(23)) + "…" : domain
+        let nameClipped = name.count > 20 ? String(name.prefix(19)) + "…" : name
+        let valueClipped = value.count > 40 ? String(value.prefix(39)) + "…" : value
+        print(String(
+            format: "%-26@  %-20@  %@",
+            domainClipped as NSString,
+            nameClipped as NSString,
+            valueClipped
+        ))
+    }
+}
+
+private func sendWebReplyAndPrintCookiesClear(_ payload: [String: Any], all: Bool) {
+    let json = readWebReplyOrExit(payload, command: "cookies clear")
+    if all || (json["cleared_site_data"] as? Bool) == true {
+        print("cleared all site data")
+        return
+    }
+    let deleted = (json["deleted"] as? Int) ?? 0
+    let domain = (json["domain"] as? String) ?? ""
+    if domain.isEmpty {
+        print("deleted \(deleted) cookie\(deleted == 1 ? "" : "s")")
+    } else {
+        print("deleted \(deleted) cookie\(deleted == 1 ? "" : "s") for \(domain)")
+    }
+}
+
+private func sendWebReplyAndPrintCookiesDelete(_ payload: [String: Any]) {
+    let json = readWebReplyOrExit(payload, command: "cookies delete")
+    let deleted = (json["deleted"] as? Int) ?? 0
+    let name = (json["name"] as? String) ?? "?"
+    if deleted == 0 {
+        print("no cookie matched name '\(name)'")
+        exit(1)
+    }
+    print("deleted \(deleted) cookie\(deleted == 1 ? "" : "s") named '\(name)'")
 }
 
 // MARK: - pane list

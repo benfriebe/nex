@@ -193,6 +193,9 @@ struct ContentView: View {
                         onWebBatchCancel: { paneID in
                             store.send(.webBatchInspectCancel(paneID: paneID))
                         },
+                        onWebTogglePrivate: { paneID in
+                            store.send(.webPaneSetPrivate(paneID: paneID, enabled: nil))
+                        },
                         favourites: store.favourites,
                         onToggleFavourite: { url, title in
                             store.send(.toggleFavourite(url: url, title: title))

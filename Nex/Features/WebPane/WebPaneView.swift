@@ -15,6 +15,11 @@ struct WebPaneView: View {
     let tabs: [WebTab]
     /// Currently visible tab. nil falls back to `tabs.first`.
     let activeTabID: UUID?
+    /// Whether the pane runs against a `nonPersistent()` data store.
+    /// The host uses this to pick the right coordinator at first
+    /// mount, and to detect when a toggle requires destroying +
+    /// rebuilding the coordinator against the new store.
+    let isPrivate: Bool
     let isFocused: Bool
     /// Bumped by parent (PaneGridView) when ⌘L fires for this pane,
     /// the chrome promotes the URL bar to first responder.
@@ -26,6 +31,11 @@ struct WebPaneView: View {
     let onTabSelect: (UUID) -> Void
     let onTabClose: (UUID) -> Void
     let onTabNew: () -> Void
+    /// Flip between persistent + nonPersistent data stores. The
+    /// reducer warns the user about the loss of live JS state /
+    /// cookies before calling through, so this is unconditional at
+    /// the view layer.
+    var onTogglePrivate: (() -> Void)?
     /// Sibling panes in the same workspace, surfaced in the panel's
     /// destination picker at send time.
     let availableInspectTargets: [InspectTargetOption]
@@ -48,6 +58,7 @@ struct WebPaneView: View {
     let onOpenFavourite: (String) -> Void
 
     @Environment(\.webPaneStore) private var webPaneStore
+    @State private var storagePanelVisible: Bool = false
     @State private var displayedURL: String = ""
     /// Title that pairs with `displayedURL`. Updated from the same
     /// stateDidChange notification so the star toggle never saves a
@@ -76,11 +87,14 @@ struct WebPaneView: View {
                 isLoading: isLoading,
                 tabs: tabs,
                 activeTabID: active?.id,
+                isPrivate: isPrivate,
+                storagePanelVisible: storagePanelVisible,
                 onBack: onBack,
                 onForward: onForward,
                 onReload: onReload,
                 onNavigate: onNavigate,
                 onInspect: toggleInspector,
+                onToggleStoragePanel: { storagePanelVisible.toggle() },
                 onTabSelect: onTabSelect,
                 onTabClose: onTabClose,
                 onTabNew: onTabNew,
@@ -94,6 +108,15 @@ struct WebPaneView: View {
                 },
                 onOpenFavourite: onOpenFavourite
             )
+
+            if storagePanelVisible {
+                StoragePanel(
+                    paneID: paneID,
+                    isPrivate: isPrivate,
+                    onTogglePrivate: { onTogglePrivate?() },
+                    onClose: { storagePanelVisible = false }
+                )
+            }
 
             if let batchInspect, batchInspect.panelVisible {
                 WebBatchInspectPanel(
@@ -116,6 +139,7 @@ struct WebPaneView: View {
                     paneID: paneID,
                     tabs: tabs,
                     activeTab: active,
+                    isPrivate: isPrivate,
                     isFocused: isFocused
                 )
             }
@@ -161,7 +185,7 @@ struct WebPaneView: View {
 
     private func toggleInspector() {
         guard let tab = activeTab else { return }
-        webPaneStore.coordinator(for: paneID).toggleInspector(tabID: tab.id)
+        webPaneStore.coordinator(for: paneID, isPrivate: isPrivate).toggleInspector(tabID: tab.id)
     }
 
     private func refreshState() {
@@ -217,13 +241,14 @@ private struct WebPaneHost: NSViewRepresentable {
     /// Pre-resolved by `WebPaneView` so this host and the chrome
     /// agree on which tab is visible (no double fallback).
     let activeTab: WebTab?
+    let isPrivate: Bool
     let isFocused: Bool
 
     @Environment(\.webPaneStore) private var webPaneStore
 
     func makeNSView(context _: Context) -> PaneFocusView {
         let focus = PaneFocusView(paneID: paneID)
-        let coord = webPaneStore.coordinator(for: paneID)
+        let coord = webPaneStore.coordinator(for: paneID, isPrivate: isPrivate)
         for tab in tabs {
             let tabContainer = coord.container(for: tab)
             focus.embed(tabContainer)
@@ -239,7 +264,19 @@ private struct WebPaneHost: NSViewRepresentable {
     }
 
     func updateNSView(_ focus: PaneFocusView, context _: Context) {
-        let coord = webPaneStore.coordinator(for: paneID)
+        // Privacy-mode mismatch: WKWebsiteDataStore is sealed at
+        // WKWebView config time, so toggling between persistent /
+        // nonPersistent stores requires tearing down the coordinator
+        // and rebuilding fresh tabs. The reducer also destroys on
+        // flag change; this is a defence-in-depth backstop in case
+        // SwiftUI re-renders before that effect lands.
+        if let existing = webPaneStore.coordinatorIfExists(for: paneID) {
+            let wantsPersistent = !isPrivate
+            if existing.dataStore.isPersistent != wantsPersistent {
+                webPaneStore.destroyCoordinator(paneID: paneID)
+            }
+        }
+        let coord = webPaneStore.coordinator(for: paneID, isPrivate: isPrivate)
         let liveContainers = tabs.map { coord.container(for: $0) }
         let liveContainerSet = Set(liveContainers.map { ObjectIdentifier($0) })
 

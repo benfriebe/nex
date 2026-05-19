@@ -292,6 +292,10 @@ struct WorkspaceFeature {
         /// chrome toggle so the user can dismiss the panel without
         /// losing their pending items.
         case webBatchPanelVisible(paneID: UUID, visible: Bool)
+        /// Flip / set the per-pane private flag. Pure state mutation —
+        /// the AppReducer destroys the coordinator alongside so the
+        /// host rebuilds tabs against the new data store.
+        case webPaneSetIsPrivate(paneID: UUID, enabled: Bool)
         /// Focus an item in the active batch — used by both the
         /// list-row tap (which then highlights on page) and the
         /// page-side marker click (which then highlights the row).
@@ -665,9 +669,10 @@ struct WorkspaceFeature {
                     state.webPanes[paneID] = ws
                 }
                 let store = webPaneStore
+                let isPrivate = state.webPanes[paneID]?.isPrivate ?? false
                 return .run { _ in
                     await MainActor.run {
-                        let coord = store.coordinator(for: paneID)
+                        let coord = store.coordinator(for: paneID, isPrivate: isPrivate)
                         _ = coord.navigate(tab: tab, to: normalized)
                     }
                 }
@@ -676,9 +681,10 @@ struct WorkspaceFeature {
                 guard let webState = state.webPanes[paneID],
                       let tab = webState.activeTab else { return .none }
                 let store = webPaneStore
+                let isPrivate = webState.isPrivate
                 return .run { _ in
                     await MainActor.run {
-                        _ = store.coordinator(for: paneID).goBack(tabID: tab.id)
+                        _ = store.coordinator(for: paneID, isPrivate: isPrivate).goBack(tabID: tab.id)
                     }
                 }
 
@@ -686,9 +692,10 @@ struct WorkspaceFeature {
                 guard let webState = state.webPanes[paneID],
                       let tab = webState.activeTab else { return .none }
                 let store = webPaneStore
+                let isPrivate = webState.isPrivate
                 return .run { _ in
                     await MainActor.run {
-                        _ = store.coordinator(for: paneID).goForward(tabID: tab.id)
+                        _ = store.coordinator(for: paneID, isPrivate: isPrivate).goForward(tabID: tab.id)
                     }
                 }
 
@@ -696,9 +703,10 @@ struct WorkspaceFeature {
                 guard let webState = state.webPanes[paneID],
                       let tab = webState.activeTab else { return .none }
                 let store = webPaneStore
+                let isPrivate = webState.isPrivate
                 return .run { _ in
                     await MainActor.run {
-                        _ = store.coordinator(for: paneID).reload(tabID: tab.id, hard: hard)
+                        _ = store.coordinator(for: paneID, isPrivate: isPrivate).reload(tabID: tab.id, hard: hard)
                     }
                 }
 
@@ -899,6 +907,13 @@ struct WorkspaceFeature {
                       let batch = webState.batchInspect,
                       batch.panelVisible != visible else { return .none }
                 webState.batchInspect?.panelVisible = visible
+                state.webPanes[paneID] = webState
+                return .none
+
+            case .webPaneSetIsPrivate(let paneID, let enabled):
+                guard var webState = state.webPanes[paneID],
+                      webState.isPrivate != enabled else { return .none }
+                webState.isPrivate = enabled
                 state.webPanes[paneID] = webState
                 return .none
 

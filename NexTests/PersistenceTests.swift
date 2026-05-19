@@ -207,6 +207,109 @@ struct PersistenceTests {
         #expect(result.repoRegistry.first?.remoteURL == "https://github.com/user/my-repo.git")
     }
 
+    @Test func webPanePublicRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let paneID = UUID()
+        let pane = Pane(
+            id: paneID,
+            type: .web,
+            workingDirectory: NSHomeDirectory(),
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastActivityAt: Date(timeIntervalSince1970: 2000)
+        )
+        let tabID = UUID()
+        let webState = WebPaneState(
+            tabs: [WebTab(id: tabID, url: "https://example.com", title: "Example")],
+            activeTabID: tabID,
+            isPrivate: false
+        )
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: wsID,
+            name: "Web Test",
+            slug: "web-test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .blue,
+            panes: [pane],
+            layout: .leaf(paneID),
+            focusedPaneID: paneID,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 2000),
+            webPanes: [paneID: webState]
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(workspace)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        let loadedWS = result.workspaces.first!
+        let loadedWeb = loadedWS.webPanes[paneID]
+        #expect(loadedWeb != nil)
+        #expect(loadedWeb?.isPrivate == false)
+        #expect(loadedWeb?.tabs.count == 1)
+        #expect(loadedWeb?.tabs.first?.url == "https://example.com")
+        #expect(loadedWeb?.activeTabID == tabID)
+    }
+
+    @Test func webPanePrivateBlanksOnReload() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let paneID = UUID()
+        let pane = Pane(
+            id: paneID,
+            type: .web,
+            workingDirectory: NSHomeDirectory(),
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastActivityAt: Date(timeIntervalSince1970: 2000)
+        )
+        let tabID = UUID()
+        // Private pane with a tab in memory — save must drop the
+        // tab from disk but preserve the private flag itself so the
+        // restore keeps the pane configured for a nonPersistent
+        // data store.
+        let webState = WebPaneState(
+            tabs: [WebTab(id: tabID, url: "https://secret.example.com")],
+            activeTabID: tabID,
+            isPrivate: true
+        )
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: wsID,
+            name: "Private Test",
+            slug: "private-test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .blue,
+            panes: [pane],
+            layout: .leaf(paneID),
+            focusedPaneID: paneID,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 2000),
+            webPanes: [paneID: webState]
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(workspace)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        let loadedWS = result.workspaces.first!
+        let loadedPane = loadedWS.panes.first!
+        let loadedWeb = loadedWS.webPanes[paneID]
+        #expect(loadedPane.type == .web)
+        #expect(loadedWeb != nil)
+        #expect(loadedWeb?.isPrivate == true)
+        #expect(loadedWeb?.tabs.isEmpty == true)
+        #expect(loadedWeb?.activeTabID == nil)
+    }
+
     @Test func repoAssociationRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)

@@ -92,7 +92,7 @@ enum SocketMessage: Equatable {
     /// Open a new `.web` pane with the given URL. `paneID` (from
     /// `NEX_PANE_ID`) is informational; opening always creates a new
     /// pane in the active workspace, mirroring `nex diff`.
-    case webOpen(paneID: UUID?, url: String)
+    case webOpen(paneID: UUID?, url: String, isPrivate: Bool)
     /// Read the active tab's current URL + title for the resolved pane.
     case webURL(paneID: UUID?, target: String?, workspace: String?)
     case webBack(paneID: UUID?, target: String?, workspace: String?)
@@ -141,6 +141,31 @@ enum SocketMessage: Equatable {
     case webInspectResult(
         paneID: UUID?, target: String?, workspace: String?, clear: Bool
     )
+
+    // Phase 5 — private mode + cookies
+
+    /// Set the resolved web pane's private mode flag. The reducer
+    /// destroys the coordinator so the host rebuilds tabs against
+    /// the new data store. Idempotent.
+    case webPrivate(
+        paneID: UUID?, target: String?, workspace: String?, enabled: Bool
+    )
+    /// List cookies for the resolved web pane's data store, grouped
+    /// by domain. Read-only.
+    case webCookiesList(paneID: UUID?, target: String?, workspace: String?)
+    /// Drop cookies (and other site data when `--all`) for the
+    /// resolved web pane's data store. `domain` scopes deletion to
+    /// cookies whose domain matches; omitting it clears everything.
+    case webCookiesClear(
+        paneID: UUID?, target: String?, workspace: String?,
+        domain: String?, all: Bool
+    )
+    /// Delete cookies matching `name` (and optional `domain` scope)
+    /// from the resolved web pane's data store.
+    case webCookiesDelete(
+        paneID: UUID?, target: String?, workspace: String?,
+        name: String, domain: String?
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -153,7 +178,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-open", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
-    "web-console", "web-inspect", "web-inspect-result"
+    "web-console", "web-inspect", "web-inspect-result",
+    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -590,6 +616,16 @@ final class SocketServer: Sendable {
         var submit: Bool?
         /// `web-inspect --disarm`.
         var disarm: Bool?
+        /// `web-open --private`, `web-private on|off`. Treated as a
+        /// tri-state on `web-open` (nil = no flag → default false);
+        /// `web-private` requires it.
+        var isPrivate: Bool?
+        /// `web-cookies-*` — RFC 6265 domain. Optional on clear,
+        /// optional on delete (scopes to a single host when present).
+        var domain: String?
+        /// `web-cookies-clear --all` extends deletion to caches +
+        /// local storage + indexed db.
+        var all: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -611,6 +647,8 @@ final class SocketServer: Sendable {
             case since, level, clear
             case sendTo = "send_to"
             case submit, disarm
+            case isPrivate = "private"
+            case domain, all
         }
     }
 
@@ -746,7 +784,7 @@ final class SocketServer: Sendable {
         if wire.command == "web-open" {
             guard let url = wire.url, !url.isEmpty else { return nil }
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            return (.webOpen(paneID: paneID, url: url), wire)
+            return (.webOpen(paneID: paneID, url: url, isPrivate: wire.isPrivate ?? false), wire)
         }
 
         if wire.command == "web-url" {
@@ -843,6 +881,49 @@ final class SocketServer: Sendable {
                 target: scope.target,
                 workspace: scope.workspace,
                 clear: wire.clear ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-private" {
+            guard let scope = parseWebTarget(wire),
+                  let enabled = wire.isPrivate else { return nil }
+            return (.webPrivate(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                enabled: enabled
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-list" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webCookiesList(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-clear" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webCookiesClear(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                domain: (wire.domain?.isEmpty == true) ? nil : wire.domain,
+                all: wire.all ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-delete" {
+            guard let scope = parseWebTarget(wire),
+                  let name = wire.name, !name.isEmpty else { return nil }
+            return (.webCookiesDelete(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                name: name,
+                domain: (wire.domain?.isEmpty == true) ? nil : wire.domain
             ), wire)
         }
 
