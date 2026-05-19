@@ -1259,4 +1259,62 @@ struct SocketParsingTests {
             selector: "css:#a", maxBytes: 4096
         ))
     }
+
+    // MARK: - Phase D — wait (web-wait)
+
+    @Test func parseWebWaitSelectorOnly() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"text:Loaded","timeout_ms":5000}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Loaded", urlMatch: nil,
+            forCondition: nil, timeoutMs: 5000
+        ))
+    }
+
+    @Test func parseWebWaitUrlMatchOnly() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","url_match":"/checkout"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        // Missing timeout_ms → server defaults to 10000ms so JS-side
+        // never gets `0` which would be a no-wait.
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: nil, urlMatch: "/checkout",
+            forCondition: nil, timeoutMs: 10000
+        ))
+    }
+
+    @Test func parseWebWaitWithForCondition() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"css:.spinner","for":"hidden","timeout_ms":3000}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:.spinner", urlMatch: nil,
+            forCondition: "hidden", timeoutMs: 3000
+        ))
+    }
+
+    @Test func parseWebWaitRequiresSelectorOrUrlMatch() {
+        // Neither field present → reject. (Different from a JS-side
+        // validation error; this is the wire-layer guard so other
+        // clients can't ship a bare wait and stall the actuator.)
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","timeout_ms":1000}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebWaitEmptyStringsTreatedAsAbsent() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"","url_match":""}
+        """)
+        // Both empty → both absent → reject.
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
 }

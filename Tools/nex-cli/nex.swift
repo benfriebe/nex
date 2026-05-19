@@ -113,6 +113,7 @@ func printUsage() {
       nex web count <selector> [--target X] [--workspace Y] [--json]
       nex web exists <selector> [--target X] [--workspace Y]   # exit 0 = yes, 1 = no
       nex web dom <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
+      nex web wait (--selector <sel> | --url-match <substr-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--target X] [--workspace Y] [--json]
     \n
     """, stderr)
 }
@@ -799,6 +800,7 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web count   [--target ...] [--workspace ...] <selector> [--json]
       nex web exists  [--target ...] [--workspace ...] <selector>   # exit 0 = yes, 1 = no
       nex web dom     [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
+      nex web wait    [--target ...] [--workspace ...] (--selector <sel> | --url-match <sub-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--json]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1206,6 +1208,50 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "dom")
         sendWebReplyAndPrintRead(payload, command: "dom", asJSON: asJSON)
 
+    case "wait":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let selector = parseFlag("--selector", from: &args)
+        let forCondition = parseFlag("--for", from: &args)
+        let urlMatch = parseFlag("--url-match", from: &args)
+        let timeoutStr = parseFlag("--timeout", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        // Exactly one of --selector / --url-match must be present.
+        // Conditions like visible/hidden/count/text always need a
+        // selector; url-match conflicts with selector (the JS side
+        // ignores selector when for=url-match anyway, but we reject
+        // here so misuse surfaces at usage time).
+        guard selector != nil || urlMatch != nil else {
+            fputs("nex web wait: one of --selector or --url-match is required\n", stderr)
+            exit(1)
+        }
+        if selector != nil, urlMatch != nil {
+            fputs("nex web wait: --selector and --url-match are mutually exclusive\n", stderr)
+            exit(1)
+        }
+        // --timeout is in seconds (matches user expectation); wire
+        // ships milliseconds. Default 10s — JS side enforces the
+        // same default if we ship 0.
+        let timeoutSeconds: Double
+        if let timeoutStr {
+            guard let parsed = Double(timeoutStr), parsed > 0 else {
+                fputs("nex web wait: --timeout must be a positive number of seconds (got '\(timeoutStr)')\n", stderr)
+                exit(1)
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 10
+        }
+        var payload: [String: Any] = [
+            "command": "web-wait",
+            "timeout_ms": Int(timeoutSeconds * 1000)
+        ]
+        if let selector { payload["selector"] = selector }
+        if let urlMatch { payload["url_match"] = urlMatch }
+        if let forCondition { payload["for"] = forCondition }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "wait")
+        sendWebReplyAndPrintActuator(payload, command: "wait", asJSON: asJSON)
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
@@ -1270,6 +1316,12 @@ private func sendWebReplyAndPrintActuator(
     case "type":
         let value = (json["value"] as? String) ?? ""
         print("typed: \(value)")
+    case "wait":
+        // The decode helper already exited on ok=false (incl. timeout
+        // sets ok:false), so reaching here means the condition fired.
+        let cond = (json["condition"] as? String) ?? "exists"
+        let waited = (json["waited_ms"] as? Int) ?? 0
+        print("matched \(cond) in \(waited) ms")
     default:
         print("\(command) ok")
     }

@@ -563,6 +563,22 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return try? await webView.evaluateJavaScript(source)
     }
 
+    /// Like `evaluateJavaScript` but `WKWebView.callAsyncJavaScript`
+    /// wraps the source in an async function and awaits returned
+    /// Promises — required for actuator methods whose JS body
+    /// returns a Promise (e.g. `wait`). The plain
+    /// `evaluateJavaScript` path returns the Promise *object*
+    /// instead of awaiting it, which serialises to `{}`.
+    func callAsyncJavaScript(tabID: UUID, source: String) async -> Any? {
+        guard let webView = webViews[tabID] else { return nil }
+        return try? await webView.callAsyncJavaScript(
+            source,
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+    }
+
     /// Whether the coordinator currently has a WebView for `tabID`.
     /// `WebPaneActuator` uses this to distinguish "tab gone between
     /// dispatch and evaluation" from "tab still present but the

@@ -51,6 +51,22 @@ final class ActuatorTestHost: NSObject, WKNavigationDelegate {
         try await (eval(js) as? String) ?? ""
     }
 
+    /// `callAsyncJavaScript` wraps `js` in `async function(){ ... }`
+    /// and awaits any returned Promise, so the resolved value is
+    /// what comes back. Required for testing actuator methods that
+    /// return Promises (`wait`).
+    func evalAsync(_ js: String) async throws -> Any? {
+        try await webView.callAsyncJavaScript(
+            js, arguments: [:], in: nil, contentWorld: .page
+        )
+    }
+
+    /// Convenience: `callAsyncJavaScript` returning a JSON-encoded
+    /// string. Combine with `parse(_:)` to inspect a reply envelope.
+    func evalAsyncString(_ js: String) async throws -> String {
+        try await (evalAsync(js) as? String) ?? ""
+    }
+
     /// Parse a JSON object string produced by `JSON.stringify(...)`
     /// on the JS side. Throws (with the raw string in the message) if
     /// the input isn't a valid JSON object.

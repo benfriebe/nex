@@ -217,6 +217,20 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         selector: String, maxBytes: Int?
     )
+
+    /// `nex web wait` — server-side polling (Phase D). Exactly one of
+    /// `selector` / `urlMatch` is required at the server; the CLI
+    /// enforces this client-side, so a wire payload with neither
+    /// reaches the JS-side validator and surfaces a structured error.
+    ///
+    /// `forCondition` is the literal `--for` token (`visible`,
+    /// `hidden`, `exists`, `count=N`, `text=X`, `url-match`); the JS
+    /// side parses the `count=N`/`text=X` suffix.
+    case webWait(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String?, urlMatch: String?,
+        forCondition: String?, timeoutMs: Int
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -232,7 +246,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-console", "web-inspect", "web-inspect-result",
     "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
     "web-click", "web-type",
-    "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom"
+    "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom",
+    "web-wait"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -698,6 +713,14 @@ final class SocketServer: Sendable {
         var maxBytes: Int?
         /// `web-q-attr` — attribute name to read.
         var attribute: String?
+        /// `web-wait` — match condition. Literal value of the `--for`
+        /// flag (visible, hidden, exists, count=N, text=X, url-match).
+        /// JS-side parses count=/text= suffixes.
+        var forCondition: String?
+        /// `web-wait --url-match` — substring or /regex/flags.
+        var urlMatch: String?
+        /// `web-wait --timeout` (milliseconds). 0 / nil → JS default 10000.
+        var timeoutMs: Int?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -727,6 +750,9 @@ final class SocketServer: Sendable {
             case replace
             case maxBytes = "max_bytes"
             case attribute
+            case forCondition = "for"
+            case urlMatch = "url_match"
+            case timeoutMs = "timeout_ms"
         }
     }
 
@@ -1091,6 +1117,33 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 selector: selector,
                 maxBytes: wire.maxBytes
+            ), wire)
+        }
+
+        if wire.command == "web-wait" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
+            let urlMatch = (wire.urlMatch?.isEmpty == true) ? nil : wire.urlMatch
+            // Selector OR urlMatch must be present — both nil is a
+            // usage error. The CLI catches this before sending, but
+            // the wire validates too so misuse from other clients
+            // surfaces as a clean rejection rather than a JS-side
+            // "unknown condition" deep in the stack.
+            guard selector != nil || urlMatch != nil else { return nil }
+            let forCondition = (wire.forCondition?.isEmpty == true)
+                ? nil : wire.forCondition
+            // Default at the wire layer keeps JS-side defaults
+            // authoritative — 0 / nil flows through to the JS
+            // `wait` body which substitutes 10000ms.
+            let timeoutMs = (wire.timeoutMs ?? 0) > 0 ? (wire.timeoutMs ?? 0) : 10000
+            return (.webWait(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                urlMatch: urlMatch,
+                forCondition: forCondition,
+                timeoutMs: timeoutMs
             ), wire)
         }
 

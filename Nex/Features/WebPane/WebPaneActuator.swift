@@ -44,27 +44,32 @@ enum WebPaneActuator {
         // Wrap the call so that:
         //   * a missing __nexAct throws a recognisable string,
         //   * a thrown JS exception flattens into the reply envelope
-        //     instead of bubbling up to `evaluateJavaScript` (which on
-        //     some WebKit builds returns nil with no diagnostic),
+        //     instead of bubbling up to `callAsyncJavaScript` (which
+        //     on some WebKit builds returns nil with no diagnostic),
+        //   * `await` resolves any Promise-returning method (`wait`)
+        //     so the reply value, not the Promise object, is
+        //     serialised,
         //   * the reply round-trips through JSON.stringify so the
         //     Swift side gets a single, easy-to-parse string.
+        //
+        // `callAsyncJavaScript` wraps this body in `async function(){
+        // ... }` itself, so the source is the function body — no
+        // outer IIFE.
         let source = """
-        (function() {
-            try {
-                if (!window.__nexAct) {
-                    return JSON.stringify({ok: false, error: 'actuator not installed'});
-                }
-                var r = window.__nexAct.\(method)(\(argsJS));
-                return JSON.stringify(r === undefined ? null : r);
-            } catch (e) {
-                return JSON.stringify({
-                    ok: false,
-                    error: (e && e.message) ? e.message : String(e)
-                });
+        try {
+            if (!window.__nexAct) {
+                return JSON.stringify({ok: false, error: 'actuator not installed'});
             }
-        })();
+            var r = await window.__nexAct.\(method)(\(argsJS));
+            return JSON.stringify(r === undefined ? null : r);
+        } catch (e) {
+            return JSON.stringify({
+                ok: false,
+                error: (e && e.message) ? e.message : String(e)
+            });
+        }
         """
-        let raw = await coordinator.evaluateJavaScript(tabID: tabID, source: source)
+        let raw = await coordinator.callAsyncJavaScript(tabID: tabID, source: source)
         guard let string = raw as? String else {
             if coordinator.knowsTab(tabID: tabID) {
                 return .evaluationFailed("actuator returned non-string reply")

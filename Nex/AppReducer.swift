@@ -1928,6 +1928,33 @@ struct AppReducer {
         )
     }
 
+    func handleWebWait(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String?,
+        urlMatch: String?,
+        forCondition: String?,
+        timeoutMs: Int,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let selector { opts.append(JSPair(key: "selector", value: .string(selector))) }
+        if let urlMatch { opts.append(JSPair(key: "urlMatch", value: .string(urlMatch))) }
+        if let forCondition { opts.append(JSPair(key: "for", value: .string(forCondition))) }
+        opts.append(JSPair(key: "timeout", value: .int(timeoutMs)))
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "wait",
+            args: [.object(opts)],
+            reply: reply
+        )
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -5026,6 +5053,19 @@ struct AppReducer {
                         workspaceFilter: workspaceFilter,
                         selector: selector,
                         maxBytes: maxBytes,
+                        reply: reply
+                    )
+
+                case .webWait(let paneID, let target, let workspaceFilter, let selector, let urlMatch, let forCondition, let timeoutMs):
+                    return handleWebWait(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        urlMatch: urlMatch,
+                        forCondition: forCondition,
+                        timeoutMs: timeoutMs,
                         reply: reply
                     )
                 }

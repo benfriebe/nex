@@ -630,6 +630,168 @@ enum WebPaneActuatorScript {
             return { ok: true, outer_html: clipped.value, truncated: clipped.truncated };
         }
 
+        // ---- wait --------------------------------------------------
+
+        // Parse a "value or /regex/flags" string into either a plain
+        // string target or a compiled RegExp. Returns { error } if the
+        // regex didn't compile. Shared by text= and url-match
+        // condition builders.
+        function parseValueOrRegex(raw) {
+            var s = String(raw);
+            if (s.length > 1 && s.charAt(0) === '/') {
+                var close = s.lastIndexOf('/');
+                if (close > 0) {
+                    try {
+                        return {
+                            regex: new RegExp(s.slice(1, close), s.slice(close + 1))
+                        };
+                    } catch (e) {
+                        return { error: 'bad regex: ' + e.message };
+                    }
+                }
+            }
+            return { value: s };
+        }
+
+        // Map a `for` condition name + opts into a predicate-style
+        // tester: { test() -> bool } on success, { error } on bad
+        // input. Validation lives here so wait()'s body stays small.
+        function makeCondition(name, opts) {
+            if (name === 'visible') {
+                if (!opts.selector) return { error: 'for=visible requires selector' };
+                return { test: function() {
+                    var el = find(opts.selector);
+                    // offsetParent is null for display:none subtrees
+                    // and detached elements. <body> itself has a null
+                    // offsetParent but `find` won't return <body> for
+                    // a meaningful selector anyway.
+                    return el != null && el.offsetParent !== null;
+                }};
+            }
+            if (name === 'hidden') {
+                if (!opts.selector) return { error: 'for=hidden requires selector' };
+                return { test: function() {
+                    var el = find(opts.selector);
+                    return el == null || el.offsetParent === null;
+                }};
+            }
+            if (name === 'exists') {
+                if (!opts.selector) return { error: 'for=exists requires selector' };
+                return { test: function() { return existsAny(opts.selector); }};
+            }
+            if (name.indexOf('count=') === 0) {
+                if (!opts.selector) return { error: 'for=count requires selector' };
+                var target = parseInt(name.slice(6), 10);
+                if (isNaN(target) || target < 0) {
+                    return { error: 'invalid count target: ' + name.slice(6) };
+                }
+                return { test: function() {
+                    var parsed = parseSelector(opts.selector);
+                    var compiled = compile(parsed);
+                    if (compiled.error) return false;
+                    return compiled.fnAll(document).length === target;
+                }};
+            }
+            if (name.indexOf('text=') === 0) {
+                if (!opts.selector) return { error: 'for=text requires selector' };
+                var matcher = parseValueOrRegex(name.slice(5));
+                if (matcher.error) return matcher;
+                return { test: function() {
+                    var el = find(opts.selector);
+                    if (!el) return false;
+                    var t = trimText(el);
+                    if (matcher.regex) {
+                        matcher.regex.lastIndex = 0;
+                        return matcher.regex.test(t);
+                    }
+                    return t === matcher.value;
+                }};
+            }
+            if (name === 'url-match') {
+                if (!opts.urlMatch) {
+                    return { error: 'for=url-match requires urlMatch' };
+                }
+                var urlMatcher = parseValueOrRegex(opts.urlMatch);
+                if (urlMatcher.error) return urlMatcher;
+                return { test: function() {
+                    var href = location.href;
+                    if (urlMatcher.regex) {
+                        urlMatcher.regex.lastIndex = 0;
+                        return urlMatcher.regex.test(href);
+                    }
+                    return href.indexOf(urlMatcher.value) >= 0;
+                }};
+            }
+            return { error: 'unknown condition: ' + name };
+        }
+
+        // Active wait handles for cancellation. Survives navigation
+        // re-injection because the namespace is idempotent — but the
+        // old page's intervals die with the old window anyway, so the
+        // map only matters for cancellation within a single page.
+        var activeWaits = new Map();
+        var waitCounter = 0;
+
+        function cancelWait(handle) {
+            var id = activeWaits.get(handle);
+            if (id != null) {
+                clearInterval(id);
+                activeWaits.delete(handle);
+            }
+        }
+
+        function cancelAllWaits() {
+            activeWaits.forEach(function(id) { clearInterval(id); });
+            activeWaits.clear();
+            return { ok: true, cancelled: true };
+        }
+
+        // Server-side polling. Replaces the shell `until ...; do sleep`
+        // pattern: one socket roundtrip blocks until the condition
+        // fires or the timeout elapses. Polls at 100ms — fast enough
+        // for typical app transitions, cheap enough to leave running.
+        function wait(opts) {
+            opts = opts || {};
+            // Default condition: `exists` when only `selector` was
+            // given; `url-match` when only `urlMatch` was given.
+            var conditionName = opts.for ||
+                (opts.urlMatch ? 'url-match' : 'exists');
+            var condition = makeCondition(conditionName, opts);
+            if (condition.error) {
+                return Promise.resolve({ ok: false, error: condition.error });
+            }
+            var timeoutMs = (typeof opts.timeout === 'number' && opts.timeout > 0)
+                ? opts.timeout : 10000;
+            return new Promise(function(resolve) {
+                var startedAt = Date.now();
+                if (condition.test()) {
+                    resolve({ ok: true, condition: conditionName, waited_ms: 0 });
+                    return;
+                }
+                var handle = ++waitCounter;
+                var intervalId = setInterval(function() {
+                    var elapsed = Date.now() - startedAt;
+                    if (condition.test()) {
+                        cancelWait(handle);
+                        resolve({
+                            ok: true,
+                            condition: conditionName,
+                            waited_ms: elapsed
+                        });
+                    } else if (elapsed >= timeoutMs) {
+                        cancelWait(handle);
+                        resolve({
+                            ok: false,
+                            error: 'timeout',
+                            condition: conditionName,
+                            waited_ms: elapsed
+                        });
+                    }
+                }, 100);
+                activeWaits.set(handle, intervalId);
+            });
+        }
+
         // ---- public API --------------------------------------------
 
         function find(selector) {
@@ -656,6 +818,7 @@ enum WebPaneActuatorScript {
             count: count,
             exists: exists,
             dom: dom,
+            wait: wait,
 
             // Exposed for unit tests + future phases. Underscore-prefixed
             // to signal "subject to change"; CLI verbs go through the
@@ -664,7 +827,8 @@ enum WebPaneActuatorScript {
             _compile: compile,
             _accessibleName: accessibleName,
             _implicitRole: implicitRole,
-            _clipToBytes: clipToBytes
+            _clipToBytes: clipToBytes,
+            _cancelAllWaits: cancelAllWaits
         };
     })();
     """
