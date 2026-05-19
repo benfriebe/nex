@@ -108,6 +108,11 @@ func printUsage() {
       nex web cookies list|clear|delete [...]
       nex web click <selector> [--target X] [--workspace Y] [--double] [--right] [--at x,y] [--json]
       nex web type <selector> <text> [--target X] [--workspace Y] [--submit] [--no-replace] [--json]
+      nex web text <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
+      nex web attr <selector> <attribute> [--target X] [--workspace Y] [--json]
+      nex web count <selector> [--target X] [--workspace Y] [--json]
+      nex web exists <selector> [--target X] [--workspace Y]   # exit 0 = yes, 1 = no
+      nex web dom <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
     \n
     """, stderr)
 }
@@ -789,6 +794,11 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web cookies    list|clear|delete [...]
       nex web click   [--target ...] [--workspace ...] <selector> [--double] [--right] [--at x,y] [--json]
       nex web type    [--target ...] [--workspace ...] <selector> <text> [--submit] [--no-replace] [--json]
+      nex web text    [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
+      nex web attr    [--target ...] [--workspace ...] <selector> <attribute> [--json]
+      nex web count   [--target ...] [--workspace ...] <selector> [--json]
+      nex web exists  [--target ...] [--workspace ...] <selector>   # exit 0 = yes, 1 = no
+      nex web dom     [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1103,6 +1113,99 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "type")
         sendWebReplyAndPrintActuator(payload, command: "type", asJSON: asJSON)
 
+    case "text":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let maxBytes = parseFlag("--max-bytes", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web text [--target X] [--workspace Y] <selector> [--max-bytes N] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-text",
+            "selector": selector
+        ]
+        if let maxBytes {
+            guard let n = Int(maxBytes), n > 0 else {
+                fputs("nex web text: --max-bytes must be a positive integer (got '\(maxBytes)')\n", stderr)
+                exit(1)
+            }
+            payload["max_bytes"] = n
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "text")
+        sendWebReplyAndPrintRead(payload, command: "text", asJSON: asJSON)
+
+    case "attr":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty,
+              let attribute = args.popFirst(), !attribute.isEmpty else {
+            fputs("Usage: nex web attr [--target X] [--workspace Y] <selector> <attribute> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-attr",
+            "selector": selector,
+            "attribute": attribute
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "attr")
+        sendWebReplyAndPrintRead(payload, command: "attr", asJSON: asJSON)
+
+    case "count":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web count [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-count",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "count")
+        sendWebReplyAndPrintRead(payload, command: "count", asJSON: asJSON)
+
+    case "exists":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web exists [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-exists",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exists")
+        sendWebReplyAndPrintRead(payload, command: "exists", asJSON: asJSON)
+
+    case "dom":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let maxBytes = parseFlag("--max-bytes", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web dom [--target X] [--workspace Y] <selector> [--max-bytes N] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-dom",
+            "selector": selector
+        ]
+        if let maxBytes {
+            guard let n = Int(maxBytes), n > 0 else {
+                fputs("nex web dom: --max-bytes must be a positive integer (got '\(maxBytes)')\n", stderr)
+                exit(1)
+            }
+            payload["max_bytes"] = n
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "dom")
+        sendWebReplyAndPrintRead(payload, command: "dom", asJSON: asJSON)
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
@@ -1153,6 +1256,81 @@ private func sendWebReplyAndPrintActuator(
     case "type":
         let value = (json["value"] as? String) ?? ""
         print("typed: \(value)")
+    default:
+        print("\(command) ok")
+    }
+}
+
+/// Reply printer for read verbs (`text`, `attr`, `count`, `exists`,
+/// `dom`). Each verb prints its primary value directly to stdout —
+/// strings unquoted, numbers as-is, booleans surfaced via exit code
+/// for `exists`. `--json` dumps the full reply.
+///
+/// Exit codes match the cookbook ergonomics:
+///   text/attr/count/dom — 0 success, 1 on not-found or selector error.
+///   exists              — 0 if found, 1 if not (no error output unless
+///                         the call itself failed).
+private func sendWebReplyAndPrintRead(
+    _ payload: [String: Any], command: String, asJSON: Bool
+) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if asJSON {
+        if let pretty = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys]
+        ), let str = String(data: pretty, encoding: .utf8) {
+            print(str)
+        }
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        if !asJSON {
+            fputs("nex web \(command): \(msg)\n", stderr)
+        }
+        exit(1)
+    }
+    if asJSON {
+        // `exists` still uses exit-1-for-not-found even in JSON mode,
+        // so the until-loop ergonomic survives `--json`.
+        if command == "exists", let found = json["found"] as? Bool, !found {
+            exit(1)
+        }
+        return
+    }
+    switch command {
+    case "text":
+        let text = (json["text"] as? String) ?? ""
+        print(text)
+    case "attr":
+        // Distinguish attribute absent from attribute present with
+        // empty value: absent → exit 1, present → print value (which
+        // may be empty) and exit 0.
+        let present = (json["present"] as? Bool) ?? false
+        if !present {
+            exit(1)
+        }
+        let value = (json["value"] as? String) ?? ""
+        print(value)
+    case "count":
+        let count = (json["count"] as? Int) ?? 0
+        print(count)
+    case "exists":
+        let found = (json["found"] as? Bool) ?? false
+        exit(found ? 0 : 1)
+    case "dom":
+        let html = (json["outer_html"] as? String) ?? ""
+        print(html)
     default:
         print("\(command) ok")
     }

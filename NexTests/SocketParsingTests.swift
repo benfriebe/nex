@@ -1177,4 +1177,86 @@ struct SocketParsingTests {
         """)
         #expect(SocketServer.parseWireMessage(missingText) == nil)
     }
+
+    // MARK: - Phase C — read verbs (web-q-*)
+
+    @Test func parseWebQText() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)","selector":"css:#p"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQText(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#p", maxBytes: nil
+        ))
+    }
+
+    @Test func parseWebQTextWithMaxBytes() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)","selector":"css:#p","max_bytes":1024}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQText(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#p", maxBytes: 1024
+        ))
+    }
+
+    @Test func parseWebQTextRequiresSelector() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebQAttr() {
+        let data = jsonData("""
+        {"command":"web-q-attr","pane_id":"\(Self.paneIDString)","selector":"css:a","attribute":"href"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQAttr(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:a", attribute: "href"
+        ))
+    }
+
+    @Test func parseWebQAttrRequiresAttribute() {
+        let data = jsonData("""
+        {"command":"web-q-attr","pane_id":"\(Self.paneIDString)","selector":"css:a"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebQCount() {
+        let data = jsonData("""
+        {"command":"web-q-count","pane_id":"\(Self.paneIDString)","selector":"css:li"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQCount(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:li"
+        ))
+    }
+
+    @Test func parseWebQExists() {
+        let data = jsonData("""
+        {"command":"web-q-exists","pane_id":"\(Self.paneIDString)","selector":"text:Loaded"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQExists(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Loaded"
+        ))
+    }
+
+    @Test func parseWebQDom() {
+        let data = jsonData("""
+        {"command":"web-q-dom","pane_id":"\(Self.paneIDString)","selector":"css:#a","max_bytes":4096}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQDom(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#a", maxBytes: 4096
+        ))
+    }
 }

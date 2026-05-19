@@ -219,4 +219,169 @@ struct WebPaneActuatorActionTests {
         let text = try await host.eval("document.getElementById('ce').textContent")
         #expect(text as? String == "new")
     }
+
+    // MARK: - text
+
+    @Test func textReadsInnerTextOfMatch() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <p id="p">Hello <strong>world</strong></p>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.text('css:#p'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["text"] as? String == "Hello world")
+        #expect(parsed["truncated"] as? Bool == false)
+    }
+
+    @Test func textClipsAtByteBudget() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="big">\(String(repeating: "x", count: 100))</div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.text('css:#big', {maxBytes: 50}))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect((parsed["text"] as? String)?.count == 50)
+        #expect(parsed["truncated"] as? Bool == true)
+    }
+
+    @Test func textClipsOnCodePointBoundary() async throws {
+        // 'é' is 2 bytes in UTF-8. With a 1-byte budget the actuator
+        // must snap back to a leading byte rather than emit a torn
+        // code unit; the result is the empty string and the truncated
+        // flag is set.
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="p">é</div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.text('css:#p', {maxBytes: 1}))")
+        )
+        #expect(parsed["text"] as? String == "")
+        #expect(parsed["truncated"] as? Bool == true)
+    }
+
+    @Test func textReturnsNotFoundForMissingSelector() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.text('text:nope'))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+    }
+
+    // MARK: - attr
+
+    @Test func attrReadsAttributeValue() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <a id="a" href="/x">go</a>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.attr('css:#a', 'href'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["value"] as? String == "/x")
+        #expect(parsed["present"] as? Bool == true)
+    }
+
+    @Test func attrDistinguishesAbsentFromEmptyValue() async throws {
+        // <input disabled> has attribute present with empty value;
+        // <input> has the attribute absent. The CLI uses `present` to
+        // exit 1 on absent rather than printing nothing for both.
+        let host = try await ActuatorTestHost.make(html: """
+        <input id="a" disabled>
+        <input id="b">
+        """)
+        let parsedA = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.attr('css:#a', 'disabled'))")
+        )
+        #expect(parsedA["present"] as? Bool == true)
+        #expect((parsedA["value"] as? String) == "")
+
+        let parsedB = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.attr('css:#b', 'disabled'))")
+        )
+        #expect(parsedB["present"] as? Bool == false)
+        #expect(parsedB["value"] is NSNull)
+    }
+
+    @Test func attrRejectsEmptyAttributeName() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div id=\"a\"></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.attr('css:#a', ''))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+    }
+
+    // MARK: - count
+
+    @Test func countMatchesAllSmallestEnclosingHits() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <ul><li>a</li><li>b</li><li>c</li></ul>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.count('css:li'))")
+        )
+        #expect(parsed["count"] as? Int == 3)
+    }
+
+    @Test func countZeroForMissingSelector() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.count('text:nope'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["count"] as? Int == 0)
+    }
+
+    // MARK: - exists
+
+    @Test func existsTrueWhenSelectorMatches() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <p>Loaded</p>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.exists('text:Loaded'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["found"] as? Bool == true)
+    }
+
+    @Test func existsFalseWhenSelectorMisses() async throws {
+        // exists never returns ok:false for not-found — `found` is
+        // the signal. Keeps the wire envelope uniform so the CLI's
+        // exit code is derived from `found`, not `ok`.
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.exists('text:Loaded'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["found"] as? Bool == false)
+    }
+
+    // MARK: - dom
+
+    @Test func domReturnsOuterHTML() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="a" class="b">hi</div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.dom('css:#a'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        let html = parsed["outer_html"] as? String ?? ""
+        #expect(html.contains("class=\"b\""))
+        #expect(html.contains("hi</div>"))
+    }
+
+    @Test func domTruncatesAtBudget() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="big">\(String(repeating: "x", count: 200))</div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.dom('css:#big', {maxBytes: 50}))")
+        )
+        #expect(parsed["truncated"] as? Bool == true)
+        let html = parsed["outer_html"] as? String ?? ""
+        #expect(html.utf8.count <= 50)
+    }
 }

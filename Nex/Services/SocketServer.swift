@@ -185,6 +185,38 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         selector: String, text: String, submit: Bool, replace: Bool
     )
+
+    // Actuator read verbs (Phase C). Wire keys are prefixed `web-q-`
+    // (q for query) so future allowlist tuning + audit grep can
+    // distinguish reads from actions at a glance.
+
+    /// `nex web text <selector> [--max-bytes N]`.
+    case webQText(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, maxBytes: Int?
+    )
+    /// `nex web attr <selector> <attribute>`.
+    case webQAttr(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, attribute: String
+    )
+    /// `nex web count <selector>` — number of smallest-enclosing
+    /// matches.
+    case webQCount(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web exists <selector>` — boolean. CLI exits 0/1 from the
+    /// `found` field rather than the `ok` flag.
+    case webQExists(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web dom <selector> [--max-bytes N]` — outerHTML.
+    case webQDom(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, maxBytes: Int?
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -199,7 +231,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
     "web-console", "web-inspect", "web-inspect-result",
     "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
-    "web-click", "web-type"
+    "web-click", "web-type",
+    "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -661,6 +694,10 @@ final class SocketServer: Sendable {
         /// `web-type --no-replace` → false. When omitted the typed
         /// text replaces existing content (matches Playwright `fill`).
         var replace: Bool?
+        /// `web-q-text` / `web-q-dom` — byte-budget cap. nil = JS default.
+        var maxBytes: Int?
+        /// `web-q-attr` — attribute name to read.
+        var attribute: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -688,6 +725,8 @@ final class SocketServer: Sendable {
             case atX = "at_x"
             case atY = "at_y"
             case replace
+            case maxBytes = "max_bytes"
+            case attribute
         }
     }
 
@@ -993,6 +1032,65 @@ final class SocketServer: Sendable {
                 text: text,
                 submit: wire.submit ?? false,
                 replace: wire.replace ?? true
+            ), wire)
+        }
+
+        if wire.command == "web-q-text" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQText(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                maxBytes: wire.maxBytes
+            ), wire)
+        }
+
+        if wire.command == "web-q-attr" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let attribute = wire.attribute, !attribute.isEmpty else { return nil }
+            return (.webQAttr(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                attribute: attribute
+            ), wire)
+        }
+
+        if wire.command == "web-q-count" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQCount(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-q-exists" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQExists(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-q-dom" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQDom(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                maxBytes: wire.maxBytes
             ), wire)
         }
 

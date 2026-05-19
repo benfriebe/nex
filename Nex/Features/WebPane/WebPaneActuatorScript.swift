@@ -502,6 +502,93 @@ enum WebPaneActuatorScript {
             return { ok: true, value: el.value };
         }
 
+        // ---- read verbs --------------------------------------------
+
+        // Truncate `s` to at most `maxBytes` UTF-8 bytes, snapping back
+        // to a code-point boundary. Returns the (possibly trimmed)
+        // string + a boolean noting whether truncation happened so
+        // callers can surface "..." or warn.
+        function clipToBytes(s, maxBytes) {
+            // TextEncoder is in every WebKit build we target. Using
+            // it avoids the surrogate-pair math we'd otherwise need
+            // to do by hand.
+            var enc = new TextEncoder();
+            var bytes = enc.encode(s);
+            if (bytes.length <= maxBytes) {
+                return { value: s, truncated: false };
+            }
+            // Walk back from maxBytes until we find a UTF-8 leading
+            // byte (top two bits != 10). Then decode.
+            var cut = maxBytes;
+            while (cut > 0 && (bytes[cut] & 0xC0) === 0x80) cut--;
+            var dec = new TextDecoder('utf-8', { fatal: false });
+            return {
+                value: dec.decode(bytes.slice(0, cut)),
+                truncated: true
+            };
+        }
+
+        function text(selector, opts) {
+            opts = opts || {};
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            // Prefer innerText when available — collapses runs of
+            // whitespace and skips display:none subtrees the way a
+            // human reader would. Falls back to textContent for
+            // detached / shadowless nodes where innerText is empty.
+            var raw = (typeof el.innerText === 'string' && el.innerText.length > 0)
+                ? el.innerText
+                : (el.textContent || '');
+            var maxBytes = (typeof opts.maxBytes === 'number') ? opts.maxBytes : 1000000;
+            var clipped = clipToBytes(String(raw), maxBytes);
+            return { ok: true, text: clipped.value, truncated: clipped.truncated };
+        }
+
+        function attr(selector, name) {
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            if (name == null || String(name).length === 0) {
+                return { ok: false, error: 'attribute name is empty' };
+            }
+            var value = el.getAttribute ? el.getAttribute(name) : null;
+            // hasAttribute distinguishes 'attribute absent' from
+            // 'attribute present with empty value' (e.g. <input disabled>).
+            // We surface that to callers via `present`.
+            var present = el.hasAttribute ? el.hasAttribute(name) : false;
+            return { ok: true, name: name, value: value, present: present };
+        }
+
+        function count(selector) {
+            var parsed = parseSelector(selector);
+            var compiled = compile(parsed);
+            if (compiled.error) {
+                return { ok: false, error: compiled.error };
+            }
+            var hits = compiled.fnAll(document);
+            return { ok: true, count: hits.length };
+        }
+
+        function exists(selector) {
+            var el = find(selector);
+            return { ok: true, found: el != null };
+        }
+
+        function dom(selector, opts) {
+            opts = opts || {};
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            var html = (typeof el.outerHTML === 'string') ? el.outerHTML : '';
+            var maxBytes = (typeof opts.maxBytes === 'number') ? opts.maxBytes : 16384;
+            var clipped = clipToBytes(html, maxBytes);
+            return { ok: true, outer_html: clipped.value, truncated: clipped.truncated };
+        }
+
         // ---- public API --------------------------------------------
 
         function find(selector) {
@@ -523,6 +610,11 @@ enum WebPaneActuatorScript {
             findAll: findAll,
             click: click,
             type: type,
+            text: text,
+            attr: attr,
+            count: count,
+            exists: exists,
+            dom: dom,
 
             // Exposed for unit tests + future phases. Underscore-prefixed
             // to signal "subject to change"; CLI verbs go through the
@@ -530,7 +622,8 @@ enum WebPaneActuatorScript {
             _parseSelector: parseSelector,
             _compile: compile,
             _accessibleName: accessibleName,
-            _implicitRole: implicitRole
+            _implicitRole: implicitRole,
+            _clipToBytes: clipToBytes
         };
     })();
     """

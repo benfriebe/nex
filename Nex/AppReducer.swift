@@ -1826,6 +1826,108 @@ struct AppReducer {
         )
     }
 
+    func handleWebQText(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        maxBytes: Int?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let maxBytes { opts.append(JSPair(key: "maxBytes", value: .int(maxBytes))) }
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "text",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebQAttr(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        attribute: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "attr",
+            args: [.string(selector), .string(attribute)],
+            reply: reply
+        )
+    }
+
+    func handleWebQCount(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "count",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebQExists(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "exists",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebQDom(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        maxBytes: Int?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let maxBytes { opts.append(JSPair(key: "maxBytes", value: .int(maxBytes))) }
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "dom",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -4871,6 +4973,59 @@ struct AppReducer {
                         text: text,
                         submit: submit,
                         replace: replace,
+                        reply: reply
+                    )
+
+                case .webQText(let paneID, let target, let workspaceFilter, let selector, let maxBytes):
+                    return handleWebQText(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        maxBytes: maxBytes,
+                        reply: reply
+                    )
+
+                case .webQAttr(let paneID, let target, let workspaceFilter, let selector, let attribute):
+                    return handleWebQAttr(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        attribute: attribute,
+                        reply: reply
+                    )
+
+                case .webQCount(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebQCount(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webQExists(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebQExists(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webQDom(let paneID, let target, let workspaceFilter, let selector, let maxBytes):
+                    return handleWebQDom(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        maxBytes: maxBytes,
                         reply: reply
                     )
                 }
