@@ -198,6 +198,39 @@ enum WebPaneActuatorScript {
             });
         }
 
+        // Build a DOM predicate from a parsed text / text-regex / role
+        // selector. Returns null for kinds that don't predicate-test
+        // (`css` goes through querySelector, `invalid` never compiles).
+        function buildPredicate(parsed) {
+            if (parsed.kind === 'text') {
+                var target = parsed.value;
+                return function(el) { return trimText(el) === target; };
+            }
+            if (parsed.kind === 'text-regex') {
+                var re = parsed.regex;
+                // Reset lastIndex before every test — with /g or /y
+                // flags `test()` mutates lastIndex and skips alternate
+                // candidates on the next call. Cheap, and avoids
+                // having to reject stateful flags at parse time.
+                return function(el) {
+                    re.lastIndex = 0;
+                    return re.test(trimText(el));
+                };
+            }
+            if (parsed.kind === 'role') {
+                var wantRole = parsed.role;
+                var wantName = parsed.name; // may be null
+                return function(el) {
+                    var role = el.getAttribute && el.getAttribute('role');
+                    if (!role) role = implicitRole(el);
+                    if (role !== wantRole) return false;
+                    if (wantName == null) return true;
+                    return accessibleName(el) === wantName;
+                };
+            }
+            return null;
+        }
+
         // Map a parsed selector to a DOM-level predicate / direct
         // querySelector for css. Returns one of:
         //   { fn: function(root) -> Element|null, kind: <string> }
@@ -226,47 +259,12 @@ enum WebPaneActuatorScript {
                     }
                 };
             }
-            if (parsed.kind === 'text') {
-                var target = parsed.value;
-                var pred = function(el) {
-                    return trimText(el) === target;
-                };
+            var pred = buildPredicate(parsed);
+            if (pred) {
                 return {
-                    kind: 'text',
+                    kind: parsed.kind,
                     fn: function(root) { return findFirst(root, pred); },
                     fnAll: function(root) { return findAllMatches(root, pred); }
-                };
-            }
-            if (parsed.kind === 'text-regex') {
-                var re = parsed.regex;
-                // Reset lastIndex before every test — with /g or /y
-                // flags `test()` mutates lastIndex and skips alternate
-                // candidates on the next call. Cheap, and avoids
-                // having to reject stateful flags at parse time.
-                var pred2 = function(el) {
-                    re.lastIndex = 0;
-                    return re.test(trimText(el));
-                };
-                return {
-                    kind: 'text-regex',
-                    fn: function(root) { return findFirst(root, pred2); },
-                    fnAll: function(root) { return findAllMatches(root, pred2); }
-                };
-            }
-            if (parsed.kind === 'role') {
-                var wantRole = parsed.role;
-                var wantName = parsed.name; // may be null
-                var pred3 = function(el) {
-                    var role = el.getAttribute && el.getAttribute('role');
-                    if (!role) role = implicitRole(el);
-                    if (role !== wantRole) return false;
-                    if (wantName == null) return true;
-                    return accessibleName(el) === wantName;
-                };
-                return {
-                    kind: 'role',
-                    fn: function(root) { return findFirst(root, pred3); },
-                    fnAll: function(root) { return findAllMatches(root, pred3); }
                 };
             }
             return { error: 'unknown selector kind: ' + parsed.kind };
@@ -554,12 +552,23 @@ enum WebPaneActuatorScript {
             if (name == null || String(name).length === 0) {
                 return { ok: false, error: 'attribute name is empty' };
             }
-            var value = el.getAttribute ? el.getAttribute(name) : null;
+            var raw = el.getAttribute ? el.getAttribute(name) : null;
             // hasAttribute distinguishes 'attribute absent' from
             // 'attribute present with empty value' (e.g. <input disabled>).
             // We surface that to callers via `present`.
             var present = el.hasAttribute ? el.hasAttribute(name) : false;
-            return { ok: true, name: name, value: value, present: present };
+            // Clip the value at 64KB by default — page-controlled
+            // attributes (data-payload, srcdoc, ...) can be megabytes
+            // and we don't want them to blow up the reply envelope.
+            if (raw == null) {
+                return { ok: true, name: name, value: null, present: present, truncated: false };
+            }
+            var clipped = clipToBytes(String(raw), 65536);
+            return {
+                ok: true, name: name,
+                value: clipped.value, present: present,
+                truncated: clipped.truncated
+            };
         }
 
         function count(selector) {
@@ -572,9 +581,41 @@ enum WebPaneActuatorScript {
             return { ok: true, count: hits.length };
         }
 
+        // First-hit short-circuit. `exists` doesn't need the smallest-
+        // enclosing-element rule that `find` applies — once any node
+        // satisfies the predicate the answer is known. On large pages
+        // with text matches near the root, skipping the descendant
+        // check saves walking the entire subtree.
+        function existsAny(selector) {
+            var parsed = parseSelector(selector);
+            if (parsed.kind === 'invalid') return false;
+            if (parsed.kind === 'css') {
+                // querySelector short-circuits at the engine level —
+                // cheaper than our TreeWalker for css:.
+                try {
+                    return document.querySelector(parsed.selector) != null;
+                } catch (e) {
+                    return false;
+                }
+            }
+            var pred = buildPredicate(parsed);
+            if (!pred) return false;
+            var walker = document.createTreeWalker(
+                document, NodeFilter.SHOW_ELEMENT,
+                {
+                    acceptNode: function(node) {
+                        if (shouldSkip(node)) return NodeFilter.FILTER_REJECT;
+                        return pred(node)
+                            ? NodeFilter.FILTER_ACCEPT
+                            : NodeFilter.FILTER_SKIP;
+                    }
+                }
+            );
+            return walker.nextNode() != null;
+        }
+
         function exists(selector) {
-            var el = find(selector);
-            return { ok: true, found: el != null };
+            return { ok: true, found: existsAny(selector) };
         }
 
         function dom(selector, opts) {

@@ -1213,13 +1213,17 @@ func handleWeb(_ args: inout ArraySlice<String>) {
     }
 }
 
-/// Shared reply printer for actuator verbs (`click`, `type`, and the
-/// Phase C–E additions). Success path: one-line acknowledgement;
-/// failure path: `{ok:false, error: ...}` → stderr + exit 1. `--json`
-/// dumps the full reply payload to stdout instead.
-private func sendWebReplyAndPrintActuator(
+/// Decode a `web-*` reply envelope into a `[String: Any]` dict,
+/// handling the shared error paths: transport failure, empty reply,
+/// invalid JSON, `--json` pretty-print, and `ok==false` → stderr +
+/// exit 1. Returns `nil` only when `--json` was requested AND the
+/// reply had `ok==false` (so the JSON dump runs before exit) — in
+/// every other failure mode this function calls `exit(1)` itself.
+/// On success, returns the parsed dict ready for verb-specific
+/// rendering.
+private func decodeWebReply(
     _ payload: [String: Any], command: String, asJSON: Bool
-) {
+) -> [String: Any] {
     guard let data = sendJSONAndReadReply(payload) else {
         fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
         exit(1)
@@ -1232,13 +1236,13 @@ private func sendWebReplyAndPrintActuator(
         fputs("nex web \(command): invalid JSON response\n", stderr)
         exit(1)
     }
-    if asJSON {
-        if let pretty = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ), let str = String(data: pretty, encoding: .utf8) {
-            print(str)
-        }
+    if asJSON,
+       let pretty = try? JSONSerialization.data(
+           withJSONObject: json,
+           options: [.prettyPrinted, .sortedKeys]
+       ),
+       let str = String(data: pretty, encoding: .utf8) {
+        print(str)
     }
     if let ok = json["ok"] as? Bool, ok == false {
         let msg = (json["error"] as? String) ?? "unknown error"
@@ -1247,6 +1251,16 @@ private func sendWebReplyAndPrintActuator(
         }
         exit(1)
     }
+    return json
+}
+
+/// Reply printer for actuator action verbs (`click`, `type`).
+/// One-line acknowledgement on success, exit-1 on `ok==false`.
+/// `--json` dumps the full reply payload instead.
+private func sendWebReplyAndPrintActuator(
+    _ payload: [String: Any], command: String, asJSON: Bool
+) {
+    let json = decodeWebReply(payload, command: command, asJSON: asJSON)
     if asJSON { return }
     switch command {
     case "click":
@@ -1264,45 +1278,14 @@ private func sendWebReplyAndPrintActuator(
 /// Reply printer for read verbs (`text`, `attr`, `count`, `exists`,
 /// `dom`). Each verb prints its primary value directly to stdout —
 /// strings unquoted, numbers as-is, booleans surfaced via exit code
-/// for `exists`. `--json` dumps the full reply.
-///
-/// Exit codes match the cookbook ergonomics:
-///   text/attr/count/dom — 0 success, 1 on not-found or selector error.
-///   exists              — 0 if found, 1 if not (no error output unless
-///                         the call itself failed).
+/// for `exists`. `--json` dumps the full reply but `exists` still
+/// uses exit-1-for-not-found even in JSON mode so the until-loop
+/// ergonomic survives `--json`.
 private func sendWebReplyAndPrintRead(
     _ payload: [String: Any], command: String, asJSON: Bool
 ) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
+    let json = decodeWebReply(payload, command: command, asJSON: asJSON)
     if asJSON {
-        if let pretty = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ), let str = String(data: pretty, encoding: .utf8) {
-            print(str)
-        }
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        if !asJSON {
-            fputs("nex web \(command): \(msg)\n", stderr)
-        }
-        exit(1)
-    }
-    if asJSON {
-        // `exists` still uses exit-1-for-not-found even in JSON mode,
-        // so the until-loop ergonomic survives `--json`.
         if command == "exists", let found = json["found"] as? Bool, !found {
             exit(1)
         }
