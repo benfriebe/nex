@@ -32,6 +32,12 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
     /// `title`.
     static let stateDidChangeNotification = Notification.Name("WebPaneCoordinator.stateDidChange")
 
+    /// Notification posted on every `estimatedProgress` or `isLoading`
+    /// transition so `WebPaneView` can drive the Safari-style progress
+    /// strip in the chrome. User info: `paneID`, `tabID`,
+    /// `progress: Double` (0..1), `isLoading: Bool`.
+    static let loadProgressDidChangeNotification = Notification.Name("WebPaneCoordinator.loadProgressDidChange")
+
     /// Notification posted for every captured console line.
     /// User info: `paneID`, `tabID`, `level`, `message`, `url`,
     /// optional `lineNumber`, `columnNumber`.
@@ -61,6 +67,12 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
 
     /// KVO tokens per webview, so deinit (or destroy) can detach.
     private var kvoTokens: [UUID: [NSKeyValueObservation]] = [:]
+
+    /// Last `(progress, isLoading)` posted per tab. `estimatedProgress`
+    /// and `isLoading` both fire `progressPost` reading the *current*
+    /// values, so a single transition (e.g. `isLoading=false` + final
+    /// `estimatedProgress=1.0`) easily double-posts identical payloads.
+    private var lastPostedProgress: [UUID: (Double, Bool)] = [:]
 
     // MARK: - Inspector arm state
 
@@ -146,6 +158,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         }
         webViews.removeValue(forKey: tabID)
         lastAttemptedURL.removeValue(forKey: tabID)
+        lastPostedProgress.removeValue(forKey: tabID)
         showingErrorPage.remove(tabID)
         // Drop the inspector arm if it pointed at the destroyed tab
         // — a late click against the gone WebView could otherwise
@@ -234,7 +247,27 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         let titleToken = webView.observe(\.title, options: [.new]) { [weak webView] _, _ in
             snapshotAndPost(webView)
         }
-        kvoTokens[tab.id] = [urlToken, titleToken]
+        // Drive the Safari-style progress strip — both fire frequently
+        // during a single page load (subresource fetches bump progress,
+        // navigation start / finish flip isLoading), so they share one
+        // post helper that captures the current values together.
+        let progressPost: @Sendable (WKWebView?) -> Void = { [weak self] webView in
+            Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                postLoadProgress(
+                    tabID: tabID,
+                    progress: webView.estimatedProgress,
+                    isLoading: webView.isLoading
+                )
+            }
+        }
+        let progressToken = webView.observe(\.estimatedProgress, options: [.new]) { [weak webView] _, _ in
+            progressPost(webView)
+        }
+        let loadingToken = webView.observe(\.isLoading, options: [.new]) { [weak webView] _, _ in
+            progressPost(webView)
+        }
+        kvoTokens[tab.id] = [urlToken, titleToken, progressToken, loadingToken]
 
         if let url = URL(string: tab.url) {
             // Mirror what `navigate(tab:to:)` does so the reload
@@ -258,6 +291,21 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
                 "tabID": tabID,
                 "url": url,
                 "title": title
+            ]
+        )
+    }
+
+    private func postLoadProgress(tabID: UUID, progress: Double, isLoading: Bool) {
+        if let last = lastPostedProgress[tabID], last == (progress, isLoading) { return }
+        lastPostedProgress[tabID] = (progress, isLoading)
+        NotificationCenter.default.post(
+            name: Self.loadProgressDidChangeNotification,
+            object: nil,
+            userInfo: [
+                "paneID": paneID,
+                "tabID": tabID,
+                "progress": progress,
+                "isLoading": isLoading
             ]
         )
     }

@@ -67,6 +67,15 @@ struct WebPaneView: View {
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
     @State private var isLoading: Bool = false
+    /// 0..1, WKWebView's `estimatedProgress`. Driven by KVO via the
+    /// coordinator notification. Held at 1.0 briefly after a load
+    /// completes so the chrome progress strip can fade out from full
+    /// instead of snapping to zero.
+    @State private var loadProgress: Double = 0
+    /// Visibility / fade state of the chrome progress strip — true
+    /// while loading and during the brief fade-out after completion.
+    @State private var loadProgressVisible: Bool = false
+    @State private var loadProgressFadeOutTask: Task<Void, Never>?
 
     /// Single source of truth for which tab is active. The host and
     /// chrome both read this so they never disagree about the
@@ -85,6 +94,8 @@ struct WebPaneView: View {
                 canGoBack: canGoBack,
                 canGoForward: canGoForward,
                 isLoading: isLoading,
+                loadProgress: loadProgress,
+                loadProgressVisible: loadProgressVisible,
                 tabs: tabs,
                 activeTabID: active?.id,
                 isPrivate: isPrivate,
@@ -166,6 +177,49 @@ struct WebPaneView: View {
             }
             refreshNavState()
         }
+        .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.loadProgressDidChangeNotification)) { note in
+            guard
+                let info = note.userInfo,
+                let firedPane = info["paneID"] as? UUID,
+                firedPane == paneID,
+                let firedTab = info["tabID"] as? UUID,
+                firedTab == active?.id
+            else { return }
+            let progress = (info["progress"] as? Double) ?? 0
+            let loading = (info["isLoading"] as? Bool) ?? false
+            applyLoadProgress(progress: progress, loading: loading)
+        }
+    }
+
+    private func applyLoadProgress(progress: Double, loading: Bool) {
+        isLoading = loading
+        if loading {
+            loadProgressFadeOutTask?.cancel()
+            loadProgressFadeOutTask = nil
+            if !loadProgressVisible {
+                loadProgressVisible = true
+                loadProgress = max(progress, 0.05) // small head-start so click registers
+            } else {
+                loadProgress = progress
+            }
+        } else {
+            // Race: KVO can fire `isLoading=false` before the final
+            // `estimatedProgress=1.0` arrives. Bump the bar to full
+            // either way so the fade-out reads as completion.
+            loadProgress = 1.0
+            loadProgressFadeOutTask?.cancel()
+            loadProgressFadeOutTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                loadProgressVisible = false
+                // Brief settle before resetting to 0 so a stale
+                // notification right after the fade doesn't redraw
+                // the bar at 100% for one frame.
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                loadProgress = 0
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -194,6 +248,7 @@ struct WebPaneView: View {
             displayedTitle = ""
             canGoBack = false
             canGoForward = false
+            snapLoadProgressForActiveTab()
             return
         }
         let coord = webPaneStore.coordinatorIfExists(for: paneID)
@@ -205,6 +260,7 @@ struct WebPaneView: View {
             displayedTitle = tab.title
         }
         refreshNavState()
+        snapLoadProgressForActiveTab()
     }
 
     private func refreshNavState() {
@@ -218,6 +274,27 @@ struct WebPaneView: View {
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         isLoading = webView.isLoading
+    }
+
+    /// Sync the progress strip to the now-active tab's WKWebView.
+    /// Without this, a slow tab switched away mid-load leaves its
+    /// strip frozen on screen (the notification filter ignores its
+    /// progress/completion posts while another tab is active) and a
+    /// switch into a tab that's loading shows nothing until the next
+    /// estimatedProgress tick.
+    private func snapLoadProgressForActiveTab() {
+        loadProgressFadeOutTask?.cancel()
+        loadProgressFadeOutTask = nil
+        guard let tab = activeTab,
+              let webView = webPaneStore.coordinatorIfExists(for: paneID)?.webView(for: tab),
+              webView.isLoading
+        else {
+            loadProgressVisible = false
+            loadProgress = 0
+            return
+        }
+        loadProgressVisible = true
+        loadProgress = max(webView.estimatedProgress, 0.05)
     }
 }
 

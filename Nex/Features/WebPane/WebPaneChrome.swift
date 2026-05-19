@@ -11,6 +11,12 @@ struct WebPaneChrome: View {
     let canGoBack: Bool
     let canGoForward: Bool
     let isLoading: Bool
+    /// 0..1 progress through the current load (`WKWebView.estimatedProgress`).
+    /// Drives the Safari-style accent strip at the bottom of the chrome.
+    var loadProgress: Double = 0
+    /// True while the strip should be visible — covers both the live
+    /// load and the short fade-out after completion.
+    var loadProgressVisible: Bool = false
     /// All open tabs. Used by the tab strip to render pills.
     let tabs: [WebTab]
     let activeTabID: UUID?
@@ -60,8 +66,28 @@ struct WebPaneChrome: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
-            Divider()
+            ZStack(alignment: .leading) {
+                Divider()
+                progressStrip
+            }
         }
+    }
+
+    /// Safari-style accent strip pinned to the bottom edge of the
+    /// chrome. Width is bound to `loadProgress` so the bar fills as
+    /// the load progresses; opacity is bound to `loadProgressVisible`
+    /// so it fades out cleanly after completion.
+    private var progressStrip: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: max(0, geo.size.width * loadProgress), height: 2)
+                .opacity(loadProgressVisible ? 1 : 0)
+                .animation(.easeOut(duration: 0.2), value: loadProgress)
+                .animation(.easeInOut(duration: 0.25), value: loadProgressVisible)
+        }
+        .frame(height: 2)
+        .allowsHitTesting(false)
     }
 
     private var bookmarksMenuButton: some View {
