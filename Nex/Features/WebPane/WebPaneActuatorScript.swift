@@ -630,6 +630,177 @@ enum WebPaneActuatorScript {
             return { ok: true, outer_html: clipped.value, truncated: clipped.truncated };
         }
 
+        // ---- long-tail actions: select / scroll / hover / key ------
+
+        function select(selector, valueOrLabel) {
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            if (el.tagName !== 'SELECT') {
+                return {
+                    ok: false,
+                    error: 'element is not a <select> (tag=' + el.tagName + ')'
+                };
+            }
+            var needle = String(valueOrLabel == null ? '' : valueOrLabel);
+            // Match by `value` first (matches the HTML attribute semantics
+            // — controlled <select>s usually round-trip on value), then
+            // by visible label. Trim the option text so whitespace in
+            // the HTML doesn't make the label unreachable.
+            var matchedIndex = -1;
+            for (var i = 0; i < el.options.length; i++) {
+                if (el.options[i].value === needle) { matchedIndex = i; break; }
+            }
+            if (matchedIndex < 0) {
+                for (var j = 0; j < el.options.length; j++) {
+                    if (trimText(el.options[j]) === needle) { matchedIndex = j; break; }
+                }
+            }
+            if (matchedIndex < 0) {
+                return {
+                    ok: false,
+                    error: 'no option with value or label: ' + needle
+                };
+            }
+            try {
+                if (typeof el.focus === 'function') el.focus();
+            } catch (e) { /* unfocusable — ignore */ }
+            // Prefer the prototype setter so React/Vue/Svelte
+            // controlled selects accept the write (same trick as type).
+            setValue(el, el.options[matchedIndex].value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return {
+                ok: true,
+                value: el.value,
+                label: trimText(el.options[matchedIndex])
+            };
+        }
+
+        function scroll(selector, opts) {
+            opts = opts || {};
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            // Default behavior: bring the element into view centered.
+            // `instant` (rather than `auto`) is well-supported in
+            // WebKit 18+ and matches what an agent expects — no
+            // implicit animation, no waiting for it to settle.
+            var block = opts.block || 'center';
+            var behavior = opts.behavior || 'instant';
+            try {
+                el.scrollIntoView({ block: block, behavior: behavior });
+            } catch (e) {
+                // Older WebKit builds (or shadow roots without
+                // scrollIntoView) — fall back to the no-options form.
+                try { el.scrollIntoView(); } catch (e2) { /* give up */ }
+            }
+            var rect = el.getBoundingClientRect();
+            return {
+                ok: true,
+                rect: {
+                    x: rect.left, y: rect.top,
+                    width: rect.width, height: rect.height
+                }
+            };
+        }
+
+        // Synthetic hover. JS cannot reproduce a real OS-level hover
+        // (pages that gate UI on the `:hover` CSS pseudo-class will
+        // not respond), but the pointer + mouse `over` / `enter`
+        // events fire any JS listener attached for tooltips, menus,
+        // and library-driven hover states.
+        function hover(selector) {
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            var rect = el.getBoundingClientRect();
+            var common = {
+                bubbles: true, cancelable: true, composed: true,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2
+            };
+            try { el.dispatchEvent(new PointerEvent('pointerover', common)); }
+            catch (e) { /* older WebKit — skip */ }
+            try { el.dispatchEvent(new PointerEvent('pointerenter', common)); }
+            catch (e) { /* see above */ }
+            // mouseover bubbles; mouseenter does NOT (DOM spec) — but
+            // listeners on the target itself still fire either way.
+            el.dispatchEvent(new MouseEvent('mouseover', common));
+            el.dispatchEvent(new MouseEvent(
+                'mouseenter',
+                Object.assign({}, common, { bubbles: false })
+            ));
+            return { ok: true, matched: true };
+        }
+
+        // Lookup table for the named keys agents reach for. Each entry
+        // maps to (key, code) plus an optional `charCode`/`keyCode` for
+        // the few page libraries that still consult the legacy fields.
+        // Case-insensitive; common aliases (`esc`, `space`) supported.
+        var KEY_TABLE = {
+            'enter': { key: 'Enter', code: 'Enter', keyCode: 13 },
+            'return': { key: 'Enter', code: 'Enter', keyCode: 13 },
+            'tab': { key: 'Tab', code: 'Tab', keyCode: 9 },
+            'escape': { key: 'Escape', code: 'Escape', keyCode: 27 },
+            'esc': { key: 'Escape', code: 'Escape', keyCode: 27 },
+            'space': { key: ' ', code: 'Space', keyCode: 32 },
+            'backspace': { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+            'delete': { key: 'Delete', code: 'Delete', keyCode: 46 },
+            'arrowup': { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+            'arrowdown': { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+            'arrowleft': { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+            'arrowright': { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+            'up': { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+            'down': { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+            'left': { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+            'right': { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+            'home': { key: 'Home', code: 'Home', keyCode: 36 },
+            'end': { key: 'End', code: 'End', keyCode: 35 },
+            'pageup': { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+            'pagedown': { key: 'PageDown', code: 'PageDown', keyCode: 34 }
+        };
+
+        function key(keyName, opts) {
+            opts = opts || {};
+            if (keyName == null || String(keyName).length === 0) {
+                return { ok: false, error: 'key name is empty' };
+            }
+            var lookup = KEY_TABLE[String(keyName).toLowerCase()];
+            if (!lookup) {
+                return { ok: false, error: 'unknown key: ' + String(keyName) };
+            }
+            var target;
+            if (opts.selector) {
+                target = find(opts.selector);
+                if (!target) {
+                    return {
+                        ok: false,
+                        error: 'no match for selector: ' + String(opts.selector)
+                    };
+                }
+                try {
+                    if (typeof target.focus === 'function') target.focus();
+                } catch (e) { /* unfocusable — ignore */ }
+            } else {
+                // Default to the active element so keystrokes are
+                // delivered where the user would expect them — focus
+                // ring stays the source of truth.
+                target = document.activeElement || document.body;
+            }
+            var initOpts = {
+                bubbles: true, cancelable: true, composed: true,
+                key: lookup.key, code: lookup.code,
+                keyCode: lookup.keyCode, which: lookup.keyCode
+            };
+            target.dispatchEvent(new KeyboardEvent('keydown', initOpts));
+            target.dispatchEvent(new KeyboardEvent('keyup', initOpts));
+            return { ok: true, key: lookup.key, code: lookup.code };
+        }
+
         // ---- wait --------------------------------------------------
 
         // Parse a "value or /regex/flags" string into a plain string
@@ -794,6 +965,10 @@ enum WebPaneActuatorScript {
             exists: exists,
             dom: dom,
             wait: wait,
+            select: select,
+            scroll: scroll,
+            hover: hover,
+            key: key,
 
             // Exposed for unit tests + future phases. Underscore-prefixed
             // to signal "subject to change"; CLI verbs go through the

@@ -114,6 +114,10 @@ func printUsage() {
       nex web exists <selector> [--target X] [--workspace Y]   # exit 0 = yes, 1 = no
       nex web dom <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
       nex web wait (--selector <sel> | --url-match <substr-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--target X] [--workspace Y] [--json]
+      nex web select <selector> <value-or-label> [--target X] [--workspace Y] [--json]
+      nex web scroll <selector> [--top|--bottom|--smooth] [--target X] [--workspace Y] [--json]
+      nex web hover <selector> [--target X] [--workspace Y] [--json]
+      nex web key <key-name> [--selector <sel>] [--target X] [--workspace Y] [--json]
     \n
     """, stderr)
 }
@@ -819,6 +823,10 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web exists  [--target ...] [--workspace ...] <selector>   # exit 0 = yes, 1 = no
       nex web dom     [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
       nex web wait    [--target ...] [--workspace ...] (--selector <sel> | --url-match <sub-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--json]
+      nex web select  [--target ...] [--workspace ...] <selector> <value-or-label> [--json]
+      nex web scroll  [--target ...] [--workspace ...] <selector> [--top|--bottom|--smooth] [--json]
+      nex web hover   [--target ...] [--workspace ...] <selector> [--json]
+      nex web key     [--target ...] [--workspace ...] <key-name> [--selector <sel>] [--json]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1226,6 +1234,81 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "dom")
         sendWebReplyAndPrintRead(payload, command: "dom", asJSON: asJSON)
 
+    case "select":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty,
+              let valueOrLabel = args.popFirst() else {
+            fputs("Usage: nex web select [--target X] [--workspace Y] <selector> <value-or-label> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-select",
+            "selector": selector,
+            "value_or_label": valueOrLabel
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "select")
+        sendWebReplyAndPrintActuator(payload, command: "select", asJSON: asJSON)
+
+    case "scroll":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let top = popSwitch("--top", from: &args)
+        let bottom = popSwitch("--bottom", from: &args)
+        let smooth = popSwitch("--smooth", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web scroll [--target X] [--workspace Y] <selector> [--top|--bottom|--smooth] [--json]\n", stderr)
+            exit(1)
+        }
+        if top, bottom {
+            fputs("nex web scroll: --top and --bottom are mutually exclusive\n", stderr)
+            exit(1)
+        }
+        let block = top ? "start" : (bottom ? "end" : "center")
+        let behavior = smooth ? "smooth" : "instant"
+        var payload: [String: Any] = [
+            "command": "web-scroll",
+            "selector": selector,
+            "block": block,
+            "behavior": behavior
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "scroll")
+        sendWebReplyAndPrintActuator(payload, command: "scroll", asJSON: asJSON)
+
+    case "hover":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web hover [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-hover",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "hover")
+        sendWebReplyAndPrintActuator(payload, command: "hover", asJSON: asJSON)
+
+    case "key":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let selector = parseFlag("--selector", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let keyName = args.popFirst(), !keyName.isEmpty else {
+            fputs("Usage: nex web key [--target X] [--workspace Y] <key-name> [--selector <sel>] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-key",
+            "key": keyName
+        ]
+        if let selector { payload["selector"] = selector }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "key")
+        sendWebReplyAndPrintActuator(payload, command: "key", asJSON: asJSON)
+
     case "wait":
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
@@ -1354,6 +1437,17 @@ private func sendWebReplyAndPrintActuator(
         let cond = (json["condition"] as? String) ?? "exists"
         let waited = (json["waited_ms"] as? Int) ?? 0
         print("matched \(cond) in \(waited) ms")
+    case "select":
+        let label = (json["label"] as? String) ?? ""
+        let value = (json["value"] as? String) ?? ""
+        print("selected: \(label.isEmpty ? value : label)")
+    case "scroll":
+        print("scrolled")
+    case "hover":
+        print("hovered")
+    case "key":
+        let k = (json["key"] as? String) ?? ""
+        print("key: \(k)")
     default:
         print("\(command) ok")
     }

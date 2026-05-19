@@ -1327,4 +1327,90 @@ struct SocketParsingTests {
         """)
         #expect(SocketServer.parseWireMessage(data) == nil)
     }
+
+    // MARK: - Phase E — select / scroll / hover / key
+
+    @Test func parseWebSelect() {
+        let data = jsonData("""
+        {"command":"web-select","pane_id":"\(Self.paneIDString)","selector":"css:#s","value_or_label":"Large"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webSelect(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#s", valueOrLabel: "Large"
+        ))
+    }
+
+    @Test func parseWebSelectRequiresValueOrLabel() {
+        let data = jsonData("""
+        {"command":"web-select","pane_id":"\(Self.paneIDString)","selector":"css:#s"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebScrollDefaults() {
+        let data = jsonData("""
+        {"command":"web-scroll","pane_id":"\(Self.paneIDString)","selector":"css:#footer"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        // Missing block / behavior default to center / instant so the
+        // JS side never receives empty strings (invalid scrollIntoView
+        // options would otherwise silently fall back to "auto").
+        #expect(result?.0 == .webScroll(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#footer", block: "center", behavior: "instant"
+        ))
+    }
+
+    @Test func parseWebScrollWithBlockAndSmooth() {
+        let data = jsonData("""
+        {"command":"web-scroll","pane_id":"\(Self.paneIDString)","selector":"css:#hero","block":"end","behavior":"smooth"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webScroll(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#hero", block: "end", behavior: "smooth"
+        ))
+    }
+
+    @Test func parseWebHover() {
+        let data = jsonData("""
+        {"command":"web-hover","pane_id":"\(Self.paneIDString)","selector":"text:More"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webHover(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:More"
+        ))
+    }
+
+    @Test func parseWebKeyBare() {
+        // No --selector → keystroke goes to document.activeElement.
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)","key":"Escape"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webKey(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            keyName: "Escape", selector: nil
+        ))
+    }
+
+    @Test func parseWebKeyWithSelector() {
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)","key":"ArrowDown","selector":"css:#search"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webKey(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            keyName: "ArrowDown", selector: "css:#search"
+        ))
+    }
+
+    @Test func parseWebKeyRequiresName() {
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
 }

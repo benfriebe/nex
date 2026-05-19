@@ -231,6 +231,35 @@ enum SocketMessage: Equatable {
         selector: String?, urlMatch: String?,
         forCondition: String?, timeoutMs: Int
     )
+
+    // Actuator long-tail verbs (Phase E).
+
+    /// `nex web select <selector> <value-or-label>` — set the value
+    /// of a `<select>` element. Matches options by `value` first,
+    /// then by visible label.
+    case webSelect(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, valueOrLabel: String
+    )
+    /// `nex web scroll <selector> [--top|--bottom|--smooth]` —
+    /// `block` is one of `start`/`center`/`end`; `behavior` is
+    /// `instant` or `smooth`. CLI flags map to these directly.
+    case webScroll(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, block: String, behavior: String
+    )
+    /// `nex web hover <selector>` — synthetic hover.
+    case webHover(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web key <key-name> [--selector <sel>]` — dispatch a
+    /// named keystroke to `selector` (or `document.activeElement`
+    /// when `selector` is nil).
+    case webKey(
+        paneID: UUID?, target: String?, workspace: String?,
+        keyName: String, selector: String?
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -247,7 +276,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
     "web-click", "web-type",
     "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom",
-    "web-wait"
+    "web-wait",
+    "web-select", "web-scroll", "web-hover", "web-key"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -721,6 +751,12 @@ final class SocketServer: Sendable {
         var urlMatch: String?
         /// `web-wait --timeout` (milliseconds). 0 / nil → JS default 10000.
         var timeoutMs: Int?
+        /// `web-select` — option value or visible label.
+        var valueOrLabel: String?
+        /// `web-scroll` — scrollIntoView block: start|center|end.
+        var block: String?
+        /// `web-scroll` — scrollIntoView behavior: instant|smooth.
+        var behavior: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -753,6 +789,8 @@ final class SocketServer: Sendable {
             case forCondition = "for"
             case urlMatch = "url_match"
             case timeoutMs = "timeout_ms"
+            case valueOrLabel = "value_or_label"
+            case block, behavior
         }
     }
 
@@ -1117,6 +1155,58 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 selector: selector,
                 maxBytes: wire.maxBytes
+            ), wire)
+        }
+
+        if wire.command == "web-select" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let valueOrLabel = wire.valueOrLabel else { return nil }
+            return (.webSelect(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                valueOrLabel: valueOrLabel
+            ), wire)
+        }
+
+        if wire.command == "web-scroll" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            let block = (wire.block?.isEmpty == true) ? "center" : (wire.block ?? "center")
+            let behavior = (wire.behavior?.isEmpty == true) ? "instant" : (wire.behavior ?? "instant")
+            return (.webScroll(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                block: block,
+                behavior: behavior
+            ), wire)
+        }
+
+        if wire.command == "web-hover" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webHover(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-key" {
+            guard let scope = parseWebTarget(wire),
+                  let keyName = wire.key, !keyName.isEmpty else { return nil }
+            let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
+            return (.webKey(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                keyName: keyName,
+                selector: selector
             ), wire)
         }
 

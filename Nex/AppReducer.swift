@@ -1955,6 +1955,92 @@ struct AppReducer {
         )
     }
 
+    func handleWebSelect(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        valueOrLabel: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "select",
+            args: [.string(selector), .string(valueOrLabel)],
+            reply: reply
+        )
+    }
+
+    func handleWebScroll(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        block: String,
+        behavior: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let opts: [JSPair] = [
+            JSPair(key: "block", value: .string(block)),
+            JSPair(key: "behavior", value: .string(behavior))
+        ]
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "scroll",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebHover(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "hover",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebKey(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        keyName: String,
+        selector: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let selector { opts.append(JSPair(key: "selector", value: .string(selector))) }
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "key",
+            args: [.string(keyName), .object(opts)],
+            reply: reply
+        )
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -5066,6 +5152,50 @@ struct AppReducer {
                         urlMatch: urlMatch,
                         forCondition: forCondition,
                         timeoutMs: timeoutMs,
+                        reply: reply
+                    )
+
+                case .webSelect(let paneID, let target, let workspaceFilter, let selector, let valueOrLabel):
+                    return handleWebSelect(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        valueOrLabel: valueOrLabel,
+                        reply: reply
+                    )
+
+                case .webScroll(let paneID, let target, let workspaceFilter, let selector, let block, let behavior):
+                    return handleWebScroll(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        block: block,
+                        behavior: behavior,
+                        reply: reply
+                    )
+
+                case .webHover(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebHover(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webKey(let paneID, let target, let workspaceFilter, let keyName, let selector):
+                    return handleWebKey(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        keyName: keyName,
+                        selector: selector,
                         reply: reply
                     )
                 }

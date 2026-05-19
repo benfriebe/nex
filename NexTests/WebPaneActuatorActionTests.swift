@@ -384,4 +384,192 @@ struct WebPaneActuatorActionTests {
         let html = parsed["outer_html"] as? String ?? ""
         #expect(html.utf8.count <= 50)
     }
+
+    // MARK: - select
+
+    @Test func selectByValueUpdatesAndFiresChange() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <select id="s">
+            <option value="s">Small</option>
+            <option value="m">Medium</option>
+            <option value="l">Large</option>
+        </select>
+        <script>
+        window.__changes = 0;
+        document.getElementById('s').addEventListener('change', function() {
+            window.__changes++;
+        });
+        </script>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.select('css:#s', 'm'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["value"] as? String == "m")
+        let value = try await host.eval("document.getElementById('s').value")
+        #expect(value as? String == "m")
+        let changes = try await host.eval("window.__changes")
+        #expect(changes as? Int == 1)
+    }
+
+    @Test func selectByLabelWhenValueMisses() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <select id="s">
+            <option value="s">Small</option>
+            <option value="m">Medium</option>
+            <option value="l">Large</option>
+        </select>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.select('css:#s', 'Large'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["value"] as? String == "l")
+        #expect(parsed["label"] as? String == "Large")
+    }
+
+    @Test func selectRejectsNonSelectElement() async throws {
+        let host = try await ActuatorTestHost.make(html: "<input id=\"i\">")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.select('css:#i', 'x'))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+        #expect((parsed["error"] as? String)?.contains("not a <select>") == true)
+    }
+
+    @Test func selectRejectsMissingOption() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <select id="s"><option value="s">Small</option></select>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.select('css:#s', 'XXL'))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+        #expect((parsed["error"] as? String)?.contains("no option") == true)
+    }
+
+    // MARK: - scroll
+
+    @Test func scrollReturnsRect() async throws {
+        // We can't directly assert "the page scrolled" in a 0-height
+        // hidden webview, but we can verify the call succeeds and the
+        // rect is reported. The integration smoke covers actual
+        // scroll behaviour on a real page.
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="d" style="height:200px;width:200px;background:red"></div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.scroll('css:#d'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["rect"] != nil)
+    }
+
+    @Test func scrollMissingSelectorErrors() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.scroll('text:nope'))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+    }
+
+    // MARK: - hover
+
+    @Test func hoverDispatchesMouseAndPointerOver() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="t" style="width:100px;height:50px">x</div>
+        <script>
+        window.__events = [];
+        ['pointerover','pointerenter','mouseover','mouseenter'].forEach(function(name) {
+            document.getElementById('t').addEventListener(name, function() {
+                window.__events.push(name);
+            });
+        });
+        </script>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.hover('css:#t'))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        let events = try await host.eval("JSON.stringify(window.__events)")
+        let str = (events as? String) ?? ""
+        // mouseover + mouseenter always; pointer* may be absent on
+        // very old WebKit but on the test runner they fire.
+        #expect(str.contains("mouseover"))
+        #expect(str.contains("mouseenter"))
+        #expect(str.contains("pointerover"))
+        #expect(str.contains("pointerenter"))
+    }
+
+    @Test func hoverReturnsNotFoundForMissingSelector() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.hover('text:nope'))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+    }
+
+    // MARK: - key
+
+    @Test func keyDispatchesEscapeToActiveElement() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <input id="i" autofocus>
+        <script>
+        window.__esc = 0;
+        document.getElementById('i').addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') window.__esc++;
+        });
+        document.getElementById('i').focus();
+        </script>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.key('Escape', {}))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["key"] as? String == "Escape")
+        let esc = try await host.eval("window.__esc")
+        #expect(esc as? Int == 1)
+    }
+
+    @Test func keyDispatchesArrowToSelectorTarget() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <input id="a"><input id="b">
+        <script>
+        window.__keys = [];
+        document.getElementById('b').addEventListener('keydown', function(e) {
+            window.__keys.push(e.key + ':' + e.code);
+        });
+        </script>
+        """)
+        _ = try await host.eval("__nexAct.key('ArrowDown', {selector: 'css:#b'})")
+        let keys = try await host.eval("JSON.stringify(window.__keys)")
+        #expect((keys as? String) == "[\"ArrowDown:ArrowDown\"]")
+    }
+
+    @Test func keyAcceptsCaseInsensitiveAliases() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <input id="i" autofocus>
+        <script>
+        window.__keys = [];
+        document.addEventListener('keydown', function(e) {
+            window.__keys.push(e.key);
+        });
+        document.getElementById('i').focus();
+        </script>
+        """)
+        _ = try await host.eval("__nexAct.key('esc', {})")
+        _ = try await host.eval("__nexAct.key('SPACE', {})")
+        _ = try await host.eval("__nexAct.key('Up', {})")
+        let keys = try await host.eval("JSON.stringify(window.__keys)")
+        #expect((keys as? String) == "[\"Escape\",\" \",\"ArrowUp\"]")
+    }
+
+    @Test func keyRejectsUnknownName() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.key('Fjord', {}))")
+        )
+        #expect(parsed["ok"] as? Bool == false)
+        #expect((parsed["error"] as? String)?.contains("unknown key") == true)
+    }
 }
