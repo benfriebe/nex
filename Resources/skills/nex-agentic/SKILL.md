@@ -3,11 +3,16 @@ name: nex-agentic
 description: >
   Use the Nex terminal multiplexer and its CLI to orchestrate multi-agent
   development workflows. Enables spawning named child panes, starting Claude
-  agents in them, farming out parallel work, and coordinating results via
-  markdown files and direct pane messaging. Trigger when: the user asks to
-  "spawn agents", "fan out work", "create worker panes", "orchestrate panes",
-  "use nex to coordinate", "multi-agent", "farm out tasks", or any variation
-  of parallelizing work across Nex panes.
+  agents in them, farming out parallel work, coordinating results via markdown
+  files and direct pane messaging, AND driving / observing a web app from an
+  agent via the `nex web` pane (open URL, capture page text or screenshot,
+  drain console buffer, arm element picker to paste structured payloads into
+  an agent pane). Trigger when: the user asks to "spawn agents", "fan out
+  work", "create worker panes", "orchestrate panes", "use nex to coordinate",
+  "multi-agent", "farm out tasks", or any variation of parallelizing work
+  across Nex panes. Also trigger when an agent needs to "drive the browser",
+  "watch the page console", "capture a screenshot of the app", "pick an
+  element from the page", or coordinate with the web pane in any way.
 ---
 
 # Nex Agentic Development Skill
@@ -100,7 +105,10 @@ nex pane name <label>
 # Label resolution is scoped to the sender's own workspace by default
 # (issue #92). Pass --workspace <name-or-id> to target another workspace
 # or to disambiguate a label collision; UUID targets are always global.
-nex pane send --target <label-or-uuid> [--workspace <name-or-uuid>] <command...>
+# `--bare` writes the text without appending Enter — pair with
+# `pane send-key` for compositional flows (autocomplete with `tab`,
+# escape sequences, partial input, paste-safe structured content).
+nex pane send [--bare] --target <label-or-uuid> [--workspace <name-or-uuid>] <command...>
 
 # List panes (only command that returns data — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
@@ -132,8 +140,8 @@ nex pane list --current
 nex pane list --workspace nex
 ```
 
-Each JSON entry includes: `id`, `label`, `type` (`shell`/`markdown`/
-`scratchpad`), `title`, `workspace_id`, `workspace_name`,
+Each JSON entry includes: `id`, `label`, `type` (`shell` / `markdown` /
+`scratchpad` / `diff` / `web`), `title`, `workspace_id`, `workspace_name`,
 `working_directory`, `git_branch`, `status` (`idle`/`running`/
 `waitingForInput`), `claude_session_id`, `is_focused`,
 `is_active_workspace`, `created_at`, `last_activity_at`.
@@ -177,6 +185,70 @@ nex event notification --title "..." --body "..."  # Desktop notification
 ```bash
 nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray]
 ```
+
+### Web Pane Commands
+
+A `web` pane is a full in-pane browser with URL bar, multi-tab
+strip, console capture, an element picker that pastes structured
+payloads into a chosen pane, private mode, and a cookies editor.
+The CLI surface is the orchestration angle: an agent in pane A can
+drive or observe a web app in pane B.
+
+```bash
+# Create a new web pane in the active workspace
+nex web open [--private] <url>
+
+# Read the active tab's URL + title
+nex web url --target <name-or-uuid> [--workspace <name-or-uuid>]
+
+# Navigate
+nex web back    --target <name-or-uuid>
+nex web forward --target <name-or-uuid>
+nex web reload  --target <name-or-uuid> [--hard]
+
+# Capture page state into a JSON reply
+nex web capture --target <name-or-uuid> --mode meta|text|screenshot
+
+# Multi-tab
+nex web tabs       --target <name-or-uuid> [--json] [--no-header]
+nex web tab-new    --target <name-or-uuid> [<url>] [--no-focus]
+nex web tab-close  --target <name-or-uuid> <ref>   # UUID or numeric index
+nex web tab-select --target <name-or-uuid> <ref>
+
+# Drain the per-pane console ring buffer (since-cursor, level filter, clear)
+nex web console --target <name-or-uuid> [--since N] [--level error|warn|info|log|debug] [--clear] [--json]
+
+# Arm the element picker. With --send-to, the next click pastes a
+# sanitised payload (selector, xpath, tag, outer_html, attributes,
+# rect, surrounding text, url) into the named pane via `pane send`.
+# Default is paste-only — pass --submit if the receiving pane should
+# auto-execute (rarely what you want for an agent prompt).
+nex web inspect --target <name-or-uuid> [--send-to <pane>] [--submit] [--disarm]
+
+# Drain the per-pane inspect-result queue without arming
+nex web inspect-result --target <name-or-uuid> [--clear] [--json]
+
+# Toggle private mode (rebuilds the coordinator with a nonPersistent
+# data store; live JS state is lost on transition)
+nex web private on|off --target <name-or-uuid>
+
+# Cookies (per-pane data store)
+nex web cookies list   --target <name-or-uuid> [--json]
+nex web cookies clear  --target <name-or-uuid> [--domain X] [--all]
+nex web cookies delete <name> --target <name-or-uuid> [--domain X]
+```
+
+All `web` verbs follow the same `--target` / `--workspace`
+scoping as `pane send` (issue #92): label targets need an origin
+pane or `--workspace`; UUID targets resolve globally. All are
+reply-allowlisted — they return JSON and the CLI exits non-zero on
+failure.
+
+**Known limitation.** `WKUserContentController` user-script injection
+is unreliable on `data:` URLs (opaque origin). Console capture +
+element picker rely on injected scripts, so reach for a real
+`http(s)://` URL when validating those paths. Smoke tests can still
+use `data:` URLs for navigation / capture --mode text / tabs.
 
 ### Key Behaviors
 
@@ -344,6 +416,76 @@ nex pane send --target coder claude
 sleep 2
 nex pane send --target coder "You are a coder. Write code for the task in .nex-tasks/feature.md and save it to .nex-results/code.md"
 ```
+
+### Pattern 4: Agent driving / observing a web app via web pane
+
+The web pane closes the loop where an agent in one pane drives or
+observes a web app in another. Common shapes:
+
+**(a) Capture-then-fix loop** — agent runs the app in a web pane,
+polls its console for errors, fixes the code, reloads, repeats.
+
+```bash
+# Coordinator opens the dev server's URL in a web pane and an agent
+# pane that watches it.
+nex web open http://localhost:3000              # → prints `open ok: <web-uuid>`
+nex pane create --name dev-agent
+sleep 2
+nex pane send --target dev-agent claude --permission-mode acceptEdits
+
+# Agent prompt (typed into dev-agent):
+#   "Watch the console buffer of web pane <web-uuid>. Every 10s run
+#    `nex web console --target <web-uuid> --json --since $cursor`
+#    (track the cursor between polls). When you see a JS error,
+#    open the relevant source file and propose a fix. Reload the web
+#    pane after each edit via `nex web reload --target <web-uuid>`."
+```
+
+**(b) Click-to-locate-source** — the human clicks an element on the
+page, an agent gets the selector + outerHTML and finds the code that
+rendered it. The picker is single-shot by default (one click → one
+delivery), or sticky via the chrome's batch-annotate panel.
+
+```bash
+# Arm the picker on the web pane, route the next click into the agent
+nex web inspect --target <web-uuid> --send-to dev-agent
+# → next click on the web page pastes a fenced JSON block into
+#   dev-agent's PTY (paste-only; agent reads it as input but does NOT
+#   auto-submit unless --submit was passed)
+```
+
+The pasted payload includes `selector`, `xpath`, `tag`, `id`,
+`outer_html` (clipped 16KB), `attributes`, `rect`, surrounding `text`,
+`context_html` (clipped 4KB), and `url`. ANSI / C0 control bytes are
+stripped before paste so the agent's prompt can't be smuggled into.
+
+**(c) Headless visual diff** — capture screenshots before/after a
+change to gate a deploy.
+
+```bash
+nex web capture --target <web-uuid> --mode screenshot
+# → JSON reply contains either `png_base64` (small) or `path` to a
+#   PNG in the system temp dir (larger). The CLI prints the path.
+```
+
+**(d) Sandbox a flaky integration** — open the integration target in a
+private web pane so the agent's exploration doesn't pollute the
+user's real session.
+
+```bash
+nex web open --private https://staging.example.com
+# Cookies + caches discarded on quit; tabs blank on restart.
+```
+
+**Picker behaviour to design around:**
+- Arming is single-shot by default — exactly one click delivers, then
+  the picker disarms. Sticky mode (multiple clicks per arm) is only
+  reachable through the batch-annotate panel in the chrome.
+- Delivery defaults to paste-no-submit — the receiving agent reads
+  the JSON as input but does not execute it. Pass `--submit` only
+  when the receiver is at a prompt that should auto-fire on Enter.
+- The picker auto-disarms on tab switch, tab close, and Escape.
+- Page JS cannot spoof inbound payloads on the inspect channel.
 
 ## Task File Format
 
