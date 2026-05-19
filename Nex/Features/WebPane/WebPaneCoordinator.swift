@@ -344,7 +344,28 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return trimmed }
         if trimmed.contains("://") { return trimmed }
-        if trimmed.hasPrefix("about:") { return trimmed }
+
+        // Recognise opaque schemes that don't use `://` — `data:`,
+        // `javascript:`, `mailto:`, `tel:`, `about:`, `file:` and the
+        // like. Distinguish a real scheme from a `host:port` pair by
+        // looking at what follows the colon: a port is digits, a
+        // scheme value starts with anything else. Without this, e.g.
+        // `data:text/html,<h1>x</h1>` would be prefixed with
+        // `https://` and never load (caught by PR #147 cua validation).
+        if let colonIdx = trimmed.firstIndex(of: ":"),
+           let firstChar = trimmed.first,
+           firstChar.isLetter {
+            let scheme = trimmed[..<colonIdx]
+            let validSchemeChars = scheme.allSatisfy { ch in
+                ch.isLetter || ch.isNumber || ch == "+" || ch == "-" || ch == "."
+            }
+            let afterIdx = trimmed.index(after: colonIdx)
+            let afterColon = trimmed[afterIdx...]
+            let looksLikePort = afterColon.first?.isNumber == true
+            if validSchemeChars, !looksLikePort {
+                return trimmed
+            }
+        }
 
         // Extract the host portion ("host[:port]/path?..." → "host").
         let beforePath = trimmed.split(separator: "/", maxSplits: 1).first.map(String.init) ?? trimmed

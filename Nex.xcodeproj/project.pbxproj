@@ -52,6 +52,7 @@
 		5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3879BA745F8737CA5872F80D /* DatabaseService.swift */; };
 		52D4477AF5CCF1724D609119 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EFC4D8E9A152683486EC7F29 /* Sparkle */; };
 		539AACF3A856FD51EC92A6F1 /* WebPaneBatchMarkerScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579D8D40F1D9930845C3B0C9 /* WebPaneBatchMarkerScript.swift */; };
+		53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */; };
 		550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221A3B0170CFD708F3B03A84 /* Repo.swift */; };
 		5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */; };
 		58B6A951A34B2ED1516194C4 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E08D39F8F87D7505CD32D25D /* WebKit.framework */; };
@@ -181,6 +182,7 @@
 		005B56542A2F5FD5D3BC588C /* PaneGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneGridView.swift; sourceTree = "<group>"; };
 		0153509BA13BB205C40DE2D5 /* GitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitService.swift; sourceTree = "<group>"; };
 		018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceContainerView.swift; sourceTree = "<group>"; };
+		06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneURLNormalisationTests.swift; sourceTree = "<group>"; };
 		0689D085597FF9C7F4D87401 /* RepoPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPickerView.swift; sourceTree = "<group>"; };
 		09102B6ADEAB463454E7F15E /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTarget.swift; sourceTree = "<group>"; };
@@ -452,6 +454,7 @@
 				ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */,
 				AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */,
 				1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */,
+				06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */,
 				94D09D767C96B3F96E4DF7C5 /* WindowSpacesBindingTests.swift */,
 				28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */,
 				E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */,
@@ -851,6 +854,7 @@
 				EAF43DC55C5612F3AE83BF02 /* SettingsFeatureTests.swift in Sources */,
 				2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */,
 				EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */,
+				53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */,
 				DDD05A3B3A535DEA66485A47 /* WindowSpacesBindingTests.swift in Sources */,
 				5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */,
 				F01CDB667AE2A0CF2A825AD3 /* WorkspaceDropTargetTests.swift in Sources */,
