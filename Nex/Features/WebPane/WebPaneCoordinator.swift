@@ -215,6 +215,15 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        // Actuator namespace (window.__nexAct) — selector parser +
+        // DOM lookup / action / wait primitives that every
+        // `nex web <verb>` invocation composes on top of. Main frame
+        // only; cross-origin frames are out of scope for actuation.
+        config.userContentController.addUserScript(WKUserScript(
+            source: WebPaneActuatorScript.source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
@@ -542,6 +551,24 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         } catch {
             return nil
         }
+    }
+
+    /// Evaluate a JS source string against the named tab's WKWebView
+    /// and return the raw result. Thin wrapper around
+    /// `WKWebView.evaluateJavaScript` that surfaces the missing-tab
+    /// case as `nil` rather than throwing. Used by `WebPaneActuator`
+    /// and the rebuilt `web exec`.
+    func evaluateJavaScript(tabID: UUID, source: String) async -> Any? {
+        guard let webView = webViews[tabID] else { return nil }
+        return try? await webView.evaluateJavaScript(source)
+    }
+
+    /// Whether the coordinator currently has a WebView for `tabID`.
+    /// `WebPaneActuator` uses this to distinguish "tab gone between
+    /// dispatch and evaluation" from "tab still present but the
+    /// actuator reply was unparseable".
+    func knowsTab(tabID: UUID) -> Bool {
+        webViews[tabID] != nil
     }
 
     // MARK: - WKNavigationDelegate
