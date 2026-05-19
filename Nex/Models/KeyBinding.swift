@@ -247,6 +247,21 @@ enum NexAction: String, CaseIterable {
     case commandPalette = "command_palette"
     case newGroup = "new_group"
     case openDiff = "open_diff"
+
+    // Web pane actions. All ship unbound; the priority layer in
+    // `PaneShortcutMonitor` dispatches them directly when the focused
+    // pane is a web pane, so the global ⌘L / ⌘R / ⌘[ / ⌘] / ⌘T /
+    // ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every other pane type.
+    case openWebPane = "open_web_pane"
+    case webFocusURLBar = "web_focus_url_bar"
+    case webBack = "web_back"
+    case webForward = "web_forward"
+    case webReload = "web_reload"
+    case webTabNew = "web_tab_new"
+    case webTabClose = "web_tab_close"
+    case webTabPrev = "web_tab_prev"
+    case webTabNext = "web_tab_next"
+
     case unbind
 
     /// Actions handled by SwiftUI Commands (menu bar items).
@@ -305,6 +320,15 @@ enum NexAction: String, CaseIterable {
         case .commandPalette: "Command Palette"
         case .newGroup: "New Group"
         case .openDiff: "Open Diff"
+        case .openWebPane: "Open Web Pane"
+        case .webFocusURLBar: "Web: Focus URL Bar"
+        case .webBack: "Web: Back"
+        case .webForward: "Web: Forward"
+        case .webReload: "Web: Reload"
+        case .webTabNew: "Web: New Tab"
+        case .webTabClose: "Web: Close Tab"
+        case .webTabPrev: "Web: Previous Tab"
+        case .webTabNext: "Web: Next Tab"
         case .unbind: "Unbind"
         }
     }
@@ -327,6 +351,9 @@ enum NexAction: String, CaseIterable {
         case .openFile, .toggleMarkdownEdit, .increaseMarkdownFontSize, .decreaseMarkdownFontSize,
              .resetMarkdownFontSize, .openDiff:
             "Files"
+        case .openWebPane, .webFocusURLBar, .webBack, .webForward, .webReload,
+             .webTabNew, .webTabClose, .webTabPrev, .webTabNext:
+            "Web Pane (active when web pane focused)"
         case .toggleSearch, .closeSearch:
             "Search"
         case .unbind:

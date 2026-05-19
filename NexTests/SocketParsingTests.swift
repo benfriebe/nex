@@ -833,4 +833,257 @@ struct SocketParsingTests {
         let result = SocketServer.parseWireMessage(data)
         #expect(result?.0 == .graftStatus)
     }
+
+    // MARK: - parseWireMessage — Phase 3 web console/inspector
+
+    @Test func parseWebConsoleDefaults() {
+        let data = jsonData("""
+        {"command":"web-console","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webConsole(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            since: 0,
+            level: nil,
+            clear: false
+        ))
+    }
+
+    @Test func parseWebConsoleWithFilters() {
+        let data = jsonData("""
+        {"command":"web-console","pane_id":"\(Self.paneIDString)",
+         "since":42,"level":"error","clear":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webConsole(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            since: 42,
+            level: "error",
+            clear: true
+        ))
+    }
+
+    @Test func parseWebConsoleEmptyLevelNormalisedToNil() {
+        let data = jsonData("""
+        {"command":"web-console","pane_id":"\(Self.paneIDString)","level":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webConsole(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            since: 0,
+            level: nil,
+            clear: false
+        ))
+    }
+
+    @Test func parseWebConsoleRequiresScope() {
+        // No pane_id and no target — `parseWebTarget` rejects.
+        let data = jsonData("""
+        {"command":"web-console"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebConsoleByTargetWithWorkspace() {
+        let data = jsonData("""
+        {"command":"web-console","target":"main","workspace":"Dev"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webConsole(
+            paneID: nil,
+            target: "main",
+            workspace: "Dev",
+            since: 0,
+            level: nil,
+            clear: false
+        ))
+    }
+
+    @Test func parseWebInspectArm() {
+        let data = jsonData("""
+        {"command":"web-inspect","pane_id":"\(Self.paneIDString)",
+         "send_to":"agent","submit":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webInspect(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            sendTo: "agent",
+            submit: true,
+            disarm: false
+        ))
+    }
+
+    @Test func parseWebInspectDisarm() {
+        let data = jsonData("""
+        {"command":"web-inspect","pane_id":"\(Self.paneIDString)","disarm":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webInspect(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            sendTo: nil,
+            submit: false,
+            disarm: true
+        ))
+    }
+
+    @Test func parseWebInspectEmptySendToNormalisedToNil() {
+        let data = jsonData("""
+        {"command":"web-inspect","pane_id":"\(Self.paneIDString)","send_to":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webInspect(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            sendTo: nil,
+            submit: false,
+            disarm: false
+        ))
+    }
+
+    @Test func parseWebInspectRequiresScope() {
+        let data = jsonData("""
+        {"command":"web-inspect"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebInspectResultBare() {
+        let data = jsonData("""
+        {"command":"web-inspect-result","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webInspectResult(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            clear: false
+        ))
+    }
+
+    @Test func parseWebInspectResultClear() {
+        let data = jsonData("""
+        {"command":"web-inspect-result","pane_id":"\(Self.paneIDString)","clear":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webInspectResult(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            clear: true
+        ))
+    }
+
+    @Test func parseWebInspectResultRequiresScope() {
+        let data = jsonData("""
+        {"command":"web-inspect-result"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    // MARK: - Phase 5 — private mode + cookies
+
+    @Test func parseWebOpenDefaultsToPublic() {
+        let data = jsonData("""
+        {"command":"web-open","url":"https://example.com"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webOpen(
+            paneID: nil, url: "https://example.com", isPrivate: false
+        ))
+    }
+
+    @Test func parseWebOpenWithPrivateFlag() {
+        let data = jsonData("""
+        {"command":"web-open","url":"https://example.com","private":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webOpen(
+            paneID: nil, url: "https://example.com", isPrivate: true
+        ))
+    }
+
+    @Test func parseWebPrivateOn() {
+        let data = jsonData("""
+        {"command":"web-private","pane_id":"\(Self.paneIDString)","private":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webPrivate(
+            paneID: Self.paneUUID, target: nil, workspace: nil, enabled: true
+        ))
+    }
+
+    @Test func parseWebPrivateOff() {
+        let data = jsonData("""
+        {"command":"web-private","target":"web","workspace":"Dev","private":false}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webPrivate(
+            paneID: nil, target: "web", workspace: "Dev", enabled: false
+        ))
+    }
+
+    @Test func parseWebPrivateRequiresFlag() {
+        let data = jsonData("""
+        {"command":"web-private","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebCookiesList() {
+        let data = jsonData("""
+        {"command":"web-cookies-list","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCookiesList(
+            paneID: Self.paneUUID, target: nil, workspace: nil
+        ))
+    }
+
+    @Test func parseWebCookiesClearAllSiteData() {
+        let data = jsonData("""
+        {"command":"web-cookies-clear","pane_id":"\(Self.paneIDString)","all":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCookiesClear(
+            paneID: Self.paneUUID, target: nil, workspace: nil, domain: nil, all: true
+        ))
+    }
+
+    @Test func parseWebCookiesClearScopedToDomain() {
+        let data = jsonData("""
+        {"command":"web-cookies-clear","pane_id":"\(Self.paneIDString)","domain":"example.com"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCookiesClear(
+            paneID: Self.paneUUID, target: nil, workspace: nil, domain: "example.com", all: false
+        ))
+    }
+
+    @Test func parseWebCookiesDelete() {
+        let data = jsonData("""
+        {"command":"web-cookies-delete","pane_id":"\(Self.paneIDString)","name":"sessionid","domain":"example.com"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCookiesDelete(
+            paneID: Self.paneUUID, target: nil, workspace: nil, name: "sessionid", domain: "example.com"
+        ))
+    }
+
+    @Test func parseWebCookiesDeleteRequiresName() {
+        let data = jsonData("""
+        {"command":"web-cookies-delete","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
 }

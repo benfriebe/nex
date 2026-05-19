@@ -32,6 +32,37 @@ struct PaneGridView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
+    /// Sidecar state for `.web` panes in this workspace. Keyed by pane id.
+    var webPanes: [UUID: WebPaneState] = [:]
+    /// URL bar focus token bumped by ⌘L. Used by `WebPaneView` to
+    /// promote the URL bar to first responder for the matching pane.
+    var webPaneURLFocusToken: [UUID: UInt64] = [:]
+    var onWebNavigate: ((UUID, String) -> Void)?
+    var onWebBack: ((UUID) -> Void)?
+    var onWebForward: ((UUID) -> Void)?
+    var onWebReload: ((UUID) -> Void)?
+    var onWebTabSelect: ((UUID, UUID) -> Void)?
+    var onWebTabClose: ((UUID, UUID) -> Void)?
+    var onWebTabNew: ((UUID) -> Void)?
+    /// Toggle the element-pickup panel on a web pane. Reducer-side
+    /// logic decides between start / hide / show based on the
+    /// current state of `batchInspect` and `panelVisible`.
+    var onWebTogglePickup: ((UUID) -> Void)?
+    var onWebBatchItemCommentChanged: ((UUID, UUID, String) -> Void)?
+    var onWebBatchItemRemoved: ((UUID, UUID) -> Void)?
+    var onWebBatchRowTapped: ((UUID, UUID) -> Void)?
+    /// Send the batch. Second arg is the destination pane id —
+    /// nil = drop into the local inspect-result queue.
+    var onWebBatchSend: ((UUID, UUID?) -> Void)?
+    var onWebBatchCancel: ((UUID) -> Void)?
+    /// Flip the per-pane private mode flag. Reducer destroys the
+    /// coordinator, the host then rebuilds against the new store on
+    /// the next SwiftUI pass.
+    var onWebTogglePrivate: ((UUID) -> Void)?
+    /// Global web favourites — surfaced in every web pane's chrome.
+    var favourites: [Favourite] = []
+    var onToggleFavourite: ((String, String) -> Void)?
+    var onOpenFavourite: ((UUID, String) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.surfaceManager) private var surfaceManager
@@ -211,6 +242,46 @@ struct PaneGridView: View {
                     backgroundOpacity: ghosttyConfig.backgroundOpacity,
                     fontSize: pane.markdownFontSize
                 )
+            case .web:
+                WebPaneView(
+                    paneID: pane.id,
+                    tabs: webPanes[pane.id]?.tabs ?? [],
+                    activeTabID: webPanes[pane.id]?.activeTabID,
+                    isPrivate: webPanes[pane.id]?.isPrivate ?? false,
+                    isFocused: pane.id == focusedPaneID,
+                    focusURLBarToken: webPaneURLFocusToken[pane.id] ?? 0,
+                    onNavigate: { url in onWebNavigate?(pane.id, url) },
+                    onBack: { onWebBack?(pane.id) },
+                    onForward: { onWebForward?(pane.id) },
+                    onReload: { onWebReload?(pane.id) },
+                    onTabSelect: { tabID in onWebTabSelect?(pane.id, tabID) },
+                    onTabClose: { tabID in onWebTabClose?(pane.id, tabID) },
+                    onTabNew: { onWebTabNew?(pane.id) },
+                    onTogglePrivate: { onWebTogglePrivate?(pane.id) },
+                    availableInspectTargets: inspectTargets(excluding: pane.id),
+                    inspectorArmed: (webPanes[pane.id]?.batchInspect?.panelVisible) ?? false,
+                    batchInspect: webPanes[pane.id]?.batchInspect,
+                    lastBatchTarget: webPanes[pane.id]?.lastBatchTarget,
+                    onTogglePickup: { onWebTogglePickup?(pane.id) },
+                    onBatchItemCommentChanged: { itemID, comment in
+                        onWebBatchItemCommentChanged?(pane.id, itemID, comment)
+                    },
+                    onBatchItemRemoved: { itemID in
+                        onWebBatchItemRemoved?(pane.id, itemID)
+                    },
+                    onBatchRowTapped: { itemID in
+                        onWebBatchRowTapped?(pane.id, itemID)
+                    },
+                    onBatchSend: { sendTo in onWebBatchSend?(pane.id, sendTo) },
+                    onBatchCancel: { onWebBatchCancel?(pane.id) },
+                    favourites: favourites,
+                    onToggleFavourite: { url, title in
+                        onToggleFavourite?(url, title)
+                    },
+                    onOpenFavourite: { url in
+                        onOpenFavourite?(pane.id, url)
+                    }
+                )
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -229,7 +300,7 @@ struct PaneGridView: View {
             }
         }
         .background {
-            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff {
+            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }
@@ -309,6 +380,32 @@ struct PaneGridView: View {
             .frame(width: overlayRect.width, height: overlayRect.height)
             .offset(x: overlayRect.origin.x, y: overlayRect.origin.y)
             .allowsHitTesting(false)
+    }
+
+    /// Build the dropdown entries for the web pane's inspect-pickup
+    /// button: every other shell pane in the same workspace,
+    /// labelled by its tag (or working-directory tail when no tag is
+    /// set). The source web pane is excluded so users don't
+    /// accidentally pipe the payload back into the page they're
+    /// inspecting, and non-shell panes (markdown / scratchpad / diff
+    /// / web) are filtered out because they have no terminal surface
+    /// for `paneSendText` to write to.
+    private func inspectTargets(excluding sourcePaneID: UUID) -> [InspectTargetOption] {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        return panes.compactMap { pane -> InspectTargetOption? in
+            guard pane.id != sourcePaneID else { return nil }
+            guard pane.type == .shell else { return nil }
+            let label: String = {
+                if let tag = pane.label, !tag.isEmpty { return tag }
+                var cwd = pane.workingDirectory
+                if !home.isEmpty, cwd.hasPrefix(home) {
+                    cwd = "~" + cwd.dropFirst(home.count)
+                }
+                let lastComponent = (cwd as NSString).lastPathComponent
+                return "shell: \(lastComponent)"
+            }()
+            return InspectTargetOption(id: pane.id, label: label)
+        }
     }
 
     private func postMarkdownCopy(_ paneID: UUID, kind: MarkdownCopyKind) {

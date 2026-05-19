@@ -84,6 +84,88 @@ enum SocketMessage: Equatable {
     case graftStop(workspace: String?, repo: String?, paneID: UUID?)
     /// `nex graft status` — list active sessions across all workspaces.
     case graftStatus
+
+    // Web pane commands (Phase 1). `web` is a first-class top-level
+    // CLI verb (not a `pane` subcommand), so the wire names follow
+    // suit: `web-open` / `web-url` / etc.
+
+    /// Open a new `.web` pane with the given URL. `paneID` (from
+    /// `NEX_PANE_ID`) is informational; opening always creates a new
+    /// pane in the active workspace, mirroring `nex diff`.
+    case webOpen(paneID: UUID?, url: String, isPrivate: Bool)
+    /// Read the active tab's current URL + title for the resolved pane.
+    case webURL(paneID: UUID?, target: String?, workspace: String?)
+    case webBack(paneID: UUID?, target: String?, workspace: String?)
+    case webForward(paneID: UUID?, target: String?, workspace: String?)
+    case webReload(paneID: UUID?, target: String?, workspace: String?, hard: Bool)
+    /// `mode` is one of `meta`, `text`, `screenshot`. `meta` is the
+    /// cheap default — URL + title + byte counts; `text` returns the
+    /// visible page text; `screenshot` returns a PNG (inline base64
+    /// under 1 MB, else a `/tmp` path).
+    case webCapture(paneID: UUID?, target: String?, workspace: String?, mode: String)
+
+    // Tab commands
+
+    /// List the open tabs of the resolved web pane.
+    case webTabs(paneID: UUID?, target: String?, workspace: String?)
+    /// Open a new tab in the resolved web pane. `url` may be empty
+    /// (blank tab). `makeActive` defaults to true.
+    case webTabNew(paneID: UUID?, target: String?, workspace: String?, url: String, makeActive: Bool)
+    /// Close a tab. `tabRef` is either a tab UUID or a numeric index.
+    /// Resolving to the only tab in the pane returns `{ok:false}`
+    /// rather than implicitly closing the pane — callers can use
+    /// `pane close` for that.
+    case webTabClose(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
+    case webTabSelect(paneID: UUID?, target: String?, workspace: String?, tabRef: String)
+
+    // Phase 3 — console + inspector
+
+    /// Drain the console ring buffer of the resolved web pane.
+    /// `since` is the last seq the caller has already seen (0 = full
+    /// buffer). `level` filters to a single severity. `clear` empties
+    /// the buffer after the read so the next call starts fresh.
+    case webConsole(
+        paneID: UUID?, target: String?, workspace: String?,
+        since: UInt64, level: String?, clear: Bool
+    )
+    /// Arm the picker for the resolved pane's active tab. `sendTo`
+    /// is an optional pane target (label or UUID) into which the
+    /// next click's payload gets pasted. `submit` controls whether
+    /// the paste ends with an Enter keystroke (default: false).
+    /// `disarm` disarms an existing arm without picking.
+    case webInspect(
+        paneID: UUID?, target: String?, workspace: String?,
+        sendTo: String?, submit: Bool, disarm: Bool
+    )
+    /// Drain the per-pane inspect-result queue without arming.
+    case webInspectResult(
+        paneID: UUID?, target: String?, workspace: String?, clear: Bool
+    )
+
+    // Phase 5 — private mode + cookies
+
+    /// Set the resolved web pane's private mode flag. The reducer
+    /// destroys the coordinator so the host rebuilds tabs against
+    /// the new data store. Idempotent.
+    case webPrivate(
+        paneID: UUID?, target: String?, workspace: String?, enabled: Bool
+    )
+    /// List cookies for the resolved web pane's data store, grouped
+    /// by domain. Read-only.
+    case webCookiesList(paneID: UUID?, target: String?, workspace: String?)
+    /// Drop cookies (and other site data when `--all`) for the
+    /// resolved web pane's data store. `domain` scopes deletion to
+    /// cookies whose domain matches; omitting it clears everything.
+    case webCookiesClear(
+        paneID: UUID?, target: String?, workspace: String?,
+        domain: String?, all: Bool
+    )
+    /// Delete cookies matching `name` (and optional `domain` scope)
+    /// from the resolved web pane's data store.
+    case webCookiesDelete(
+        paneID: UUID?, target: String?, workspace: String?,
+        name: String, domain: String?
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -92,7 +174,12 @@ enum SocketMessage: Equatable {
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
-    "graft-start", "graft-stop", "graft-status"
+    "graft-start", "graft-stop", "graft-status",
+    "web-open", "web-url", "web-back",
+    "web-forward", "web-reload", "web-capture",
+    "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
+    "web-console", "web-inspect", "web-inspect-result",
+    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -159,7 +246,20 @@ final class SocketServer: Sendable {
             closeImpl()
         }
 
-        /// Identity compare on id only — the closures aren't comparable
+        /// Convenience for the common reply path: send then close.
+        func sendAndClose(_ json: [String: Any]) {
+            sendImpl(json)
+            closeImpl()
+        }
+
+        /// Convenience for the common error path: send `{ok:false,error:...}`
+        /// then close.
+        func error(_ message: String) {
+            sendImpl(["ok": false, "error": message])
+            closeImpl()
+        }
+
+        /// Identity compare on id only - the closures aren't comparable
         /// but two handles from the same server slot always share an id.
         /// Keeps the enclosing TCA Action Equatable-synthesized.
         static func == (lhs: ReplyHandle, rhs: ReplyHandle) -> Bool {
@@ -491,6 +591,41 @@ final class SocketServer: Sendable {
         var scrollback: Bool?
         /// `graft-start` / `graft-stop` — repo name or path scope.
         var repo: String?
+        /// `web-open` / `web-url` etc. — destination URL or
+        /// (for capture) the visible-text/screenshot/meta mode.
+        var url: String?
+        var mode: String?
+        /// `web-reload --hard`.
+        var hard: Bool?
+        /// `web-tab-close` / `web-tab-select` — tab UUID or numeric
+        /// index. Parser keeps it as a raw string; the reducer
+        /// resolves to a concrete UUID by trying UUID(uuidString:)
+        /// first, then Int parsing for index.
+        var tab: String?
+        /// `web-tab-new --no-focus` → false.
+        var makeActive: Bool?
+        /// `web-console --since`. Default 0 = full buffer.
+        var since: UInt64?
+        /// `web-console --level`. Optional severity filter.
+        var level: String?
+        /// `web-console --clear`, `web-inspect-result --clear`.
+        var clear: Bool?
+        /// `web-inspect --send-to <pane-target>`.
+        var sendTo: String?
+        /// `web-inspect --submit`. Default false (paste only).
+        var submit: Bool?
+        /// `web-inspect --disarm`.
+        var disarm: Bool?
+        /// `web-open --private`, `web-private on|off`. Treated as a
+        /// tri-state on `web-open` (nil = no flag → default false);
+        /// `web-private` requires it.
+        var isPrivate: Bool?
+        /// `web-cookies-*` — RFC 6265 domain. Optional on clear,
+        /// optional on delete (scopes to a single host when present).
+        var domain: String?
+        /// `web-cookies-clear --all` extends deletion to caches +
+        /// local storage + indexed db.
+        var all: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -506,7 +641,29 @@ final class SocketServer: Sendable {
             case targetPath = "target_path"
             case lines, scrollback
             case repo
+            case url, mode, hard
+            case tab
+            case makeActive = "make_active"
+            case since, level, clear
+            case sendTo = "send_to"
+            case submit, disarm
+            case isPrivate = "private"
+            case domain, all
         }
+    }
+
+    /// Shared scope extraction for the `web-*` commands. All of them
+    /// follow the same shape on the wire (paneID from NEX_PANE_ID
+    /// and/or --target with optional --workspace) and reject when
+    /// neither paneID nor target is present.
+    private static func parseWebTarget(
+        _ wire: WireMessage
+    ) -> (paneID: UUID?, target: String?, workspace: String?)? {
+        let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+        let target = (wire.target?.isEmpty == true) ? nil : wire.target
+        let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+        guard paneID != nil || target != nil else { return nil }
+        return (paneID, target, workspace)
     }
 
     /// Parse a single JSON message into a (SocketMessage, WireMessage) tuple.
@@ -622,6 +779,152 @@ final class SocketServer: Sendable {
 
         if wire.command == "graft-status" {
             return (.graftStatus, wire)
+        }
+
+        if wire.command == "web-open" {
+            guard let url = wire.url, !url.isEmpty else { return nil }
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.webOpen(paneID: paneID, url: url, isPrivate: wire.isPrivate ?? false), wire)
+        }
+
+        if wire.command == "web-url" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webURL(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
+        }
+
+        if wire.command == "web-back" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webBack(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
+        }
+
+        if wire.command == "web-forward" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webForward(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
+        }
+
+        if wire.command == "web-reload" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webReload(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace,
+                hard: wire.hard ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-capture" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            let mode = (wire.mode?.isEmpty == true) ? "meta" : (wire.mode ?? "meta")
+            return (.webCapture(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, mode: mode
+            ), wire)
+        }
+
+        if wire.command == "web-tabs" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webTabs(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
+        }
+
+        if wire.command == "web-tab-new" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webTabNew(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                url: wire.url ?? "",
+                makeActive: wire.makeActive ?? true
+            ), wire)
+        }
+
+        if wire.command == "web-tab-close" {
+            guard let scope = parseWebTarget(wire),
+                  let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
+            return (.webTabClose(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
+            ), wire)
+        }
+
+        if wire.command == "web-tab-select" {
+            guard let scope = parseWebTarget(wire),
+                  let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
+            return (.webTabSelect(
+                paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
+            ), wire)
+        }
+
+        if wire.command == "web-console" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webConsole(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                since: wire.since ?? 0,
+                level: (wire.level?.isEmpty == true) ? nil : wire.level,
+                clear: wire.clear ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-inspect" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webInspect(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                sendTo: (wire.sendTo?.isEmpty == true) ? nil : wire.sendTo,
+                submit: wire.submit ?? false,
+                disarm: wire.disarm ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-inspect-result" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webInspectResult(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                clear: wire.clear ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-private" {
+            guard let scope = parseWebTarget(wire),
+                  let enabled = wire.isPrivate else { return nil }
+            return (.webPrivate(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                enabled: enabled
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-list" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webCookiesList(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-clear" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            return (.webCookiesClear(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                domain: (wire.domain?.isEmpty == true) ? nil : wire.domain,
+                all: wire.all ?? false
+            ), wire)
+        }
+
+        if wire.command == "web-cookies-delete" {
+            guard let scope = parseWebTarget(wire),
+                  let name = wire.name, !name.isEmpty else { return nil }
+            return (.webCookiesDelete(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                name: name,
+                domain: (wire.domain?.isEmpty == true) ? nil : wire.domain
+            ), wire)
         }
 
         if wire.command == "pane-send-key" {

@@ -3,4 +3,5 @@ enum PaneType: String, Codable {
     case markdown
     case scratchpad
     case diff
+    case web
 }

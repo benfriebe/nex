@@ -115,6 +115,96 @@ struct ContentView: View {
                                 ),
                                 reply: nil
                             ))
+                        },
+                        webPanes: workspace.webPanes,
+                        webPaneURLFocusToken: store.webPaneURLFocusTokens,
+                        onWebNavigate: { paneID, url in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneNavigate(paneID: paneID, url: url)
+                            )))
+                        },
+                        onWebBack: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneBack(paneID: paneID)
+                            )))
+                        },
+                        onWebForward: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneForward(paneID: paneID)
+                            )))
+                        },
+                        onWebReload: { paneID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneReload(paneID: paneID, hard: false)
+                            )))
+                        },
+                        onWebTabSelect: { paneID, tabID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneTabSelect(paneID: paneID, tabID: tabID)
+                            )))
+                        },
+                        onWebTabClose: { paneID, tabID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneTabClose(paneID: paneID, tabID: tabID)
+                            )))
+                        },
+                        onWebTabNew: { paneID in
+                            store.send(.webPaneOpenNewTab(paneID: paneID, url: nil))
+                        },
+                        onWebTogglePickup: { paneID in
+                            store.send(.webBatchInspectToggle(paneID: paneID))
+                        },
+                        onWebBatchItemCommentChanged: { paneID, itemID, comment in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webBatchItemCommentChanged(
+                                    paneID: paneID, itemID: itemID, comment: comment
+                                )
+                            )))
+                            // Push to the page popover too so it
+                            // mirrors the panel edit when shown for
+                            // the same item (no-op if its textarea
+                            // currently holds keyboard focus).
+                            store.send(.pushBatchCommentToPage(
+                                paneID: paneID, itemID: itemID, comment: comment
+                            ))
+                        },
+                        onWebBatchItemRemoved: { paneID, itemID in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webBatchItemRemoved(paneID: paneID, itemID: itemID)
+                            )))
+                            store.send(.syncBatchMarkers(paneID: paneID))
+                        },
+                        onWebBatchRowTapped: { paneID, itemID in
+                            store.send(.webBatchFocusItem(
+                                paneID: paneID, itemID: itemID, origin: .panel
+                            ))
+                        },
+                        onWebBatchSend: { paneID, sendTo in
+                            store.send(.webBatchInspectSend(paneID: paneID, sendTo: sendTo))
+                        },
+                        onWebBatchCancel: { paneID in
+                            store.send(.webBatchInspectCancel(paneID: paneID))
+                        },
+                        onWebTogglePrivate: { paneID in
+                            store.send(.webPaneSetPrivate(paneID: paneID, enabled: nil))
+                        },
+                        favourites: store.favourites,
+                        onToggleFavourite: { url, title in
+                            store.send(.toggleFavourite(url: url, title: title))
+                        },
+                        onOpenFavourite: { paneID, url in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .webPaneNavigate(paneID: paneID, url: url)
+                            )))
                         }
                     )
                 } else {
@@ -238,6 +328,128 @@ struct ContentView: View {
                       let paneID = surfaceManager.paneID(for: surface) else { return }
                 // Route through AppReducer for cross-workspace support
                 store.send(.surfaceTitleChanged(paneID: paneID, title: title))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.stateDidChangeNotification)) { notification in
+                // WKWebView KVO fired for url/title — push the new
+                // values into the workspace reducer so persistence,
+                // close/reopen snapshots, pane titles, and the CLI
+                // `nex web url` reply stay in sync with what the
+                // user actually has on screen (link clicks, back/
+                // forward, redirects, etc.).
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let tabID = info["tabID"] as? UUID else { return }
+                let url = (info["url"] as? String) ?? ""
+                let title = (info["title"] as? String) ?? ""
+                guard let workspace = store.workspaces.first(where: {
+                    $0.webPanes[paneID] != nil
+                }) else { return }
+                store.send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webPaneStateChanged(
+                        paneID: paneID, tabID: tabID, url: url, title: title
+                    )
+                )))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.consoleLineNotification)) { notification in
+                // Console capture: every wrapped console.* call and
+                // every window error fires here. Push into the pane's
+                // ring buffer so `nex web console` can drain it.
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let tabID = info["tabID"] as? UUID,
+                      let levelRaw = info["level"] as? String,
+                      let level = ConsoleLine.Level(rawValue: levelRaw) else { return }
+                let message = (info["message"] as? String) ?? ""
+                let url = (info["url"] as? String) ?? ""
+                let lineNumber = info["lineNumber"] as? Int
+                let columnNumber = info["columnNumber"] as? Int
+                guard let workspace = store.workspaces.first(where: {
+                    $0.webPanes[paneID] != nil
+                }) else { return }
+                let line = ConsoleLine(
+                    tabID: tabID,
+                    level: level,
+                    message: message,
+                    url: url,
+                    lineNumber: lineNumber,
+                    columnNumber: columnNumber,
+                    capturedAt: Date()
+                )
+                store.send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webConsoleLineReceived(paneID: paneID, line: line)
+                )))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.batchMarkerClickedNotification)) { notification in
+                // User clicked a numbered badge on the page — focus
+                // the matching row in the side panel. Skip the
+                // page-side highlight (the badge was just under their
+                // cursor; re-pulsing it would be redundant).
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let itemID = info["itemID"] as? UUID else { return }
+                store.send(.webBatchFocusItem(
+                    paneID: paneID, itemID: itemID, origin: .page
+                ))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.batchCommentEditedNotification)) { notification in
+                // User edited the comment in the page popover.
+                // Push it into state via the usual workspace action,
+                // skipping the panel→page sync (origin == .page) so
+                // we don't bounce the value back into JS and clobber
+                // the textarea cursor.
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let itemID = info["itemID"] as? UUID,
+                      let comment = info["comment"] as? String,
+                      let workspace = store.workspaces.first(where: {
+                          $0.webPanes[paneID] != nil
+                      }) else { return }
+                store.send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webBatchItemCommentChanged(
+                        paneID: paneID, itemID: itemID, comment: comment
+                    )
+                )))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.batchPopoverDismissedNotification)) { notification in
+                // Done / Esc in the page popover. Clear focus so
+                // the popover and focus ring hide; user can pick
+                // the next element.
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID else { return }
+                store.send(.webBatchDismissPopover(paneID: paneID))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.batchItemRemovedFromPopoverNotification)) { notification in
+                // Remove button in the page popover — same effect as
+                // the panel's ❌, plus a marker re-sync so the badge
+                // disappears.
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let itemID = info["itemID"] as? UUID,
+                      let workspace = store.workspaces.first(where: {
+                          $0.webPanes[paneID] != nil
+                      }) else { return }
+                store.send(.workspaces(.element(
+                    id: workspace.id,
+                    action: .webBatchItemRemoved(paneID: paneID, itemID: itemID)
+                )))
+                store.send(.syncBatchMarkers(paneID: paneID))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.inspectResultNotification)) { notification in
+                // Picker delivered a click — sanitise the raw dict
+                // here so it crosses into the reducer as a typed,
+                // Equatable struct (Action enums must be Equatable).
+                guard let info = notification.userInfo,
+                      let paneID = info["paneID"] as? UUID,
+                      let tabID = info["tabID"] as? UUID,
+                      let payload = info["payload"] as? [String: Any],
+                      let result = InspectPayloadSanitiser.decode(payload, tabID: tabID)
+                else { return }
+                store.send(.webInspectPayloadReceived(
+                    paneID: paneID, result: result
+                ))
             }
             .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.surfacePwdNotification)) { notification in
                 guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
