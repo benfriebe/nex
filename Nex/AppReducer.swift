@@ -2298,6 +2298,62 @@ struct AppReducer {
         }
     }
 
+    func handleWebExec(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        script: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        guard let tab = resolved.webState.activeTab else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = tab.id
+        return .run { _ in
+            let result = await MainActor.run {
+                store.coordinatorIfExists(for: resolvedPaneID)
+            }
+            guard let coord = result else {
+                reply?.error("web pane coordinator not mounted")
+                return
+            }
+            let outcome = await coord.executeJavaScript(tabID: tabID, source: script)
+            var payload: [String: Any] = [
+                "pane_id": resolvedPaneID.uuidString,
+                "workspace_id": workspaceID.uuidString,
+                "tab_id": tabID.uuidString
+            ]
+            switch outcome {
+            case .value(let data):
+                // Unwrap the `{"v": <result>}` envelope produced by the
+                // coordinator. JSONSerialization needs the wrapper to
+                // round-trip JS primitives (numbers, strings, null).
+                let wrapper = try? JSONSerialization.jsonObject(
+                    with: data, options: [.fragmentsAllowed]
+                ) as? [String: Any]
+                payload["ok"] = true
+                payload["result"] = wrapper?["v"] ?? NSNull()
+            case .error(let name, let message, let line, let col):
+                payload["ok"] = false
+                payload["error"] = message
+                var err: [String: Any] = ["name": name, "message": message]
+                if let line { err["line"] = line }
+                if let col { err["column"] = col }
+                payload["js_error"] = err
+            }
+            reply?.sendAndClose(payload)
+        }
+    }
+
     private static func cookieJSON(_ cookie: HTTPCookie) -> [String: Any] {
         var dict: [String: Any] = [
             "name": cookie.name,
@@ -4724,6 +4780,16 @@ struct AppReducer {
                         workspaceFilter: workspaceFilter,
                         name: name,
                         domain: domain,
+                        reply: reply
+                    )
+
+                case .webExec(let paneID, let target, let workspaceFilter, let script):
+                    return handleWebExec(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        script: script,
                         reply: reply
                     )
                 }

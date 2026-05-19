@@ -525,6 +525,75 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return truncated + "\n[truncated]"
     }
 
+    /// Result of an agent-driven `web exec`. Successful evaluations
+    /// carry the JSON-encoded result (wrapped in a single-key object
+    /// so primitives like `42` or `"hello"` can round-trip through
+    /// `JSONSerialization`, which requires a top-level
+    /// array/object). Errors carry the structured WebKit exception.
+    /// Sendable so it can cross `@MainActor` back to the caller.
+    enum ExecResult {
+        case value(Data)
+        case error(name: String, message: String, lineNumber: Int?, columnNumber: Int?)
+    }
+
+    /// Evaluate arbitrary JavaScript in the given tab and return the
+    /// result. The script runs in the page's main frame at page
+    /// origin — same powers as DevTools' Console tab, scoped to the
+    /// loaded document. The returned `Data` is the JSON encoding of
+    /// `{"v": <result>}` so primitives round-trip cleanly.
+    func executeJavaScript(tabID: UUID, source: String) async -> ExecResult {
+        guard let webView = webViews[tabID] else {
+            return .error(
+                name: "PaneError",
+                message: "no WKWebView mounted for tab \(tabID.uuidString)",
+                lineNumber: nil,
+                columnNumber: nil
+            )
+        }
+        do {
+            let raw = try await webView.evaluateJavaScript(source)
+            let sanitised = Self.sanitiseExecResult(raw ?? NSNull())
+            let data = try JSONSerialization.data(
+                withJSONObject: ["v": sanitised],
+                options: [.fragmentsAllowed]
+            )
+            return .value(data)
+        } catch let error as NSError {
+            let info = error.userInfo
+            let name = (info["WKJavaScriptExceptionName"] as? String)
+                ?? error.domain
+            let message = (info["WKJavaScriptExceptionMessage"] as? String)
+                ?? error.localizedDescription
+            let line = info["WKJavaScriptExceptionLineNumber"] as? Int
+            let col = info["WKJavaScriptExceptionColumnNumber"] as? Int
+            return .error(name: name, message: message, lineNumber: line, columnNumber: col)
+        }
+    }
+
+    /// Coerce `WKWebView.evaluateJavaScript` return values to
+    /// JSON-serialisable types. WebKit hands back `String` /
+    /// `NSNumber` / `NSNull` / `[Any]` / `[String: Any]` for valid
+    /// JSON, but nested dicts can hold values keyed by non-string
+    /// keys when the JS side returns a `Map` or numeric-key object —
+    /// coerce those keys to strings here so the JSON encoder doesn't
+    /// reject the whole payload.
+    private static func sanitiseExecResult(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            return dict.mapValues(sanitiseExecResult)
+        }
+        if let dict = value as? [AnyHashable: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict {
+                out["\(k)"] = sanitiseExecResult(v)
+            }
+            return out
+        }
+        if let array = value as? [Any] {
+            return array.map(sanitiseExecResult)
+        }
+        return value
+    }
+
     /// Capture the visible viewport as a PNG. Returns the raw bytes;
     /// callers decide whether to inline as base64 or spill to a file.
     func captureScreenshot(tabID: UUID) async -> Data? {

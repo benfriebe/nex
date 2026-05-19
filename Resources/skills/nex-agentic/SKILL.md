@@ -236,6 +236,15 @@ nex web private on|off --target <name-or-uuid>
 nex web cookies list   --target <name-or-uuid> [--json]
 nex web cookies clear  --target <name-or-uuid> [--domain X] [--all]
 nex web cookies delete <name> --target <name-or-uuid> [--domain X]
+
+# Evaluate JavaScript in the active tab and return the JSON-serialised
+# result. Same powers as DevTools' Console tab — click selectors, fill
+# inputs, scroll, read DOM state, wait for elements, etc. Pass --file
+# instead of a positional argument for multi-line scripts. With --json,
+# the full reply (including js_error for thrown exceptions) is printed;
+# otherwise just the `result` value is printed (strings unwrapped,
+# everything else JSON-encoded). Exit non-zero on JS exception.
+nex web exec [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--file path | <js>] [--json]
 ```
 
 All `web` verbs follow the same `--target` / `--workspace`
@@ -476,6 +485,42 @@ user's real session.
 nex web open --private https://staging.example.com
 # Cookies + caches discarded on quit; tabs blank on restart.
 ```
+
+**(e) Agent-driven page interaction** — `web exec` lets the agent
+click, type, scroll, and read state without going through the
+human-driven element picker. Returns the JSON-serialised result of
+the JS expression so the agent can chain reasoning over it.
+
+```bash
+# Click a selector. Trailing `null` keeps the return JSON-clean.
+nex web exec --target <web-uuid> 'document.querySelector("a.next").click(); null'
+
+# Type into a controlled input (React/Vue need the synthetic event).
+nex web exec --target <web-uuid> '
+  const el = document.querySelector("input[name=q]");
+  el.value = "test";
+  el.dispatchEvent(new Event("input", {bubbles:true}));
+  null
+'
+
+# Wait for a selector to appear (poll from the orchestrator).
+until nex web exec --target <web-uuid> \
+  'document.querySelector("h1.loaded") ? "ok" : null' | grep -q ok
+do sleep 1
+done
+
+# Pull structured DOM state for the agent to reason over.
+nex web exec --target <web-uuid> \
+  'JSON.stringify([...document.querySelectorAll("article h2")].map(h => h.textContent))'
+
+# Multi-line scripts: load from a file.
+nex web exec --target <web-uuid> --file ./scrape.js --json
+```
+
+JS exceptions surface as a structured `js_error` (`name`, `message`,
+`line`, `column`) and the CLI exits non-zero — wrap with `||` to
+recover. The script runs at the page's origin, in the page's main
+frame, with full access to the loaded document.
 
 **Picker behaviour to design around:**
 - Arming is single-shot by default — exactly one click delivers, then

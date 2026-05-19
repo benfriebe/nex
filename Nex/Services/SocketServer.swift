@@ -166,6 +166,13 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         name: String, domain: String?
     )
+    /// Evaluate arbitrary JavaScript in the resolved web pane's
+    /// active tab. Returns the JSON-serialised result so an agent in
+    /// another pane can click, type, scroll, or read DOM state.
+    case webExec(
+        paneID: UUID?, target: String?, workspace: String?,
+        script: String
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -179,7 +186,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
     "web-console", "web-inspect", "web-inspect-result",
-    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete"
+    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
+    "web-exec"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -626,6 +634,9 @@ final class SocketServer: Sendable {
         /// `web-cookies-clear --all` extends deletion to caches +
         /// local storage + indexed db.
         var all: Bool?
+        /// `web-exec` — JavaScript source to evaluate in the
+        /// resolved web pane's active tab.
+        var script: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -649,6 +660,7 @@ final class SocketServer: Sendable {
             case submit, disarm
             case isPrivate = "private"
             case domain, all
+            case script
         }
     }
 
@@ -924,6 +936,17 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 name: name,
                 domain: (wire.domain?.isEmpty == true) ? nil : wire.domain
+            ), wire)
+        }
+
+        if wire.command == "web-exec" {
+            guard let scope = parseWebTarget(wire),
+                  let script = wire.script, !script.isEmpty else { return nil }
+            return (.webExec(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                script: script
             ), wire)
         }
 

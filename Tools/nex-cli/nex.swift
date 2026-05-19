@@ -106,6 +106,7 @@ func printUsage() {
       nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
       nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web cookies list|clear|delete [...]
+      nex web exec [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--file path | <js>] [--json]
     \n
     """, stderr)
 }
@@ -773,6 +774,12 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
       nex web private    on|off [--target ...] [--workspace ...]
       nex web cookies    list|clear|delete [...]
+      nex web exec       [--target ...] [--workspace ...] [--file path | <js>] [--json]
+
+    `web exec` evaluates JavaScript in the resolved web pane's active
+    tab and prints the JSON-serialised result. Useful for agent-driven
+    interactions: click selectors, type into fields, read DOM state,
+    wait for elements, etc.
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1020,6 +1027,31 @@ func handleWeb(_ args: inout ArraySlice<String>) {
 
     case "cookies":
         handleWebCookies(&args)
+
+    case "exec":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let fromFile = parseFlag("--file", from: &args)
+        let script: String
+        if let fromFile {
+            guard let body = try? String(contentsOfFile: fromFile, encoding: .utf8) else {
+                fputs("nex web exec: cannot read --file '\(fromFile)'\n", stderr)
+                exit(1)
+            }
+            script = body
+        } else if let positional = args.popFirst(), !positional.isEmpty {
+            script = positional
+        } else {
+            fputs("Usage: nex web exec [--target X] [--workspace Y] [--file path | <js>] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-exec",
+            "script": script
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exec")
+        sendWebReplyAndPrintExec(payload, asJSON: asJSON)
 
     default:
         fputs("Unknown web action: \(action)\n", stderr)
@@ -1440,6 +1472,68 @@ private func sendWebReplyAndPrintCookiesDelete(_ payload: [String: Any]) {
         exit(1)
     }
     print("deleted \(deleted) cookie\(deleted == 1 ? "" : "s") named '\(name)'")
+}
+
+private func sendWebReplyAndPrintExec(_ payload: [String: Any], asJSON: Bool) {
+    // Use the raw reply rather than readWebReplyOrExit — exec replies
+    // can have `ok: false` with a structured js_error payload that
+    // callers usually want to see, not just an `error` string.
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web exec: transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web exec: no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web exec: invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if asJSON {
+        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
+        }
+        let ok = (json["ok"] as? Bool) ?? false
+        exit(ok ? 0 : 1)
+    }
+    let ok = (json["ok"] as? Bool) ?? false
+    if ok {
+        // Pretty-print the result. Strings come back as-is so a script
+        // returning `"hello"` prints `hello`. Anything structured
+        // (object, array, number, bool, null) round-trips through JSON.
+        if let result = json["result"] {
+            if let str = result as? String {
+                print(str)
+            } else if result is NSNull {
+                print("null")
+            } else if let out = try? JSONSerialization.data(
+                withJSONObject: result, options: [.sortedKeys]
+            ), let s = String(data: out, encoding: .utf8) {
+                print(s)
+            } else {
+                print(String(describing: result))
+            }
+        }
+        exit(0)
+    } else {
+        if let jsErr = json["js_error"] as? [String: Any] {
+            let name = (jsErr["name"] as? String) ?? "Error"
+            let message = (jsErr["message"] as? String) ?? "unknown"
+            let line = jsErr["line"] as? Int
+            let col = jsErr["column"] as? Int
+            var loc = ""
+            if let line {
+                loc = col.map { " (\(line):\($0))" } ?? " (line \(line))"
+            }
+            fputs("nex web exec: \(name): \(message)\(loc)\n", stderr)
+        } else {
+            let msg = (json["error"] as? String) ?? "unknown error"
+            fputs("nex web exec: \(msg)\n", stderr)
+        }
+        exit(1)
+    }
 }
 
 // MARK: - pane list
