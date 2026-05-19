@@ -1086,4 +1086,95 @@ struct SocketParsingTests {
         """)
         #expect(SocketServer.parseWireMessage(data) == nil)
     }
+
+    // MARK: - Phase B — actuator verbs (click / type)
+
+    @Test func parseWebClickMinimal() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)","selector":"text:Add to order"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webClick(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Add to order",
+            double: false, right: false, atX: nil, atY: nil
+        ))
+    }
+
+    @Test func parseWebClickWithAllFlags() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)","selector":"css:.btn","double":true,"right":true,"at_x":10.5,"at_y":20}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webClick(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:.btn",
+            double: true, right: true, atX: 10.5, atY: 20
+        ))
+    }
+
+    @Test func parseWebClickRequiresSelector() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebClickRequiresScope() {
+        // Neither pane_id nor target -> no scope, parser rejects.
+        let data = jsonData("""
+        {"command":"web-click","selector":"text:Go"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebTypeMinimal() {
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input","text":"hello"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:input", text: "hello",
+            submit: false, replace: true
+        ))
+    }
+
+    @Test func parseWebTypeAcceptsEmptyText() {
+        // text="" is meaningful: clears the field when combined with the
+        // default replace=true. Parser must not reject it.
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input","text":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:input", text: "",
+            submit: false, replace: true
+        ))
+    }
+
+    @Test func parseWebTypeWithSubmitAndNoReplace() {
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"text:Search","text":"q","submit":true,"replace":false}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Search", text: "q",
+            submit: true, replace: false
+        ))
+    }
+
+    @Test func parseWebTypeRequiresSelectorAndText() {
+        let missingSelector = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","text":"x"}
+        """)
+        #expect(SocketServer.parseWireMessage(missingSelector) == nil)
+
+        let missingText = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input"}
+        """)
+        #expect(SocketServer.parseWireMessage(missingText) == nil)
+    }
 }

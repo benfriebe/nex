@@ -318,6 +318,176 @@ enum WebPaneActuatorScript {
             return null;
         }
 
+        // ---- click + type primitives -------------------------------
+
+        // Synthesise a full pointer-down → mouse-down → pointer-up →
+        // mouse-up → click sequence. Calling .click() alone misses
+        // libraries that listen for pointer / mouse events (react-dnd,
+        // framer-motion, custom dropdowns), so we always dispatch the
+        // full envelope. .click() runs last because most click handlers
+        // listen for it, not for pointerup.
+        function dispatchClickSequence(target, opts) {
+            opts = opts || {};
+            var rect = target.getBoundingClientRect();
+            // `at: [x, y]` (offsets within the element) is useful for
+            // canvas-driven UIs. Default to the centre so synthesised
+            // coordinates land somewhere the element actually accepts.
+            var localX = (opts.at && typeof opts.at.x === 'number') ? opts.at.x : rect.width / 2;
+            var localY = (opts.at && typeof opts.at.y === 'number') ? opts.at.y : rect.height / 2;
+            var clientX = rect.left + localX;
+            var clientY = rect.top + localY;
+            var button = opts.right ? 2 : 0;
+            var common = {
+                bubbles: true, cancelable: true, composed: true,
+                clientX: clientX, clientY: clientY, button: button, buttons: 1
+            };
+            try {
+                target.dispatchEvent(new PointerEvent('pointerdown', common));
+            } catch (e) { /* older WebKit lacks PointerEvent ctor for some builds */ }
+            target.dispatchEvent(new MouseEvent('mousedown', common));
+            try {
+                target.dispatchEvent(new PointerEvent('pointerup', common));
+            } catch (e) { /* see above */ }
+            target.dispatchEvent(new MouseEvent('mouseup', common));
+            if (opts.right) {
+                target.dispatchEvent(new MouseEvent('contextmenu', common));
+            } else {
+                // .click() respects disabled state and form/anchor
+                // semantics that synthesised events skip.
+                if (typeof target.click === 'function') {
+                    target.click();
+                }
+                if (opts.double) {
+                    target.dispatchEvent(new MouseEvent('dblclick', common));
+                }
+            }
+        }
+
+        function click(selector, opts) {
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            try {
+                dispatchClickSequence(el, opts || {});
+            } catch (e) {
+                return {
+                    ok: false,
+                    error: 'click dispatch failed: ' + (e && e.message ? e.message : String(e))
+                };
+            }
+            return { ok: true, matched: true, text: trimText(el) };
+        }
+
+        // Native value setter, honoured by React / Vue / Svelte
+        // controlled inputs. Reading the descriptor each call (vs
+        // caching) handles polyfills that patch the prototype after
+        // the actuator was injected.
+        function nativeSetter(el) {
+            var proto;
+            if (el instanceof HTMLTextAreaElement) {
+                proto = HTMLTextAreaElement.prototype;
+            } else if (el instanceof HTMLSelectElement) {
+                proto = HTMLSelectElement.prototype;
+            } else {
+                proto = HTMLInputElement.prototype;
+            }
+            var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+            return (desc && desc.set) ? desc.set : null;
+        }
+
+        function setValue(el, value) {
+            var setter = nativeSetter(el);
+            if (setter) {
+                setter.call(el, value);
+            } else {
+                el.value = value;
+            }
+        }
+
+        function isTypable(el) {
+            if (!el) return false;
+            if (el.isContentEditable) return true;
+            var tag = el.tagName;
+            if (tag === 'TEXTAREA') return true;
+            if (tag === 'INPUT') {
+                var type = (el.getAttribute('type') || 'text').toLowerCase();
+                // type=button/submit/reset/checkbox/radio/file etc. are
+                // not typable. Whitelist the text-shaped ones.
+                return [
+                    'text', 'search', 'email', 'tel', 'url', 'password',
+                    'number', 'date', 'datetime-local', 'time', 'month', 'week'
+                ].indexOf(type) >= 0;
+            }
+            return false;
+        }
+
+        function dispatchKey(target, name, opts) {
+            var keyOpts = Object.assign({
+                bubbles: true, cancelable: true, composed: true
+            }, opts || {});
+            keyOpts.key = name;
+            target.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
+            target.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
+            target.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
+        }
+
+        function type(selector, text, opts) {
+            opts = opts || {};
+            var el = find(selector);
+            if (!el) {
+                return { ok: false, error: 'no match for selector: ' + String(selector) };
+            }
+            if (!isTypable(el)) {
+                return {
+                    ok: false,
+                    error: 'element is not typable (tag=' + el.tagName + ', type=' +
+                        (el.getAttribute && el.getAttribute('type')) + ')'
+                };
+            }
+            try {
+                // Focus first so onFocus handlers run before value
+                // mutations; some controlled inputs gate `onChange`
+                // dispatch on document.activeElement matching.
+                if (typeof el.focus === 'function') el.focus();
+            } catch (e) { /* focus on unfocusable element — ignore */ }
+
+            // contentEditable path: set textContent + input event.
+            if (el.isContentEditable) {
+                var existing = opts.replace === false ? (el.textContent || '') : '';
+                el.textContent = existing + String(text);
+                el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+                if (opts.submit) {
+                    dispatchKey(el, 'Enter');
+                }
+                return { ok: true, value: el.textContent };
+            }
+
+            var prev = el.value || '';
+            var next;
+            if (opts.replace === false) {
+                next = prev + String(text);
+            } else {
+                next = String(text);
+            }
+            setValue(el, next);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (opts.submit) {
+                // Two paths: the explicit Enter keystroke covers
+                // search inputs + non-form widgets that listen for
+                // keydown; form.requestSubmit() covers actual <form>s
+                // whose submit button is disabled until requestSubmit
+                // walks form validation.
+                dispatchKey(el, 'Enter');
+                var form = el.form;
+                if (form && typeof form.requestSubmit === 'function') {
+                    try { form.requestSubmit(); } catch (e) { /* submit blocked — ignore */ }
+                }
+            }
+            return { ok: true, value: el.value };
+        }
+
         // ---- public API --------------------------------------------
 
         function find(selector) {
@@ -338,6 +508,10 @@ enum WebPaneActuatorScript {
             // Public lookups.
             find: find,
             findAll: findAll,
+
+            // Action verbs.
+            click: click,
+            type: type,
 
             // Exposed for unit tests + future phases. Underscore-prefixed
             // to signal "subject to change"; CLI verbs go through the

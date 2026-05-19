@@ -106,6 +106,8 @@ func printUsage() {
       nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
       nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web cookies list|clear|delete [...]
+      nex web click <selector> [--target X] [--workspace Y] [--double] [--right] [--at x,y] [--json]
+      nex web type <selector> <text> [--target X] [--workspace Y] [--submit] [--no-replace] [--json]
     \n
     """, stderr)
 }
@@ -773,6 +775,8 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
       nex web private    on|off [--target ...] [--workspace ...]
       nex web cookies    list|clear|delete [...]
+      nex web click   [--target ...] [--workspace ...] <selector> [--double] [--right] [--at x,y] [--json]
+      nex web type    [--target ...] [--workspace ...] <selector> <text> [--submit] [--no-replace] [--json]
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1021,10 +1025,113 @@ func handleWeb(_ args: inout ArraySlice<String>) {
     case "cookies":
         handleWebCookies(&args)
 
+    case "click":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let double = popSwitch("--double", from: &args)
+        let right = popSwitch("--right", from: &args)
+        let atArg = parseFlag("--at", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web click [--target X] [--workspace Y] <selector> [--double] [--right] [--at x,y] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-click",
+            "selector": selector
+        ]
+        if double { payload["double"] = true }
+        if right { payload["right"] = true }
+        if let atArg {
+            let parts = atArg.split(separator: ",").map(String.init)
+            guard parts.count == 2,
+                  let x = Double(parts[0].trimmingCharacters(in: .whitespaces)),
+                  let y = Double(parts[1].trimmingCharacters(in: .whitespaces)) else {
+                fputs("nex web click: --at must be 'x,y' numbers (got '\(atArg)')\n", stderr)
+                exit(1)
+            }
+            payload["at_x"] = x
+            payload["at_y"] = y
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "click")
+        sendWebReplyAndPrintActuator(payload, command: "click", asJSON: asJSON)
+
+    case "type":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let submit = popSwitch("--submit", from: &args)
+        let noReplace = popSwitch("--no-replace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
+            exit(1)
+        }
+        guard let text = args.popFirst() else {
+            fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-type",
+            "selector": selector,
+            "text": text
+        ]
+        if submit { payload["submit"] = true }
+        if noReplace { payload["replace"] = false }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "type")
+        sendWebReplyAndPrintActuator(payload, command: "type", asJSON: asJSON)
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
         exit(1)
+    }
+}
+
+/// Shared reply printer for actuator verbs (`click`, `type`, and the
+/// Phase C–E additions). Success path: one-line acknowledgement;
+/// failure path: `{ok:false, error: ...}` → stderr + exit 1. `--json`
+/// dumps the full reply payload to stdout instead.
+private func sendWebReplyAndPrintActuator(
+    _ payload: [String: Any], command: String, asJSON: Bool
+) {
+    guard let data = sendJSONAndReadReply(payload) else {
+        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if asJSON {
+        if let pretty = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys]
+        ), let str = String(data: pretty, encoding: .utf8) {
+            print(str)
+        }
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        if !asJSON {
+            fputs("nex web \(command): \(msg)\n", stderr)
+        }
+        exit(1)
+    }
+    if asJSON { return }
+    switch command {
+    case "click":
+        let text = (json["text"] as? String) ?? ""
+        let label = text.isEmpty ? "" : ": \"\(text)\""
+        print("clicked\(label)")
+    case "type":
+        let value = (json["value"] as? String) ?? ""
+        print("typed: \(value)")
+    default:
+        print("\(command) ok")
     }
 }
 

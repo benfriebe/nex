@@ -166,6 +166,25 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         name: String, domain: String?
     )
+
+    // Actuator commands (Phase B) — semantic verbs over the in-page
+    // `window.__nexAct` namespace.
+
+    /// `nex web click <selector> [--double] [--right] [--at x,y]` —
+    /// synthesise a pointer+mouse click sequence on the first element
+    /// matching `selector`.
+    case webClick(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, double: Bool, right: Bool, atX: Double?, atY: Double?
+    )
+    /// `nex web type <selector> <text> [--submit] [--no-replace]` —
+    /// set the value of a typable element via the prototype native
+    /// setter and dispatch input + change events. Optional Enter
+    /// keystroke + form.requestSubmit when `submit` is true.
+    case webType(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, text: String, submit: Bool, replace: Bool
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -179,7 +198,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
     "web-console", "web-inspect", "web-inspect-result",
-    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete"
+    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
+    "web-click", "web-type"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -626,6 +646,21 @@ final class SocketServer: Sendable {
         /// `web-cookies-clear --all` extends deletion to caches +
         /// local storage + indexed db.
         var all: Bool?
+        /// `web-click` / `web-type` — actuator selector string. Raw
+        /// (`css:`/`text:`/`role:`/auto-detect); the JS side parses.
+        var selector: String?
+        /// `web-click --double`.
+        var double: Bool?
+        /// `web-click --right`.
+        var right: Bool?
+        /// `web-click --at x,y` — element-local offsets. Both must be
+        /// present to apply; otherwise the centre of the bounding box
+        /// is used.
+        var atX: Double?
+        var atY: Double?
+        /// `web-type --no-replace` → false. When omitted the typed
+        /// text replaces existing content (matches Playwright `fill`).
+        var replace: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -649,6 +684,10 @@ final class SocketServer: Sendable {
             case submit, disarm
             case isPrivate = "private"
             case domain, all
+            case selector, double, right
+            case atX = "at_x"
+            case atY = "at_y"
+            case replace
         }
     }
 
@@ -924,6 +963,36 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 name: name,
                 domain: (wire.domain?.isEmpty == true) ? nil : wire.domain
+            ), wire)
+        }
+
+        if wire.command == "web-click" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webClick(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                double: wire.double ?? false,
+                right: wire.right ?? false,
+                atX: wire.atX,
+                atY: wire.atY
+            ), wire)
+        }
+
+        if wire.command == "web-type" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let text = wire.text else { return nil }
+            return (.webType(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                text: text,
+                submit: wire.submit ?? false,
+                replace: wire.replace ?? true
             ), wire)
         }
 

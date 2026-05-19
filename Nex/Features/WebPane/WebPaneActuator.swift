@@ -84,14 +84,29 @@ enum WebPaneActuator {
 /// expression. Kept tight — only the shapes `__nexAct.*` calls
 /// currently need. Sendable so call sites can build the args array
 /// outside an actor.
-enum JSValue {
+///
+/// Object pairs are modelled as an ordered list of `JSPair`s (vs a
+/// `[(String, JSValue)]` tuple list) because tuples don't get
+/// auto-synthesised Sendable conformance under Swift 6 strict mode.
+// swiftformat:disable redundantSendable
+// Explicit Sendable conformance is required: recursive associated
+// values (`[JSValue]` / `[JSPair]`) defeat Swift 6's auto-synthesis
+// inference, so without the annotation the AppReducer call sites
+// fail with "capture of non-Sendable type '[JSValue]' in a @Sendable
+// closure". Keep the conformance on both types together.
+struct JSPair: Sendable {
+    let key: String
+    let value: JSValue
+}
+
+enum JSValue: Sendable {
     case null
     case bool(Bool)
     case int(Int)
     case double(Double)
     case string(String)
     case array([JSValue])
-    case object([(String, JSValue)])
+    case object([JSPair])
 
     var jsLiteral: String {
         switch self {
@@ -112,7 +127,7 @@ enum JSValue {
             return "[" + items.map(\.jsLiteral).joined(separator: ", ") + "]"
         case let .object(pairs):
             let body = pairs
-                .map { Self.encodeString($0.0) + ": " + $0.1.jsLiteral }
+                .map { Self.encodeString($0.key) + ": " + $0.value.jsLiteral }
                 .joined(separator: ", ")
             return "{" + body + "}"
         }
@@ -136,3 +151,5 @@ enum JSValue {
         return String(trimmed)
     }
 }
+
+// swiftformat:enable redundantSendable

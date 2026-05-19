@@ -1706,6 +1706,126 @@ struct AppReducer {
         }
     }
 
+    // MARK: - Web pane actuator handlers
+
+    /// Dispatch a `__nexAct.<method>(<args>)` call against the resolved
+    /// web pane's active tab and translate the JSON envelope returned
+    /// by the actuator into a `ReplyHandle` reply. Shared body for
+    /// `web-click` / `web-type` / future Phase C–E verbs.
+    private func handleWebActuatorCall(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        method: String,
+        args: [JSValue],
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        guard let tab = resolved.webState.activeTab else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = tab.id
+        let isPrivate = resolved.webState.isPrivate
+
+        return .run { _ in
+            let result = await MainActor.run {
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate)
+            }
+            let outcome = await WebPaneActuator.invoke(
+                coordinator: result, tabID: tabID, method: method, args: args
+            )
+            switch outcome {
+            case .unknownTab:
+                reply?.error("web pane has no live tab \(tabID.uuidString)")
+            case .evaluationFailed(let message):
+                reply?.error("actuator evaluation failed: \(message)")
+            case .success(let data):
+                // The actuator side already produces an `{ok, ...}`
+                // envelope. We surface it verbatim plus the standard
+                // scope fields so the CLI doesn't have to re-derive
+                // them from request context.
+                var payload: [String: Any] = [:]
+                if let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    payload = parsed
+                } else {
+                    payload = ["ok": false, "error": "actuator reply not JSON object"]
+                }
+                payload["pane_id"] = resolvedPaneID.uuidString
+                payload["workspace_id"] = workspaceID.uuidString
+                payload["tab_id"] = tabID.uuidString
+                reply?.sendAndClose(payload)
+            }
+        }
+    }
+
+    func handleWebClick(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        double: Bool,
+        right: Bool,
+        atX: Double?,
+        atY: Double?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if double { opts.append(JSPair(key: "double", value: .bool(true))) }
+        if right { opts.append(JSPair(key: "right", value: .bool(true))) }
+        if let x = atX, let y = atY {
+            opts.append(JSPair(key: "at", value: .object([
+                JSPair(key: "x", value: .double(x)),
+                JSPair(key: "y", value: .double(y))
+            ])))
+        }
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "click",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebType(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        selector: String,
+        text: String,
+        submit: Bool,
+        replace: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if submit { opts.append(JSPair(key: "submit", value: .bool(true))) }
+        // `replace` defaults true in the JS side; only ship the flag
+        // when the caller overrode it so the wire payload stays small.
+        if !replace { opts.append(JSPair(key: "replace", value: .bool(false))) }
+        return handleWebActuatorCall(
+            state: state,
+            paneID: paneID,
+            target: target,
+            workspaceFilter: workspaceFilter,
+            method: "type",
+            args: [.string(selector), .string(text), .object(opts)],
+            reply: reply
+        )
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -4724,6 +4844,33 @@ struct AppReducer {
                         workspaceFilter: workspaceFilter,
                         name: name,
                         domain: domain,
+                        reply: reply
+                    )
+
+                case .webClick(let paneID, let target, let workspaceFilter, let selector, let double, let right, let atX, let atY):
+                    return handleWebClick(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        double: double,
+                        right: right,
+                        atX: atX,
+                        atY: atY,
+                        reply: reply
+                    )
+
+                case .webType(let paneID, let target, let workspaceFilter, let selector, let text, let submit, let replace):
+                    return handleWebType(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        selector: selector,
+                        text: text,
+                        submit: submit,
+                        replace: replace,
                         reply: reply
                     )
                 }
