@@ -341,16 +341,30 @@ enum WebPaneActuatorScript {
                 bubbles: true, cancelable: true, composed: true,
                 clientX: clientX, clientY: clientY, button: button, buttons: 1
             };
-            try {
-                target.dispatchEvent(new PointerEvent('pointerdown', common));
-            } catch (e) { /* older WebKit lacks PointerEvent ctor for some builds */ }
+            // Older WebKit builds lack the PointerEvent constructor;
+            // skip the pointer event but still send the mouse event.
+            function tryPointer(name) {
+                try { target.dispatchEvent(new PointerEvent(name, common)); }
+                catch (e) {}
+            }
+            tryPointer('pointerdown');
             target.dispatchEvent(new MouseEvent('mousedown', common));
-            try {
-                target.dispatchEvent(new PointerEvent('pointerup', common));
-            } catch (e) { /* see above */ }
+            tryPointer('pointerup');
             target.dispatchEvent(new MouseEvent('mouseup', common));
             if (opts.right) {
                 target.dispatchEvent(new MouseEvent('contextmenu', common));
+            } else if (opts.at) {
+                // .click() dispatches a click event but strips the
+                // clientX/Y we synthesised, which breaks canvas /
+                // custom-control listeners that read coordinates.
+                // When the caller asked for a specific point, fire a
+                // synthesised click carrying it. Trade-off: native
+                // form-submit / anchor-follow semantics that rely on
+                // trusted events won't fire for this path.
+                target.dispatchEvent(new MouseEvent('click', common));
+                if (opts.double) {
+                    target.dispatchEvent(new MouseEvent('dblclick', common));
+                }
             } else {
                 // .click() respects disabled state and form/anchor
                 // semantics that synthesised events skip.
@@ -379,10 +393,9 @@ enum WebPaneActuatorScript {
             return { ok: true, matched: true, text: trimText(el) };
         }
 
-        // Native value setter, honoured by React / Vue / Svelte
-        // controlled inputs. Reading the descriptor each call (vs
-        // caching) handles polyfills that patch the prototype after
-        // the actuator was injected.
+        // The prototype `value` setter, which React / Vue / Svelte
+        // controlled inputs honour even when the framework has shadowed
+        // the instance setter with one that ignores writes.
         function nativeSetter(el) {
             var proto;
             if (el instanceof HTMLTextAreaElement) {
@@ -422,13 +435,14 @@ enum WebPaneActuatorScript {
             return false;
         }
 
+        // `keypress` is deprecated and ignored by modern frameworks,
+        // so we only fire keydown + keyup. Matches Playwright.
         function dispatchKey(target, name, opts) {
             var keyOpts = Object.assign({
                 bubbles: true, cancelable: true, composed: true
             }, opts || {});
             keyOpts.key = name;
             target.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
-            target.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
             target.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
         }
 
@@ -505,11 +519,8 @@ enum WebPaneActuatorScript {
         }
 
         window.__nexAct = {
-            // Public lookups.
             find: find,
             findAll: findAll,
-
-            // Action verbs.
             click: click,
             type: type,
 

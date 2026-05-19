@@ -82,18 +82,14 @@ enum WebPaneActuator {
 
 /// A small typed wrapper for the values we splice into a generated JS
 /// expression. Kept tight — only the shapes `__nexAct.*` calls
-/// currently need. Sendable so call sites can build the args array
-/// outside an actor.
+/// currently need.
 ///
-/// Object pairs are modelled as an ordered list of `JSPair`s (vs a
-/// `[(String, JSValue)]` tuple list) because tuples don't get
-/// auto-synthesised Sendable conformance under Swift 6 strict mode.
+/// Object pairs use the named `JSPair` struct rather than a
+/// `[(String, JSValue)]` tuple list because tuples don't auto-synthesise
+/// `Sendable`. Explicit `Sendable` is required on both: the AppReducer
+/// builds `[JSValue]` args inside `.run { _ in ... }` (a `@Sendable`
+/// closure) and the conformance does not flow through `[T]` without it.
 // swiftformat:disable redundantSendable
-// Explicit Sendable conformance is required: recursive associated
-// values (`[JSValue]` / `[JSPair]`) defeat Swift 6's auto-synthesis
-// inference, so without the annotation the AppReducer call sites
-// fail with "capture of non-Sendable type '[JSValue]' in a @Sendable
-// closure". Keep the conformance on both types together.
 struct JSPair: Sendable {
     let key: String
     let value: JSValue

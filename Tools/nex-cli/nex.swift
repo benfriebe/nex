@@ -151,6 +151,18 @@ func popSwitch(_ name: String, from args: inout ArraySlice<String>) -> Bool {
     return true
 }
 
+/// Split `args` at the first POSIX `--` terminator. Removes everything
+/// from `--` onward from `args` and returns the trailing items as
+/// positionals that flag parsers must not touch. Used by verbs whose
+/// positional payload can legitimately look like a switch (e.g.
+/// `nex web type css:#i -- --submit` types the literal string).
+func extractPositionalTail(from args: inout ArraySlice<String>) -> [String] {
+    guard let idx = args.firstIndex(of: "--") else { return [] }
+    let tail = Array(args[args.index(after: idx)...])
+    args = args[..<idx]
+    return tail
+}
+
 func requirePaneID() -> String {
     guard let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] else {
         // Not running inside a Nex pane — silent exit
@@ -781,6 +793,11 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
     needs an explicit workspace scope).
+
+    For `click` and `type`, use `--` to terminate options when the
+    positional payload looks like a flag (e.g. typing the literal
+    string "--submit" into a search box):
+      nex web type css:#i -- --submit
     \n
     """, stream)
 }
@@ -1026,13 +1043,15 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         handleWebCookies(&args)
 
     case "click":
+        let tail = extractPositionalTail(from: &args)
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let double = popSwitch("--double", from: &args)
         let right = popSwitch("--right", from: &args)
         let atArg = parseFlag("--at", from: &args)
         let asJSON = popSwitch("--json", from: &args)
-        guard let selector = args.popFirst(), !selector.isEmpty else {
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty else {
             fputs("Usage: nex web click [--target X] [--workspace Y] <selector> [--double] [--right] [--at x,y] [--json]\n", stderr)
             exit(1)
         }
@@ -1057,16 +1076,20 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         sendWebReplyAndPrintActuator(payload, command: "click", asJSON: asJSON)
 
     case "type":
+        // Pull off any `--`-terminated tail before flag parsing so a
+        // text payload like "--submit" or "--json" survives intact.
+        let tail = extractPositionalTail(from: &args)
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let submit = popSwitch("--submit", from: &args)
         let noReplace = popSwitch("--no-replace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
-        guard let selector = args.popFirst(), !selector.isEmpty else {
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty else {
             fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
             exit(1)
         }
-        guard let text = args.popFirst() else {
+        guard let text = positional.popFirst() else {
             fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
             exit(1)
         }

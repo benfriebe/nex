@@ -5,16 +5,15 @@ import WebKit
 
 /// Action verb tests for `__nexAct.click` / `__nexAct.type`. Drives
 /// the actuator inside a hidden WKWebView and asserts the resulting
-/// DOM state. Covers the regression we burned a chunk of restaurant-
-/// ordering session debugging on: React-style controlled inputs that
-/// ignore `.value = ...` because the synthetic React setter is on
-/// the instance and the prototype setter has to be invoked instead.
+/// DOM state. The React-controlled-input case is exercised because a
+/// straight `el.value = x` is intercepted by the framework's instance
+/// setter; the actuator must invoke the prototype setter to write.
 @MainActor
 struct WebPaneActuatorActionTests {
     // MARK: - click
 
     @Test func clickFiresFullPointerSequence() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <button id="b">go</button>
         <script>
         window.__events = [];
@@ -24,24 +23,26 @@ struct WebPaneActuatorActionTests {
         });
         </script>
         """)
-        let reply = try await host.eval("JSON.stringify(__nexAct.click('css:#b'))")
-        let events = try await host.eval("JSON.stringify(window.__events)")
-        let parsed = try host.parse(reply as? String ?? "")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.click('css:#b'))")
+        )
+        let events = try await host.evalString("JSON.stringify(window.__events)")
         #expect(parsed["ok"] as? Bool == true)
         #expect(parsed["text"] as? String == "go")
-        #expect((events as? String) == "[\"pointerdown\",\"mousedown\",\"pointerup\",\"mouseup\",\"click\"]")
+        #expect(events == "[\"pointerdown\",\"mousedown\",\"pointerup\",\"mouseup\",\"click\"]")
     }
 
     @Test func clickReturnsNotFoundForUnknownSelector() async throws {
-        let host = try await ActuatorActionTestHost.make(html: "<div></div>")
-        let reply = try await host.eval("JSON.stringify(__nexAct.click('text:Not there'))")
-        let parsed = try host.parse(reply as? String ?? "")
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.click('text:Not there'))")
+        )
         #expect(parsed["ok"] as? Bool == false)
         #expect((parsed["error"] as? String)?.contains("no match") == true)
     }
 
     @Test func clickDoubleFiresDblclick() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <button id="b">go</button>
         <script>
         window.__count = 0;
@@ -56,7 +57,7 @@ struct WebPaneActuatorActionTests {
     }
 
     @Test func clickRightFiresContextMenuNotClick() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <button id="b">go</button>
         <script>
         window.__cm = 0; window.__clicks = 0;
@@ -75,10 +76,34 @@ struct WebPaneActuatorActionTests {
         #expect(clicks as? Int == 0)
     }
 
+    @Test func clickAtDeliversCoordinatesToListener() async throws {
+        // The default code path calls native target.click(), which
+        // strips the synthesised clientX/Y. When `at` is supplied the
+        // caller wants those coords on the listener, so the actuator
+        // must dispatch a synthesised click instead. Canvas / custom-
+        // control widgets are the motivating case.
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="b" style="position:absolute;left:50px;top:80px;width:200px;height:100px"></div>
+        <script>
+        window.__cx = -1; window.__cy = -1;
+        document.getElementById('b').addEventListener('click', function(e) {
+            window.__cx = e.clientX; window.__cy = e.clientY;
+        });
+        </script>
+        """)
+        _ = try await host.eval("__nexAct.click('css:#b', {at: {x: 10, y: 20}})")
+        let cx = try await host.eval("window.__cx")
+        let cy = try await host.eval("window.__cy")
+        // The element is offset (left=50, top=80) and the local point
+        // is (10, 20), so the absolute clientX/Y must be 60 / 100.
+        #expect(cx as? Int == 60)
+        #expect(cy as? Int == 100)
+    }
+
     // MARK: - type
 
     @Test func typeSetsInputValueAndDispatchesEvents() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <input id="i" type="text">
         <script>
         window.__inputEvents = 0; window.__changeEvents = 0;
@@ -87,8 +112,9 @@ struct WebPaneActuatorActionTests {
         i.addEventListener('change', function() { window.__changeEvents++; });
         </script>
         """)
-        let reply = try await host.eval("JSON.stringify(__nexAct.type('css:#i', 'hello'))")
-        let parsed = try host.parse(reply as? String ?? "")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.type('css:#i', 'hello'))")
+        )
         #expect(parsed["ok"] as? Bool == true)
         #expect(parsed["value"] as? String == "hello")
 
@@ -101,7 +127,7 @@ struct WebPaneActuatorActionTests {
     }
 
     @Test func typeReplacesByDefault() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <input id="i" type="text" value="old">
         """)
         _ = try await host.eval("__nexAct.type('css:#i', 'new')")
@@ -110,7 +136,7 @@ struct WebPaneActuatorActionTests {
     }
 
     @Test func typeAppendsWhenReplaceFalse() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <input id="i" type="text" value="abc">
         """)
         _ = try await host.eval("__nexAct.type('css:#i', 'def', {replace: false})")
@@ -125,7 +151,7 @@ struct WebPaneActuatorActionTests {
         // bypassed via the prototype getOwnPropertyDescriptor or
         // controlled inputs revert to their state value on the next
         // render. The actuator must thread that needle.
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <input id="i" type="text">
         <script>
         window.__instanceSetterCalls = 0;
@@ -160,17 +186,18 @@ struct WebPaneActuatorActionTests {
     }
 
     @Test func typeRejectsNonTypableElement() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <button id="b">go</button>
         """)
-        let reply = try await host.eval("JSON.stringify(__nexAct.type('css:#b', 'x'))")
-        let parsed = try host.parse(reply as? String ?? "")
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.type('css:#b', 'x'))")
+        )
         #expect(parsed["ok"] as? Bool == false)
         #expect((parsed["error"] as? String)?.contains("not typable") == true)
     }
 
     @Test func typeSubmitFiresEnterKeydown() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <input id="i" type="search">
         <script>
         window.__enter = 0;
@@ -185,90 +212,11 @@ struct WebPaneActuatorActionTests {
     }
 
     @Test func typeIntoContentEditableElement() async throws {
-        let host = try await ActuatorActionTestHost.make(html: """
+        let host = try await ActuatorTestHost.make(html: """
         <div id="ce" contenteditable="true">old</div>
         """)
         _ = try await host.eval("__nexAct.type('css:#ce', 'new')")
         let text = try await host.eval("document.getElementById('ce').textContent")
         #expect(text as? String == "new")
-    }
-}
-
-// MARK: - test host (shares the same WKWebView pattern as the
-
-// selector tests but exposes a JSON-parser helper for action replies).
-
-@MainActor
-private final class ActuatorActionTestHost: NSObject, WKNavigationDelegate {
-    let webView: WKWebView
-    private var didFinish: CheckedContinuation<Void, Error>?
-
-    static func make(html: String) async throws -> ActuatorActionTestHost {
-        let host = ActuatorActionTestHost()
-        try await host.load(html: html)
-        return host
-    }
-
-    override init() {
-        let config = WKWebViewConfiguration()
-        config.userContentController.addUserScript(WKUserScript(
-            source: WebPaneActuatorScript.source,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        ))
-        webView = WKWebView(frame: .zero, configuration: config)
-        super.init()
-        webView.navigationDelegate = self
-    }
-
-    func load(html: String) async throws {
-        try await withCheckedThrowingContinuation { (cc: CheckedContinuation<Void, Error>) in
-            didFinish = cc
-            webView.loadHTMLString(
-                "<!doctype html><html><body>\(html)</body></html>",
-                baseURL: nil
-            )
-        }
-    }
-
-    func eval(_ js: String) async throws -> Any? {
-        try await webView.evaluateJavaScript(js)
-    }
-
-    /// Parse a JSON string produced by `JSON.stringify(...)` on the
-    /// JS side. Throws if the input isn't a valid JSON object —
-    /// surfaces as a test failure with the raw string in scope.
-    func parse(_ json: String) throws -> [String: Any] {
-        guard let data = json.data(using: .utf8),
-              let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            throw NSError(domain: "ActuatorActionTestHost", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "not a JSON object: \(json)"
-            ])
-        }
-        return parsed
-    }
-
-    nonisolated func webView(_: WKWebView, didFinish _: WKNavigation!) {
-        Task { @MainActor in
-            self.didFinish?.resume()
-            self.didFinish = nil
-        }
-    }
-
-    nonisolated func webView(_: WKWebView, didFail _: WKNavigation!, withError error: Error) {
-        Task { @MainActor in
-            self.didFinish?.resume(throwing: error)
-            self.didFinish = nil
-        }
-    }
-
-    nonisolated func webView(
-        _: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: Error
-    ) {
-        Task { @MainActor in
-            self.didFinish?.resume(throwing: error)
-            self.didFinish = nil
-        }
     }
 }
