@@ -243,7 +243,12 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         let snapshotAndPost: @Sendable (WKWebView?) -> Void = { [weak self] webView in
             Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
-                postStateChange(
+                // Explicit `self.` is required under Swift 6 strict
+                // concurrency in the Release-config compile path —
+                // swiftformat's redundantSelf rule wants to strip it,
+                // hence the inline disable.
+                // swiftformat:disable:next redundantSelf
+                self.postStateChange(
                     tabID: tabID,
                     url: webView.url?.absoluteString ?? "",
                     title: webView.title ?? ""
@@ -263,7 +268,11 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         let progressPost: @Sendable (WKWebView?) -> Void = { [weak self] webView in
             Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
-                postLoadProgress(
+                // See note above — explicit `self.` required by the
+                // Release-config Swift 6 compiler; formatter wants it
+                // stripped, so suppress the rule for this call.
+                // swiftformat:disable:next redundantSelf
+                self.postLoadProgress(
                     tabID: tabID,
                     progress: webView.estimatedProgress,
                     isLoading: webView.isLoading
@@ -1052,12 +1061,17 @@ private final class WebPaneScriptHandler: NSObject, WKScriptMessageHandler {
         _: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        let name = message.name
-        let body = message.body
-        let isMainFrame = message.frameInfo.isMainFrame
-        let tabID = tabID
-        Task { @MainActor [weak self] in
-            guard let coord = self?.coordinator else { return }
+        // WKScriptMessage's `name` / `body` / `frameInfo` became
+        // `@MainActor`-isolated in the macOS 14+ WebKit SDK. WebKit
+        // delivers this callback on the main thread, so we read +
+        // dispatch inside `assumeIsolated` instead of round-tripping
+        // through a Task (which would force `body: Any` across an
+        // actor boundary it's not Sendable to cross).
+        MainActor.assumeIsolated {
+            guard let coord = coordinator else { return }
+            let name = message.name
+            let body = message.body
+            let isMainFrame = message.frameInfo.isMainFrame
             switch name {
             case "nexConsole":
                 coord.handleConsoleMessage(tabID: tabID, body: body)
