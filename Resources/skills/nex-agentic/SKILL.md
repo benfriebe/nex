@@ -258,11 +258,15 @@ nex web hover  --target <X> <selector> [--json]
 nex web key    --target <X> <key-name> [--selector <sel>] [--json]
 ```
 
-- `click` synthesises a full pointerdown → mousedown → pointerup →
-  mouseup → click envelope so libraries that listen for pointer
-  events (react-dnd, framer-motion, custom dropdowns) fire. `--at
-  x,y` delivers the offset to the listener; default (no `--at`)
-  uses native `.click()` and the listener sees `clientX/Y = 0`.
+- `click` always synthesises a full pointerdown → mousedown →
+  pointerup → mouseup envelope (with real centre coords) so
+  libraries that listen for pointer / mouse events (react-dnd,
+  framer-motion, custom dropdowns) fire. `--at x,y` overrides the
+  centre offset and routes the final click through a synthesised
+  `MouseEvent('click')` so listeners read the coords; without
+  `--at` the final click goes through `target.click()` (form /
+  anchor / disabled semantics intact, but `clientX/Y = 0` on the
+  click event itself).
 - `type` uses the prototype native setter so React / Vue / Svelte
   controlled inputs accept the write, then dispatches `input` +
   `change`. `--submit` fires Enter and `form.requestSubmit()`.
@@ -289,14 +293,8 @@ nex web dom    --target <X> <selector> [--max-bytes N] [--json]
 - `attr` distinguishes attribute absent (exit 1, no output) from
   attribute present with empty value (exit 0, empty stdout) via a
   `present` field in `--json` mode.
-- `exists` is the cheap "is it there?" verb — exit code is the
-  signal, no stdout. Enables the polling-loop ergonomic:
-
-  ```bash
-  until nex web exists --target X "text:Loaded"; do sleep 1; done
-  ```
-
-  …but prefer `wait` (next section) which polls inside the page.
+- `exists` is the cheap one-shot "is it there?" check — exit code
+  is the signal, no stdout. For polling, prefer `wait`.
 
 #### Wait
 
@@ -319,14 +317,15 @@ Conditions:
 | `--for` | Meaning |
 |---|---|
 | `exists` (default with `--selector`) | selector resolves to a non-null element |
-| `visible` | element exists AND `offsetParent !== null` AND not `display:none` |
+| `visible` | element `isConnected` AND `getClientRects().length !== 0` AND `getComputedStyle().visibility !== 'hidden'` (catches `display:none` via the no-rects path; correctly classifies `position:fixed` overlays as visible) |
 | `hidden` | element absent OR not visible (above) |
 | `count=N` | `findAll(selector).length === N` |
 | `text=X` | element matches AND its trimmed `textContent` equals `X` (or matches `/regex/flags`) |
 | `url-match` (default with `--url-match`) | `location.href` matches the substring or regex |
 
 Exit 0 on match (prints `matched <condition> in <N> ms`); exit 1
-on timeout (`error: timeout, waited_ms: N` to stderr).
+on timeout (`nex web wait: timeout` to stderr; `waited_ms` is in
+the `--json` envelope).
 
 #### Selector forms
 
@@ -393,10 +392,6 @@ js_error:{name, message, line, column}}` on a page-side exception.
 `--timeout` extends the CLI's socket read budget (default 30s) so
 exec scripts with embedded `nex.wait(...)` calls don't get cut
 off; the JS-side `wait` timeout is independent.
-
-Default reach: use the named verbs first. `exec` is for the cases
-that don't fit (framework state, custom DOM walks, multi-step
-flows that need conditional branching mid-sequence).
 
 All `web` verbs follow the same `--target` / `--workspace`
 scoping as `pane send` (issue #92): label targets need an origin
@@ -582,11 +577,9 @@ nex pane send --target coder "You are a coder. Write code for the task in .nex-t
 ### Pattern 4: Agent driving / observing a web app via web pane
 
 The web pane closes the loop where an agent in one pane drives or
-observes a web app in another. The actuator surface (`click`,
-`type`, `wait`, `select`, `scroll`, `hover`, `key`, `text`,
-`attr`, `count`, `exists`, `dom`) covers the common case; reach
-for `web exec` only when you need to compose them with custom
-logic. Common shapes:
+observes a web app in another. The action / query / wait verbs
+cover the common case; reach for `web exec` only when composing
+them with custom logic. Common shapes:
 
 **(a) Drive a flow with semantic verbs.** No JS authoring needed
 — the verbs cover the typical "find element, act on it, wait for
@@ -691,31 +684,12 @@ nex web open --private https://staging.example.com
 # Cookies + caches discarded on quit; tabs blank on restart.
 ```
 
-**Reach order:**
-
-1. **Named action / query / wait verb.** Covers ~90% of flows.
-   Selectors are `text:` / `role:` / `css:` / bare; agents rarely
-   need to think about DOM structure beyond the visible label.
-2. **`web wait`** when polling. Always cheaper than a shell loop
-   over `web exists`; the JS polls inside the page at 100ms while
-   one socket roundtrip blocks the CLI.
-3. **`web exec`** when verbs aren't expressive enough (framework
-   state, conditional branching mid-sequence, custom DOM walks).
-4. **`web inspect`** when a human is at the keyboard and the
-   agent doesn't know the selector — the click pastes a sanitised
-   payload into the agent's prompt.
-
-**Picker behaviour to design around:**
-- Arming is single-shot by default — exactly one click delivers,
-  then the picker disarms. Sticky mode (multiple clicks per arm)
-  is only reachable through the batch-annotate panel in the
-  chrome.
-- Delivery defaults to paste-no-submit — the receiving agent
-  reads the JSON as input but does not execute it. Pass
-  `--submit` only when the receiver is at a prompt that should
-  auto-fire on Enter.
-- The picker auto-disarms on tab switch, tab close, and Escape.
-- Page JS cannot spoof inbound payloads on the inspect channel.
+**Reach order:** lowest layer that works (see the table at the
+top of the Web Pane section); `exec` for composition; `inspect`
+when a human is at the keyboard and the agent doesn't know the
+selector. The picker auto-disarms on tab switch / close / Escape,
+sticky mode is only reachable via the chrome's batch-annotate
+panel, and page JS cannot spoof inbound payloads.
 
 ## Task File Format
 
