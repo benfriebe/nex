@@ -1174,8 +1174,8 @@ final class SocketServer: Sendable {
         if wire.command == "web-scroll" {
             guard let scope = parseWebTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
-            let block = (wire.block?.isEmpty == true) ? "center" : (wire.block ?? "center")
-            let behavior = (wire.behavior?.isEmpty == true) ? "instant" : (wire.behavior ?? "instant")
+            let block = wire.block.flatMap { $0.isEmpty ? nil : $0 } ?? "center"
+            let behavior = wire.behavior.flatMap { $0.isEmpty ? nil : $0 } ?? "instant"
             return (.webScroll(
                 paneID: scope.paneID,
                 target: scope.target,

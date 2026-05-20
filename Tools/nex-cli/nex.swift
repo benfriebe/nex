@@ -165,7 +165,8 @@ func popSwitch(_ name: String, from args: inout ArraySlice<String>) -> Bool {
 /// from `--` onward from `args` and returns the trailing items as
 /// positionals that flag parsers must not touch. Used by verbs whose
 /// positional payload can legitimately look like a switch (e.g.
-/// `nex web type css:#i -- --submit` types the literal string).
+/// `nex web type css:#i -- --submit` types the literal string;
+/// `nex web select css:#s -- --json` selects the option "--json").
 func extractPositionalTail(from args: inout ArraySlice<String>) -> [String] {
     guard let idx = args.firstIndex(of: "--") else { return [] }
     let tail = Array(args[args.index(after: idx)...])
@@ -832,10 +833,12 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
     or --workspace <name-or-id> must be passed (label resolution
     needs an explicit workspace scope).
 
-    For `click` and `type`, use `--` to terminate options when the
-    positional payload looks like a flag (e.g. typing the literal
-    string "--submit" into a search box):
+    For `click`, `type`, and `select`, use `--` to terminate options
+    when the positional payload looks like a flag (e.g. typing the
+    literal string "--submit" into a search box, or selecting an
+    option whose value is "--json"):
       nex web type css:#i -- --submit
+      nex web select css:#s -- --json
     \n
     """, stream)
 }
@@ -1235,11 +1238,15 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         sendWebReplyAndPrintRead(payload, command: "dom", asJSON: asJSON)
 
     case "select":
+        // Pull off any `--`-terminated tail before flag parsing so a
+        // value or label like "--json" survives intact.
+        let tail = extractPositionalTail(from: &args)
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
-        guard let selector = args.popFirst(), !selector.isEmpty,
-              let valueOrLabel = args.popFirst() else {
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty,
+              let valueOrLabel = positional.popFirst() else {
             fputs("Usage: nex web select [--target X] [--workspace Y] <selector> <value-or-label> [--json]\n", stderr)
             exit(1)
         }

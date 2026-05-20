@@ -473,6 +473,21 @@ struct WebPaneActuatorActionTests {
         #expect(parsed["ok"] as? Bool == false)
     }
 
+    @Test func scrollSmoothOmitsRect() async throws {
+        // With behavior:'smooth' the animation hasn't run yet so the
+        // post-call rect would be misleading. The reply surfaces
+        // behavior so callers can distinguish, and rect is omitted.
+        let host = try await ActuatorTestHost.make(html: """
+        <div id="d" style="height:200px;width:200px;background:red"></div>
+        """)
+        let parsed = try await host.parse(
+            host.evalString("JSON.stringify(__nexAct.scroll('css:#d', {behavior:'smooth'}))")
+        )
+        #expect(parsed["ok"] as? Bool == true)
+        #expect(parsed["behavior"] as? String == "smooth")
+        #expect(parsed["rect"] == nil)
+    }
+
     // MARK: - hover
 
     @Test func hoverDispatchesMouseAndPointerOver() async throws {

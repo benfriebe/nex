@@ -644,10 +644,8 @@ enum WebPaneActuatorScript {
                 };
             }
             var needle = String(valueOrLabel == null ? '' : valueOrLabel);
-            // Match by `value` first (matches the HTML attribute semantics
-            // — controlled <select>s usually round-trip on value), then
-            // by visible label. Trim the option text so whitespace in
-            // the HTML doesn't make the label unreachable.
+            // Value first so controlled <select>s round-trip; label is
+            // trimmed because HTML whitespace would otherwise hide it.
             var matchedIndex = -1;
             for (var i = 0; i < el.options.length; i++) {
                 if (el.options[i].value === needle) { matchedIndex = i; break; }
@@ -684,27 +682,28 @@ enum WebPaneActuatorScript {
             if (!el) {
                 return { ok: false, error: 'no match for selector: ' + String(selector) };
             }
-            // Default behavior: bring the element into view centered.
-            // `instant` (rather than `auto`) is well-supported in
-            // WebKit 18+ and matches what an agent expects — no
-            // implicit animation, no waiting for it to settle.
+            // `instant` avoids the implicit smooth animation an agent
+            // would otherwise have to wait for.
             var block = opts.block || 'center';
             var behavior = opts.behavior || 'instant';
             try {
                 el.scrollIntoView({ block: block, behavior: behavior });
             } catch (e) {
-                // Older WebKit builds (or shadow roots without
-                // scrollIntoView) — fall back to the no-options form.
+                // Old WebKit / shadow roots reject the options form.
                 try { el.scrollIntoView(); } catch (e2) { /* give up */ }
             }
-            var rect = el.getBoundingClientRect();
-            return {
-                ok: true,
-                rect: {
+            // For instant scrolls the rect is settled; for smooth
+            // scrolls the animation hasn't run yet so we omit it
+            // rather than report a misleading pre-animation position.
+            var reply = { ok: true, behavior: behavior };
+            if (behavior !== 'smooth') {
+                var rect = el.getBoundingClientRect();
+                reply.rect = {
                     x: rect.left, y: rect.top,
                     width: rect.width, height: rect.height
-                }
-            };
+                };
+            }
+            return reply;
         }
 
         // Synthetic hover. JS cannot reproduce a real OS-level hover
@@ -737,10 +736,8 @@ enum WebPaneActuatorScript {
             return { ok: true, matched: true };
         }
 
-        // Lookup table for the named keys agents reach for. Each entry
-        // maps to (key, code) plus an optional `charCode`/`keyCode` for
-        // the few page libraries that still consult the legacy fields.
-        // Case-insensitive; common aliases (`esc`, `space`) supported.
+        // `keyCode` is populated for the few page libraries that
+        // still consult the legacy field.
         var KEY_TABLE = {
             'enter': { key: 'Enter', code: 'Enter', keyCode: 13 },
             'return': { key: 'Enter', code: 'Enter', keyCode: 13 },
@@ -786,18 +783,13 @@ enum WebPaneActuatorScript {
                     if (typeof target.focus === 'function') target.focus();
                 } catch (e) { /* unfocusable — ignore */ }
             } else {
-                // Default to the active element so keystrokes are
-                // delivered where the user would expect them — focus
-                // ring stays the source of truth.
                 target = document.activeElement || document.body;
             }
-            var initOpts = {
-                bubbles: true, cancelable: true, composed: true,
-                key: lookup.key, code: lookup.code,
-                keyCode: lookup.keyCode, which: lookup.keyCode
-            };
-            target.dispatchEvent(new KeyboardEvent('keydown', initOpts));
-            target.dispatchEvent(new KeyboardEvent('keyup', initOpts));
+            dispatchKey(target, lookup.key, {
+                code: lookup.code,
+                keyCode: lookup.keyCode,
+                which: lookup.keyCode
+            });
             return { ok: true, key: lookup.key, code: lookup.code };
         }
 
