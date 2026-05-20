@@ -12,17 +12,27 @@ import Foundation
 /// `web exec` call the same methods from inside user-authored scripts
 /// and stay consistent with the verbs.
 enum WebPaneActuator {
+    /// Parsed reply envelope from the JS side. `raw` carries the
+    /// original JSON bytes so verb-specific fields (`text`, `value`,
+    /// `result`, `js_error`, ...) can be plucked out by callers without
+    /// re-parsing the load-bearing `ok`/`error` keys.
+    struct Envelope {
+        let ok: Bool
+        let error: String?
+        let raw: Data
+    }
+
     /// Outcome of a single `__nexAct.*` invocation.
     ///
-    /// - `success(payload)` — JS returned a structured reply. `payload`
-    ///   is the JSON-encoded reply body (typically an `{ok, ...}`
-    ///   object).
+    /// - `success(envelope)` — JS returned a structured reply parsed
+    ///   into `Envelope`.
     /// - `unknownTab` — the coordinator has no WebView for that tab id
     ///   (pane was torn down between CLI dispatch and JS evaluation).
     /// - `evaluationFailed(message)` — JS threw, parsing the reply
-    ///   failed, or the actuator was not present in the page.
+    ///   failed, the actuator was not present in the page, or the
+    ///   reply wasn't a JSON object.
     enum Result {
-        case success(Data)
+        case success(Envelope)
         case unknownTab
         case evaluationFailed(String)
     }
@@ -63,11 +73,9 @@ enum WebPaneActuator {
         return Self.normalise(raw: raw, coordinator: coordinator, tabID: tabID)
     }
 
-    /// Evaluate a pre-wrapped async-IIFE source (built by
-    /// `WebPaneExecWrapper`) against the active tab. Mirrors `invoke`
-    /// but doesn't build the JS call — `web exec` author scripts
-    /// are not method invocations on `__nexAct`, they're arbitrary
-    /// JS with the actuator surface available as bound aliases.
+    /// Sibling to `invoke` for already-wrapped sources (the author body
+    /// built by `WebPaneExecWrapper`, which is not a method call on
+    /// `__nexAct`).
     @MainActor
     static func evaluate(
         coordinator: WebPaneCoordinator,
@@ -78,8 +86,6 @@ enum WebPaneActuator {
         return Self.normalise(raw: raw, coordinator: coordinator, tabID: tabID)
     }
 
-    /// Shared post-evaluation handling: coerce the `Any?` result of
-    /// `callAsyncJavaScript` to the Sendable `Result` enum.
     @MainActor
     private static func normalise(
         raw: Any?,
@@ -95,7 +101,12 @@ enum WebPaneActuator {
         guard let data = string.data(using: .utf8) else {
             return .evaluationFailed("reply not valid utf8")
         }
-        return .success(data)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .evaluationFailed("reply not JSON object")
+        }
+        let ok = (obj["ok"] as? Bool) ?? false
+        let error = obj["error"] as? String
+        return .success(Envelope(ok: ok, error: error, raw: data))
     }
 }
 

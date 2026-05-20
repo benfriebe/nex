@@ -118,7 +118,7 @@ func printUsage() {
       nex web scroll <selector> [--top|--bottom|--smooth] [--target X] [--workspace Y] [--json]
       nex web hover <selector> [--target X] [--workspace Y] [--json]
       nex web key <key-name> [--selector <sel>] [--target X] [--workspace Y] [--json]
-      nex web exec (--file <path> | <js>) [--target X] [--workspace Y] [--json]
+      nex web exec (--file <path> | <js>) [--timeout 30] [--target X] [--workspace Y] [--json]
     \n
     """, stderr)
 }
@@ -829,12 +829,14 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web scroll  [--target ...] [--workspace ...] <selector> [--top|--bottom|--smooth] [--json]
       nex web hover   [--target ...] [--workspace ...] <selector> [--json]
       nex web key     [--target ...] [--workspace ...] <key-name> [--selector <sel>] [--json]
-      nex web exec    [--target ...] [--workspace ...] (--file <path> | <js>) [--json]
+      nex web exec    [--target ...] [--workspace ...] (--file <path> | <js>) [--timeout S] [--json]
 
     `web exec` runs author-supplied JS inside an async wrapper with
     $ / $$ / nex bound to __nexAct.find / __nexAct.findAll / __nexAct.
     A single trailing expression is returned automatically; for
-    multi-statement scripts, use an explicit `return`.
+    multi-statement scripts, use an explicit `return`. `--timeout`
+    bounds how long the CLI waits for a reply (default 30s, since
+    `nex.wait` alone can run for 10s).
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1327,7 +1329,25 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let file = parseFlag("--file", from: &args)
+        let timeoutStr = parseFlag("--timeout", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        // Default 30s — `nex.wait` itself defaults to 10s on the JS
+        // side, and exec scripts routinely chain a wait with fetch /
+        // another wait. 5s (the global default) trips on a single
+        // `await nex.wait(...)` and surfaces a misleading "no response
+        // from Nex" before the server replies.
+        let timeoutSeconds: Double
+        if let timeoutStr {
+            // `parsed.isFinite` rejects `Double("inf")` / `Double("1e309")`
+            // — both pass `> 0` but trap on `Int(_:)` conversion below.
+            guard let parsed = Double(timeoutStr), parsed > 0, parsed.isFinite else {
+                fputs("nex web exec: --timeout must be a positive finite number of seconds (got '\(timeoutStr)')\n", stderr)
+                exit(1)
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 30
+        }
         let script: String
         if let file {
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)),
@@ -1339,7 +1359,7 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         } else if let positional = args.popFirst(), !positional.isEmpty {
             script = positional
         } else {
-            fputs("Usage: nex web exec [--target X] [--workspace Y] (--file <path> | <js>) [--json]\n", stderr)
+            fputs("Usage: nex web exec [--target X] [--workspace Y] [--timeout S] (--file <path> | <js>) [--json]\n", stderr)
             exit(1)
         }
         var payload: [String: Any] = [
@@ -1347,7 +1367,8 @@ func handleWeb(_ args: inout ArraySlice<String>) {
             "script": script
         ]
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exec")
-        sendWebReplyAndPrintExec(payload, asJSON: asJSON)
+        let readTimeout = max(Int(timeoutSeconds.rounded(.up)) + 5, replyTimeoutSeconds)
+        sendWebReplyAndPrintExec(payload, asJSON: asJSON, readTimeoutOverride: readTimeout)
 
     case "wait":
         let target = parseFlag("--target", from: &args)
@@ -1375,8 +1396,10 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         // same default if we ship 0.
         let timeoutSeconds: Double
         if let timeoutStr {
-            guard let parsed = Double(timeoutStr), parsed > 0 else {
-                fputs("nex web wait: --timeout must be a positive number of seconds (got '\(timeoutStr)')\n", stderr)
+            // `isFinite` rejects `inf` / `1e309` — both pass `> 0` but
+            // trap on the `Int(_:)` conversion below.
+            guard let parsed = Double(timeoutStr), parsed > 0, parsed.isFinite else {
+                fputs("nex web wait: --timeout must be a positive finite number of seconds (got '\(timeoutStr)')\n", stderr)
                 exit(1)
             }
             timeoutSeconds = parsed
@@ -1537,18 +1560,13 @@ private func sendWebReplyAndPrintRead(
     }
 }
 
-/// Reply printer for `nex web exec`. The `result` field carries an
-/// arbitrary JSON value the author script returned. Print strategy:
-///   strings    → printed raw (no surrounding quotes)
-///   numbers    → printed as their string form
-///   booleans   → printed as `true` / `false`
-///   null       → no output
-///   arrays /
-///   objects    → printed as one-line JSON (sorted keys)
-/// `--json` always prints the full envelope. Script-side exceptions
-/// land in the shared decode path's `ok==false` branch.
-private func sendWebReplyAndPrintExec(_ payload: [String: Any], asJSON: Bool) {
-    let json = decodeWebReply(payload, command: "exec", asJSON: asJSON)
+private func sendWebReplyAndPrintExec(
+    _ payload: [String: Any], asJSON: Bool, readTimeoutOverride: Int? = nil
+) {
+    let json = decodeWebReply(
+        payload, command: "exec", asJSON: asJSON,
+        readTimeoutOverride: readTimeoutOverride
+    )
     if asJSON { return }
     guard let result = json["result"] else { return }
     switch result {
@@ -1559,8 +1577,7 @@ private func sendWebReplyAndPrintExec(_ payload: [String: Any], asJSON: Bool) {
     case let b as Bool:
         print(b ? "true" : "false")
     case let n as NSNumber:
-        // NSNumber covers both Int and Double; CustomStringConvertible
-        // prints integers without a trailing .0.
+        // `.stringValue` prints integers without a trailing `.0`.
         print(n.stringValue)
     default:
         if let data = try? JSONSerialization.data(

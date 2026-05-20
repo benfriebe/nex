@@ -261,10 +261,8 @@ enum SocketMessage: Equatable {
         keyName: String, selector: String?
     )
 
-    /// `nex web exec` — first-class composition surface (Phase F).
-    /// The author's JS gets evaluated inside an async IIFE with
-    /// `$`/`$$`/`nex` aliases bound to the actuator. `script` is
-    /// either a positional CLI argument or the contents of a `--file`.
+    /// `nex web exec` — author JS evaluated inside an async IIFE with
+    /// `$`/`$$`/`nex` aliases bound to the actuator.
     case webExec(
         paneID: UUID?, target: String?, workspace: String?,
         script: String
