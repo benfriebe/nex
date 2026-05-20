@@ -260,6 +260,15 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         keyName: String, selector: String?
     )
+
+    /// `nex web exec` — first-class composition surface (Phase F).
+    /// The author's JS gets evaluated inside an async IIFE with
+    /// `$`/`$$`/`nex` aliases bound to the actuator. `script` is
+    /// either a positional CLI argument or the contents of a `--file`.
+    case webExec(
+        paneID: UUID?, target: String?, workspace: String?,
+        script: String
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -277,7 +286,8 @@ private let replyCommandAllowlist: Set<String> = [
     "web-click", "web-type",
     "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom",
     "web-wait",
-    "web-select", "web-scroll", "web-hover", "web-key"
+    "web-select", "web-scroll", "web-hover", "web-key",
+    "web-exec"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -757,6 +767,8 @@ final class SocketServer: Sendable {
         var block: String?
         /// `web-scroll` — scrollIntoView behavior: instant|smooth.
         var behavior: String?
+        /// `web-exec` — author-supplied JS body.
+        var script: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -791,6 +803,7 @@ final class SocketServer: Sendable {
             case timeoutMs = "timeout_ms"
             case valueOrLabel = "value_or_label"
             case block, behavior
+            case script
         }
     }
 
@@ -1207,6 +1220,17 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 keyName: keyName,
                 selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-exec" {
+            guard let scope = parseWebTarget(wire),
+                  let script = wire.script, !script.isEmpty else { return nil }
+            return (.webExec(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                script: script
             ), wire)
         }
 

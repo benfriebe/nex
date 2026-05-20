@@ -2041,6 +2041,57 @@ struct AppReducer {
         )
     }
 
+    func handleWebExec(
+        state: State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        script: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(
+            state: state, paneID: paneID, target: target,
+            workspaceFilter: workspaceFilter, reply: reply
+        ) else { return .none }
+        guard let tab = resolved.webState.activeTab else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = tab.id
+        let isPrivate = resolved.webState.isPrivate
+        let wrappedSource = WebPaneExecWrapper.wrap(script)
+
+        return .run { _ in
+            let coordinator = await MainActor.run {
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate)
+            }
+            let outcome = await WebPaneActuator.evaluate(
+                coordinator: coordinator, tabID: tabID, source: wrappedSource
+            )
+            switch outcome {
+            case .unknownTab:
+                reply?.error("web pane has no live tab \(tabID.uuidString)")
+            case .evaluationFailed(let message):
+                reply?.error("exec evaluation failed: \(message)")
+            case .success(let data):
+                var payload: [String: Any] = [:]
+                if let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    payload = parsed
+                } else {
+                    payload = ["ok": false, "error": "exec reply not JSON object"]
+                }
+                payload["pane_id"] = resolvedPaneID.uuidString
+                payload["workspace_id"] = workspaceID.uuidString
+                payload["tab_id"] = tabID.uuidString
+                reply?.sendAndClose(payload)
+            }
+        }
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -5196,6 +5247,16 @@ struct AppReducer {
                         workspaceFilter: workspaceFilter,
                         keyName: keyName,
                         selector: selector,
+                        reply: reply
+                    )
+
+                case .webExec(let paneID, let target, let workspaceFilter, let script):
+                    return handleWebExec(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        script: script,
                         reply: reply
                     )
                 }

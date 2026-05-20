@@ -1413,4 +1413,42 @@ struct SocketParsingTests {
         """)
         #expect(SocketServer.parseWireMessage(data) == nil)
     }
+
+    // MARK: - Phase F — web-exec
+
+    @Test func parseWebExec() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)","script":"document.title"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webExec(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            script: "document.title"
+        ))
+    }
+
+    @Test func parseWebExecRequiresScript() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebExecRejectsEmptyScript() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)","script":""}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebExecWithTargetAndWorkspace() {
+        let data = jsonData("""
+        {"command":"web-exec","target":"web","workspace":"Dev","script":"return 1"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webExec(
+            paneID: nil, target: "web", workspace: "Dev",
+            script: "return 1"
+        ))
+    }
 }

@@ -60,6 +60,32 @@ enum WebPaneActuator {
         }
         """
         let raw = await coordinator.callAsyncJavaScript(tabID: tabID, source: source)
+        return Self.normalise(raw: raw, coordinator: coordinator, tabID: tabID)
+    }
+
+    /// Evaluate a pre-wrapped async-IIFE source (built by
+    /// `WebPaneExecWrapper`) against the active tab. Mirrors `invoke`
+    /// but doesn't build the JS call — `web exec` author scripts
+    /// are not method invocations on `__nexAct`, they're arbitrary
+    /// JS with the actuator surface available as bound aliases.
+    @MainActor
+    static func evaluate(
+        coordinator: WebPaneCoordinator,
+        tabID: UUID,
+        source: String
+    ) async -> Result {
+        let raw = await coordinator.callAsyncJavaScript(tabID: tabID, source: source)
+        return Self.normalise(raw: raw, coordinator: coordinator, tabID: tabID)
+    }
+
+    /// Shared post-evaluation handling: coerce the `Any?` result of
+    /// `callAsyncJavaScript` to the Sendable `Result` enum.
+    @MainActor
+    private static func normalise(
+        raw: Any?,
+        coordinator: WebPaneCoordinator,
+        tabID: UUID
+    ) -> Result {
         guard let string = raw as? String else {
             if coordinator.knowsTab(tabID: tabID) {
                 return .evaluationFailed("actuator returned non-string reply")

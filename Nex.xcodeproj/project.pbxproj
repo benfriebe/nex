@@ -33,6 +33,7 @@
 		27D6386295651D4FE9A3DF6B /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D96CD47FF756C95404DF4F6 /* Pane.swift */; };
 		291A22061671351813971551 /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */; };
 		29C636F17D2FEF2D5E0BE55D /* SettingsFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8322D3C28268495A01EA0597 /* SettingsFeature.swift */; };
+		2AB792CA68A7B12D55C2F834 /* WebPaneExecWrapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310A7BC6CBE6160568122935 /* WebPaneExecWrapperTests.swift */; };
 		2B0CCA8BFF359E4AF96AB5AA /* WebPaneConsoleScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = D919B65B3E950098BF3405EA /* WebPaneConsoleScript.swift */; };
 		2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */; };
 		2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000C46C62FB60503295A92E8 /* GhosttyApp.swift */; };
@@ -53,6 +54,7 @@
 		503C106566E08F34EDBC80D0 /* Favourites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54EECDF8241787F53AC4EA24 /* Favourites.swift */; };
 		5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3879BA745F8737CA5872F80D /* DatabaseService.swift */; };
 		52D4477AF5CCF1724D609119 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EFC4D8E9A152683486EC7F29 /* Sparkle */; };
+		53440A04E421A768EB338560 /* WebPaneExecWrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3F9EB3CC6EA8ED5CEE1F156 /* WebPaneExecWrapper.swift */; };
 		539AACF3A856FD51EC92A6F1 /* WebPaneBatchMarkerScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579D8D40F1D9930845C3B0C9 /* WebPaneBatchMarkerScript.swift */; };
 		53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */; };
 		550563B9BEDE841D3B7CE6B8 /* Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221A3B0170CFD708F3B03A84 /* Repo.swift */; };
@@ -222,6 +224,7 @@
 		309D0F6F13F12FDC350DE875 /* SocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketServer.swift; sourceTree = "<group>"; };
 		309F641591BB580429299666 /* ConfigParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigParserTests.swift; sourceTree = "<group>"; };
 		30D306AA2907696B7A28F9DA /* PaneLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayout.swift; sourceTree = "<group>"; };
+		310A7BC6CBE6160568122935 /* WebPaneExecWrapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneExecWrapperTests.swift; sourceTree = "<group>"; };
 		36F691F3442E4E1BBC495C78 /* GraftFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftFeatureTests.swift; sourceTree = "<group>"; };
 		3714AA1F15C85762BF36B1FE /* NexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexApp.swift; sourceTree = "<group>"; };
 		377C07C6C4B00D0699682EA3 /* PaneType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneType.swift; sourceTree = "<group>"; };
@@ -326,6 +329,7 @@
 		E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTargetTests.swift; sourceTree = "<group>"; };
 		E0625B2E7935BDDF63DC5D19 /* RingBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingBufferTests.swift; sourceTree = "<group>"; };
 		E08D39F8F87D7505CD32D25D /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		E3F9EB3CC6EA8ED5CEE1F156 /* WebPaneExecWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneExecWrapper.swift; sourceTree = "<group>"; };
 		E5859C5B2E1850D1262AFE4B /* Nex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScratchpadEditorView.swift; sourceTree = "<group>"; };
 		E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSpacesBinding.swift; sourceTree = "<group>"; };
@@ -470,6 +474,7 @@
 				9AA64A9054515A57ED6B2ECA /* WebPaneActuatorActionTests.swift */,
 				9F338E618A147E5BAAFF5FE5 /* WebPaneActuatorSelectorTests.swift */,
 				12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */,
+				310A7BC6CBE6160568122935 /* WebPaneExecWrapperTests.swift */,
 				06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */,
 				94D09D767C96B3F96E4DF7C5 /* WindowSpacesBindingTests.swift */,
 				28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */,
@@ -629,6 +634,7 @@
 				45DFA60F59651234F0F59BE9 /* WebPaneChrome.swift */,
 				D919B65B3E950098BF3405EA /* WebPaneConsoleScript.swift */,
 				FDC5A9C48821CE81CCB7FFB5 /* WebPaneCoordinator.swift */,
+				E3F9EB3CC6EA8ED5CEE1F156 /* WebPaneExecWrapper.swift */,
 				B2BAD220346CCE551765FCD9 /* WebPaneInspectorScript.swift */,
 				37B04ED477C0C51A44953A8C /* WebPaneState.swift */,
 				A0A94E80914F7411EED712E5 /* WebPaneStore.swift */,
@@ -876,6 +882,7 @@
 				04A463E95398A50F5AD5AA2B /* WebPaneActuatorActionTests.swift in Sources */,
 				E5D6BDD247E0BE03F097B4A2 /* WebPaneActuatorSelectorTests.swift in Sources */,
 				B0FA5E756635F6DFC402CD7C /* WebPaneActuatorWaitTests.swift in Sources */,
+				2AB792CA68A7B12D55C2F834 /* WebPaneExecWrapperTests.swift in Sources */,
 				53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */,
 				DDD05A3B3A535DEA66485A47 /* WindowSpacesBindingTests.swift in Sources */,
 				5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */,
@@ -982,6 +989,7 @@
 				A895048D11AFDC1FDA5DF846 /* WebPaneChrome.swift in Sources */,
 				2B0CCA8BFF359E4AF96AB5AA /* WebPaneConsoleScript.swift in Sources */,
 				A60D7684F5DA8DD340A04A01 /* WebPaneCoordinator.swift in Sources */,
+				53440A04E421A768EB338560 /* WebPaneExecWrapper.swift in Sources */,
 				C1FC2BD79FF0D9DC86910028 /* WebPaneInspectorScript.swift in Sources */,
 				630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */,
 				A8626EC08DC12588F912E1EF /* WebPaneStore.swift in Sources */,

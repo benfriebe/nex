@@ -118,6 +118,7 @@ func printUsage() {
       nex web scroll <selector> [--top|--bottom|--smooth] [--target X] [--workspace Y] [--json]
       nex web hover <selector> [--target X] [--workspace Y] [--json]
       nex web key <key-name> [--selector <sel>] [--target X] [--workspace Y] [--json]
+      nex web exec (--file <path> | <js>) [--target X] [--workspace Y] [--json]
     \n
     """, stderr)
 }
@@ -828,6 +829,12 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web scroll  [--target ...] [--workspace ...] <selector> [--top|--bottom|--smooth] [--json]
       nex web hover   [--target ...] [--workspace ...] <selector> [--json]
       nex web key     [--target ...] [--workspace ...] <key-name> [--selector <sel>] [--json]
+      nex web exec    [--target ...] [--workspace ...] (--file <path> | <js>) [--json]
+
+    `web exec` runs author-supplied JS inside an async wrapper with
+    $ / $$ / nex bound to __nexAct.find / __nexAct.findAll / __nexAct.
+    A single trailing expression is returned automatically; for
+    multi-statement scripts, use an explicit `return`.
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
@@ -1316,6 +1323,32 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "key")
         sendWebReplyAndPrintActuator(payload, command: "key", asJSON: asJSON)
 
+    case "exec":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let file = parseFlag("--file", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let script: String
+        if let file {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)),
+                  let str = String(data: data, encoding: .utf8) else {
+                fputs("nex web exec: cannot read --file '\(file)'\n", stderr)
+                exit(1)
+            }
+            script = str
+        } else if let positional = args.popFirst(), !positional.isEmpty {
+            script = positional
+        } else {
+            fputs("Usage: nex web exec [--target X] [--workspace Y] (--file <path> | <js>) [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-exec",
+            "script": script
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exec")
+        sendWebReplyAndPrintExec(payload, asJSON: asJSON)
+
     case "wait":
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
@@ -1501,6 +1534,42 @@ private func sendWebReplyAndPrintRead(
         print(html)
     default:
         print("\(command) ok")
+    }
+}
+
+/// Reply printer for `nex web exec`. The `result` field carries an
+/// arbitrary JSON value the author script returned. Print strategy:
+///   strings    → printed raw (no surrounding quotes)
+///   numbers    → printed as their string form
+///   booleans   → printed as `true` / `false`
+///   null       → no output
+///   arrays /
+///   objects    → printed as one-line JSON (sorted keys)
+/// `--json` always prints the full envelope. Script-side exceptions
+/// land in the shared decode path's `ok==false` branch.
+private func sendWebReplyAndPrintExec(_ payload: [String: Any], asJSON: Bool) {
+    let json = decodeWebReply(payload, command: "exec", asJSON: asJSON)
+    if asJSON { return }
+    guard let result = json["result"] else { return }
+    switch result {
+    case is NSNull:
+        return
+    case let s as String:
+        print(s)
+    case let b as Bool:
+        print(b ? "true" : "false")
+    case let n as NSNumber:
+        // NSNumber covers both Int and Double; CustomStringConvertible
+        // prints integers without a trailing .0.
+        print(n.stringValue)
+    default:
+        if let data = try? JSONSerialization.data(
+            withJSONObject: result, options: [.sortedKeys, .fragmentsAllowed]
+        ), let str = String(data: data, encoding: .utf8) {
+            print(str)
+        } else {
+            print(String(describing: result))
+        }
     }
 }
 

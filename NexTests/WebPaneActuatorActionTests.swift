@@ -587,4 +587,97 @@ struct WebPaneActuatorActionTests {
         #expect(parsed["ok"] as? Bool == false)
         #expect((parsed["error"] as? String)?.contains("unknown key") == true)
     }
+
+    // MARK: - exec (live wrapper roundtrip)
+
+    /// Run an exec script through the actual `WebPaneExecWrapper` and
+    /// `callAsyncJavaScript` path so the alias bindings + async IIFE
+    /// behave as the production reducer expects.
+    private func runExec(host: ActuatorTestHost, script: String) async throws -> [String: Any] {
+        let source = WebPaneExecWrapper.wrap(script)
+        let str = try await host.evalAsyncString(source)
+        return try host.parse(str)
+    }
+
+    @Test func execReturnsSingleExpressionImplicitly() async throws {
+        let host = try await ActuatorTestHost.make(html: "<title>page</title><h1>hi</h1>")
+        let reply = try await runExec(host: host, script: "document.title")
+        #expect(reply["ok"] as? Bool == true)
+        // title text of an HTML document fragment is the first <title>'s
+        // textContent — confirms the wrapper returned the value without
+        // ceremony.
+        #expect((reply["result"] as? String) == "page")
+    }
+
+    @Test func execAliasResolvesFindAndFindAll() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <ul><li>a</li><li>b</li><li>c</li></ul>
+        """)
+        let reply = try await runExec(host: host, script: #"$$('css:li').length"#)
+        #expect(reply["ok"] as? Bool == true)
+        #expect(reply["result"] as? Int == 3)
+    }
+
+    @Test func execAwaitsActuatorPromise() async throws {
+        // The wait verb returns a Promise. The wrapper's async IIFE
+        // must `await` it so the resolved value reaches `result`.
+        let host = try await ActuatorTestHost.make(html: #"<p id="p">hi</p>"#)
+        let reply = try await runExec(host: host, script: """
+        const r = await nex.wait({selector: 'css:#p', for: 'exists', timeout: 500});
+        return r.ok;
+        """)
+        #expect(reply["ok"] as? Bool == true)
+        #expect(reply["result"] as? Bool == true)
+    }
+
+    @Test func execComposesActuatorCallsThenReadsResult() async throws {
+        // Cookbook flow: wait, click, read — in one CLI invocation.
+        let host = try await ActuatorTestHost.make(html: """
+        <button id="btn">go</button>
+        <output id="out">none</output>
+        <script>
+        document.getElementById('btn').addEventListener('click', () => {
+            document.getElementById('out').textContent = 'clicked!';
+        });
+        </script>
+        """)
+        let reply = try await runExec(host: host, script: """
+        await nex.wait({selector: 'css:#btn', for: 'visible'});
+        await nex.click('css:#btn');
+        return nex.text('css:#out').text;
+        """)
+        #expect(reply["ok"] as? Bool == true)
+        #expect(reply["result"] as? String == "clicked!")
+    }
+
+    @Test func execStructuresJSException() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let reply = try await runExec(host: host, script: "throw new Error('boom')")
+        #expect(reply["ok"] as? Bool == false)
+        #expect((reply["error"] as? String)?.contains("boom") == true)
+        let jsError = reply["js_error"] as? [String: Any]
+        #expect(jsError?["name"] as? String == "Error")
+        #expect(jsError?["message"] as? String == "boom")
+    }
+
+    @Test func execReturnsNullForVoidExpressions() async throws {
+        let host = try await ActuatorTestHost.make(html: "<div></div>")
+        let reply = try await runExec(host: host, script: "void 0")
+        #expect(reply["ok"] as? Bool == true)
+        // null on the wire — the wrapper normalises undefined → null
+        // so the envelope is always well-formed JSON.
+        #expect(reply["result"] is NSNull)
+    }
+
+    @Test func execReturnsArrayValuesIntact() async throws {
+        let host = try await ActuatorTestHost.make(html: """
+        <li data-sku="a"></li><li data-sku="b"></li>
+        """)
+        let reply = try await runExec(
+            host: host,
+            script: #"$$('css:li').map(e => e.dataset.sku)"#
+        )
+        #expect(reply["ok"] as? Bool == true)
+        #expect(reply["result"] as? [String] == ["a", "b"])
+    }
 }
