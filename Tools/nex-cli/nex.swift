@@ -106,6 +106,19 @@ func printUsage() {
       nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
       nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web cookies list|clear|delete [...]
+      nex web click <selector> [--target X] [--workspace Y] [--double] [--right] [--at x,y] [--json]
+      nex web type <selector> <text> [--target X] [--workspace Y] [--submit] [--no-replace] [--json]
+      nex web text <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
+      nex web attr <selector> <attribute> [--target X] [--workspace Y] [--json]
+      nex web count <selector> [--target X] [--workspace Y] [--json]
+      nex web exists <selector> [--target X] [--workspace Y]   # exit 0 = yes, 1 = no
+      nex web dom <selector> [--target X] [--workspace Y] [--max-bytes N] [--json]
+      nex web wait (--selector <sel> | --url-match <substr-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--target X] [--workspace Y] [--json]
+      nex web select <selector> <value-or-label> [--target X] [--workspace Y] [--json]
+      nex web scroll <selector> [--top|--bottom|--smooth] [--target X] [--workspace Y] [--json]
+      nex web hover <selector> [--target X] [--workspace Y] [--json]
+      nex web key <key-name> [--selector <sel>] [--target X] [--workspace Y] [--json]
+      nex web exec (--file <path> | <js>) [--timeout 30] [--target X] [--workspace Y] [--json]
     \n
     """, stderr)
 }
@@ -149,6 +162,19 @@ func popSwitch(_ name: String, from args: inout ArraySlice<String>) -> Bool {
     return true
 }
 
+/// Split `args` at the first POSIX `--` terminator. Removes everything
+/// from `--` onward from `args` and returns the trailing items as
+/// positionals that flag parsers must not touch. Used by verbs whose
+/// positional payload can legitimately look like a switch (e.g.
+/// `nex web type css:#i -- --submit` types the literal string;
+/// `nex web select css:#s -- --json` selects the option "--json").
+func extractPositionalTail(from args: inout ArraySlice<String>) -> [String] {
+    guard let idx = args.firstIndex(of: "--") else { return [] }
+    let tail = Array(args[args.index(after: idx)...])
+    args = args[..<idx]
+    return tail
+}
+
 func requirePaneID() -> String {
     guard let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] else {
         // Not running inside a Nex pane — silent exit
@@ -180,12 +206,24 @@ func sendJSONAny(_ payload: [String: Any]) {
 /// callers must treat that differently from "empty reply" (which is
 /// data.isEmpty but non-nil, signalling an older server that silently
 /// dropped the request).
-func sendJSONAndReadReply(_ payload: [String: Any]) -> Data? {
+///
+/// `readTimeoutOverride` extends the socket read timeout for commands
+/// that legitimately block server-side longer than `replyTimeoutSeconds`
+/// (currently just `web wait`, where the JS polls up to `--timeout`).
+func sendJSONAndReadReply(
+    _ payload: [String: Any], readTimeoutOverride: Int? = nil
+) -> Data? {
     switch transport {
     case .unix(let path):
-        sendViaUnix(path: path, payload: payload, expectsReply: true)
+        sendViaUnix(
+            path: path, payload: payload, expectsReply: true,
+            readTimeoutOverride: readTimeoutOverride
+        )
     case .tcp(let host, let port):
-        sendViaTCP(host: host, port: port, payload: payload, expectsReply: true)
+        sendViaTCP(
+            host: host, port: port, payload: payload, expectsReply: true,
+            readTimeoutOverride: readTimeoutOverride
+        )
     }
 }
 
@@ -240,7 +278,10 @@ func readUntilEOF(fd: Int32) -> Data? {
 }
 
 @discardableResult
-func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Data? {
+func sendViaUnix(
+    path: String, payload: [String: Any], expectsReply: Bool,
+    readTimeoutOverride: Int? = nil
+) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -282,7 +323,7 @@ func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Da
     }
 
     if expectsReply {
-        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+        setReadTimeout(fd: fd, seconds: readTimeoutOverride ?? replyTimeoutSeconds)
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
@@ -290,7 +331,10 @@ func sendViaUnix(path: String, payload: [String: Any], expectsReply: Bool) -> Da
 }
 
 @discardableResult
-func sendViaTCP(host: String, port: UInt16, payload: [String: Any], expectsReply: Bool) -> Data? {
+func sendViaTCP(
+    host: String, port: UInt16, payload: [String: Any], expectsReply: Bool,
+    readTimeoutOverride: Int? = nil
+) -> Data? {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -332,7 +376,7 @@ func sendViaTCP(host: String, port: UInt16, payload: [String: Any], expectsReply
     }
 
     if expectsReply {
-        setReadTimeout(fd: fd, seconds: replyTimeoutSeconds)
+        setReadTimeout(fd: fd, seconds: readTimeoutOverride ?? replyTimeoutSeconds)
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
@@ -773,10 +817,37 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
       nex web private    on|off [--target ...] [--workspace ...]
       nex web cookies    list|clear|delete [...]
+      nex web click   [--target ...] [--workspace ...] <selector> [--double] [--right] [--at x,y] [--json]
+      nex web type    [--target ...] [--workspace ...] <selector> <text> [--submit] [--no-replace] [--json]
+      nex web text    [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
+      nex web attr    [--target ...] [--workspace ...] <selector> <attribute> [--json]
+      nex web count   [--target ...] [--workspace ...] <selector> [--json]
+      nex web exists  [--target ...] [--workspace ...] <selector>   # exit 0 = yes, 1 = no
+      nex web dom     [--target ...] [--workspace ...] <selector> [--max-bytes N] [--json]
+      nex web wait    [--target ...] [--workspace ...] (--selector <sel> | --url-match <sub-or-regex>) [--for visible|hidden|exists|count=N|text=X] [--timeout 10] [--json]
+      nex web select  [--target ...] [--workspace ...] <selector> <value-or-label> [--json]
+      nex web scroll  [--target ...] [--workspace ...] <selector> [--top|--bottom|--smooth] [--json]
+      nex web hover   [--target ...] [--workspace ...] <selector> [--json]
+      nex web key     [--target ...] [--workspace ...] <key-name> [--selector <sel>] [--json]
+      nex web exec    [--target ...] [--workspace ...] (--file <path> | <js>) [--timeout S] [--json]
+
+    `web exec` runs author-supplied JS inside an async wrapper with
+    $ / $$ / nex bound to __nexAct.find / __nexAct.findAll / __nexAct.
+    A single trailing expression is returned automatically; for
+    multi-statement scripts, use an explicit `return`. `--timeout`
+    bounds how long the CLI waits for a reply (default 30s, since
+    `nex.wait` alone can run for 10s).
 
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
     needs an explicit workspace scope).
+
+    For `click`, `type`, and `select`, use `--` to terminate options
+    when the positional payload looks like a flag (e.g. typing the
+    literal string "--submit" into a search box, or selecting an
+    option whose value is "--json"):
+      nex web type css:#i -- --submit
+      nex web select css:#s -- --json
     \n
     """, stream)
 }
@@ -1021,10 +1092,501 @@ func handleWeb(_ args: inout ArraySlice<String>) {
     case "cookies":
         handleWebCookies(&args)
 
+    case "click":
+        let tail = extractPositionalTail(from: &args)
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let double = popSwitch("--double", from: &args)
+        let right = popSwitch("--right", from: &args)
+        let atArg = parseFlag("--at", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web click [--target X] [--workspace Y] <selector> [--double] [--right] [--at x,y] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-click",
+            "selector": selector
+        ]
+        if double { payload["double"] = true }
+        if right { payload["right"] = true }
+        if let atArg {
+            let parts = atArg.split(separator: ",").map(String.init)
+            guard parts.count == 2,
+                  let x = Double(parts[0].trimmingCharacters(in: .whitespaces)),
+                  let y = Double(parts[1].trimmingCharacters(in: .whitespaces)) else {
+                fputs("nex web click: --at must be 'x,y' numbers (got '\(atArg)')\n", stderr)
+                exit(1)
+            }
+            payload["at_x"] = x
+            payload["at_y"] = y
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "click")
+        sendWebReplyAndPrintActuator(payload, command: "click", asJSON: asJSON)
+
+    case "type":
+        // Pull off any `--`-terminated tail before flag parsing so a
+        // text payload like "--submit" or "--json" survives intact.
+        let tail = extractPositionalTail(from: &args)
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let submit = popSwitch("--submit", from: &args)
+        let noReplace = popSwitch("--no-replace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
+            exit(1)
+        }
+        guard let text = positional.popFirst() else {
+            fputs("Usage: nex web type [--target X] [--workspace Y] <selector> <text> [--submit] [--no-replace] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-type",
+            "selector": selector,
+            "text": text
+        ]
+        if submit { payload["submit"] = true }
+        if noReplace { payload["replace"] = false }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "type")
+        sendWebReplyAndPrintActuator(payload, command: "type", asJSON: asJSON)
+
+    case "text":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let maxBytes = parseFlag("--max-bytes", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web text [--target X] [--workspace Y] <selector> [--max-bytes N] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-text",
+            "selector": selector
+        ]
+        if let maxBytes {
+            guard let n = Int(maxBytes), n > 0 else {
+                fputs("nex web text: --max-bytes must be a positive integer (got '\(maxBytes)')\n", stderr)
+                exit(1)
+            }
+            payload["max_bytes"] = n
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "text")
+        sendWebReplyAndPrintRead(payload, command: "text", asJSON: asJSON)
+
+    case "attr":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty,
+              let attribute = args.popFirst(), !attribute.isEmpty else {
+            fputs("Usage: nex web attr [--target X] [--workspace Y] <selector> <attribute> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-attr",
+            "selector": selector,
+            "attribute": attribute
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "attr")
+        sendWebReplyAndPrintRead(payload, command: "attr", asJSON: asJSON)
+
+    case "count":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web count [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-count",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "count")
+        sendWebReplyAndPrintRead(payload, command: "count", asJSON: asJSON)
+
+    case "exists":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web exists [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-exists",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exists")
+        sendWebReplyAndPrintRead(payload, command: "exists", asJSON: asJSON)
+
+    case "dom":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let maxBytes = parseFlag("--max-bytes", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web dom [--target X] [--workspace Y] <selector> [--max-bytes N] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-q-dom",
+            "selector": selector
+        ]
+        if let maxBytes {
+            guard let n = Int(maxBytes), n > 0 else {
+                fputs("nex web dom: --max-bytes must be a positive integer (got '\(maxBytes)')\n", stderr)
+                exit(1)
+            }
+            payload["max_bytes"] = n
+        }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "dom")
+        sendWebReplyAndPrintRead(payload, command: "dom", asJSON: asJSON)
+
+    case "select":
+        // Pull off any `--`-terminated tail before flag parsing so a
+        // value or label like "--json" survives intact.
+        let tail = extractPositionalTail(from: &args)
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        var positional = ArraySlice(args + tail)
+        guard let selector = positional.popFirst(), !selector.isEmpty,
+              let valueOrLabel = positional.popFirst() else {
+            fputs("Usage: nex web select [--target X] [--workspace Y] <selector> <value-or-label> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-select",
+            "selector": selector,
+            "value_or_label": valueOrLabel
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "select")
+        sendWebReplyAndPrintActuator(payload, command: "select", asJSON: asJSON)
+
+    case "scroll":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let top = popSwitch("--top", from: &args)
+        let bottom = popSwitch("--bottom", from: &args)
+        let smooth = popSwitch("--smooth", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web scroll [--target X] [--workspace Y] <selector> [--top|--bottom|--smooth] [--json]\n", stderr)
+            exit(1)
+        }
+        if top, bottom {
+            fputs("nex web scroll: --top and --bottom are mutually exclusive\n", stderr)
+            exit(1)
+        }
+        let block = top ? "start" : (bottom ? "end" : "center")
+        let behavior = smooth ? "smooth" : "instant"
+        var payload: [String: Any] = [
+            "command": "web-scroll",
+            "selector": selector,
+            "block": block,
+            "behavior": behavior
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "scroll")
+        sendWebReplyAndPrintActuator(payload, command: "scroll", asJSON: asJSON)
+
+    case "hover":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let selector = args.popFirst(), !selector.isEmpty else {
+            fputs("Usage: nex web hover [--target X] [--workspace Y] <selector> [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-hover",
+            "selector": selector
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "hover")
+        sendWebReplyAndPrintActuator(payload, command: "hover", asJSON: asJSON)
+
+    case "key":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let selector = parseFlag("--selector", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        guard let keyName = args.popFirst(), !keyName.isEmpty else {
+            fputs("Usage: nex web key [--target X] [--workspace Y] <key-name> [--selector <sel>] [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-key",
+            "key": keyName
+        ]
+        if let selector { payload["selector"] = selector }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "key")
+        sendWebReplyAndPrintActuator(payload, command: "key", asJSON: asJSON)
+
+    case "exec":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let file = parseFlag("--file", from: &args)
+        let timeoutStr = parseFlag("--timeout", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        // Default 30s — `nex.wait` itself defaults to 10s on the JS
+        // side, and exec scripts routinely chain a wait with fetch /
+        // another wait. 5s (the global default) trips on a single
+        // `await nex.wait(...)` and surfaces a misleading "no response
+        // from Nex" before the server replies.
+        let timeoutSeconds: Double
+        if let timeoutStr {
+            // `parsed.isFinite` rejects `Double("inf")` / `Double("1e309")`
+            // — both pass `> 0` but trap on `Int(_:)` conversion below.
+            guard let parsed = Double(timeoutStr), parsed > 0, parsed.isFinite else {
+                fputs("nex web exec: --timeout must be a positive finite number of seconds (got '\(timeoutStr)')\n", stderr)
+                exit(1)
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 30
+        }
+        let script: String
+        if let file {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)),
+                  let str = String(data: data, encoding: .utf8) else {
+                fputs("nex web exec: cannot read --file '\(file)'\n", stderr)
+                exit(1)
+            }
+            script = str
+        } else if let positional = args.popFirst(), !positional.isEmpty {
+            script = positional
+        } else {
+            fputs("Usage: nex web exec [--target X] [--workspace Y] [--timeout S] (--file <path> | <js>) [--json]\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-exec",
+            "script": script
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "exec")
+        let readTimeout = max(Int(timeoutSeconds.rounded(.up)) + 5, replyTimeoutSeconds)
+        sendWebReplyAndPrintExec(payload, asJSON: asJSON, readTimeoutOverride: readTimeout)
+
+    case "wait":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let selector = parseFlag("--selector", from: &args)
+        let forCondition = parseFlag("--for", from: &args)
+        let urlMatch = parseFlag("--url-match", from: &args)
+        let timeoutStr = parseFlag("--timeout", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        // Exactly one of --selector / --url-match must be present.
+        // Conditions like visible/hidden/count/text always need a
+        // selector; url-match conflicts with selector (the JS side
+        // ignores selector when for=url-match anyway, but we reject
+        // here so misuse surfaces at usage time).
+        guard selector != nil || urlMatch != nil else {
+            fputs("nex web wait: one of --selector or --url-match is required\n", stderr)
+            exit(1)
+        }
+        if selector != nil, urlMatch != nil {
+            fputs("nex web wait: --selector and --url-match are mutually exclusive\n", stderr)
+            exit(1)
+        }
+        // --timeout is in seconds (matches user expectation); wire
+        // ships milliseconds. Default 10s — JS side enforces the
+        // same default if we ship 0.
+        let timeoutSeconds: Double
+        if let timeoutStr {
+            // `isFinite` rejects `inf` / `1e309` — both pass `> 0` but
+            // trap on the `Int(_:)` conversion below.
+            guard let parsed = Double(timeoutStr), parsed > 0, parsed.isFinite else {
+                fputs("nex web wait: --timeout must be a positive finite number of seconds (got '\(timeoutStr)')\n", stderr)
+                exit(1)
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 10
+        }
+        var payload: [String: Any] = [
+            "command": "web-wait",
+            "timeout_ms": Int(timeoutSeconds * 1000)
+        ]
+        if let selector { payload["selector"] = selector }
+        if let urlMatch { payload["url_match"] = urlMatch }
+        if let forCondition { payload["for"] = forCondition }
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "wait")
+        // The server can legitimately hold the reply for the full wait
+        // duration. Pad the socket read timeout past `timeoutSeconds`
+        // so a slow-firing or about-to-timeout condition still gets
+        // its reply through instead of tripping the default 5s
+        // "no response from Nex" error.
+        let readTimeout = max(Int(timeoutSeconds.rounded(.up)) + 5, replyTimeoutSeconds)
+        sendWebReplyAndPrintActuator(
+            payload, command: "wait", asJSON: asJSON,
+            readTimeoutOverride: readTimeout
+        )
+
     default:
         fputs("Unknown web action: \(action)\n", stderr)
         printWebUsage(stream: stderr)
         exit(1)
+    }
+}
+
+/// Decode a `web-*` reply envelope into a `[String: Any]` dict,
+/// handling the shared error paths: transport failure, empty reply,
+/// invalid JSON, `--json` pretty-print, and `ok==false` → stderr +
+/// exit 1. Returns `nil` only when `--json` was requested AND the
+/// reply had `ok==false` (so the JSON dump runs before exit) — in
+/// every other failure mode this function calls `exit(1)` itself.
+/// On success, returns the parsed dict ready for verb-specific
+/// rendering.
+private func decodeWebReply(
+    _ payload: [String: Any], command: String, asJSON: Bool,
+    readTimeoutOverride: Int? = nil
+) -> [String: Any] {
+    guard let data = sendJSONAndReadReply(payload, readTimeoutOverride: readTimeoutOverride) else {
+        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("nex web \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if asJSON,
+       let pretty = try? JSONSerialization.data(
+           withJSONObject: json,
+           options: [.prettyPrinted, .sortedKeys]
+       ),
+       let str = String(data: pretty, encoding: .utf8) {
+        print(str)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        if !asJSON {
+            fputs("nex web \(command): \(msg)\n", stderr)
+        }
+        exit(1)
+    }
+    return json
+}
+
+/// Reply printer for actuator action verbs (`click`, `type`).
+/// One-line acknowledgement on success, exit-1 on `ok==false`.
+/// `--json` dumps the full reply payload instead.
+private func sendWebReplyAndPrintActuator(
+    _ payload: [String: Any], command: String, asJSON: Bool,
+    readTimeoutOverride: Int? = nil
+) {
+    let json = decodeWebReply(
+        payload, command: command, asJSON: asJSON,
+        readTimeoutOverride: readTimeoutOverride
+    )
+    if asJSON { return }
+    switch command {
+    case "click":
+        let text = (json["text"] as? String) ?? ""
+        let label = text.isEmpty ? "" : ": \"\(text)\""
+        print("clicked\(label)")
+    case "type":
+        let value = (json["value"] as? String) ?? ""
+        print("typed: \(value)")
+    case "wait":
+        // The decode helper already exited on ok=false (incl. timeout
+        // sets ok:false), so reaching here means the condition fired.
+        let cond = (json["condition"] as? String) ?? "exists"
+        let waited = (json["waited_ms"] as? Int) ?? 0
+        print("matched \(cond) in \(waited) ms")
+    case "select":
+        let label = (json["label"] as? String) ?? ""
+        let value = (json["value"] as? String) ?? ""
+        print("selected: \(label.isEmpty ? value : label)")
+    case "scroll":
+        print("scrolled")
+    case "hover":
+        print("hovered")
+    case "key":
+        let k = (json["key"] as? String) ?? ""
+        print("key: \(k)")
+    default:
+        print("\(command) ok")
+    }
+}
+
+/// Reply printer for read verbs (`text`, `attr`, `count`, `exists`,
+/// `dom`). Each verb prints its primary value directly to stdout —
+/// strings unquoted, numbers as-is, booleans surfaced via exit code
+/// for `exists`. `--json` dumps the full reply but `exists` still
+/// uses exit-1-for-not-found even in JSON mode so the until-loop
+/// ergonomic survives `--json`.
+private func sendWebReplyAndPrintRead(
+    _ payload: [String: Any], command: String, asJSON: Bool
+) {
+    let json = decodeWebReply(payload, command: command, asJSON: asJSON)
+    if asJSON {
+        if command == "exists", let found = json["found"] as? Bool, !found {
+            exit(1)
+        }
+        return
+    }
+    switch command {
+    case "text":
+        let text = (json["text"] as? String) ?? ""
+        print(text)
+    case "attr":
+        // Distinguish attribute absent from attribute present with
+        // empty value: absent → exit 1, present → print value (which
+        // may be empty) and exit 0.
+        let present = (json["present"] as? Bool) ?? false
+        if !present {
+            exit(1)
+        }
+        let value = (json["value"] as? String) ?? ""
+        print(value)
+    case "count":
+        let count = (json["count"] as? Int) ?? 0
+        print(count)
+    case "exists":
+        let found = (json["found"] as? Bool) ?? false
+        exit(found ? 0 : 1)
+    case "dom":
+        let html = (json["outer_html"] as? String) ?? ""
+        print(html)
+    default:
+        print("\(command) ok")
+    }
+}
+
+private func sendWebReplyAndPrintExec(
+    _ payload: [String: Any], asJSON: Bool, readTimeoutOverride: Int? = nil
+) {
+    let json = decodeWebReply(
+        payload, command: "exec", asJSON: asJSON,
+        readTimeoutOverride: readTimeoutOverride
+    )
+    if asJSON { return }
+    guard let result = json["result"] else { return }
+    switch result {
+    case is NSNull:
+        return
+    case let s as String:
+        print(s)
+    case let b as Bool:
+        print(b ? "true" : "false")
+    case let n as NSNumber:
+        // `.stringValue` prints integers without a trailing `.0`.
+        print(n.stringValue)
+    default:
+        if let data = try? JSONSerialization.data(
+            withJSONObject: result, options: [.sortedKeys, .fragmentsAllowed]
+        ), let str = String(data: data, encoding: .utf8) {
+            print(str)
+        } else {
+            print(String(describing: result))
+        }
     }
 }
 

@@ -1517,17 +1517,28 @@ struct AppReducer {
         )))
     }
 
+    /// Wire-level addressing for any `nex web ...` command. All three
+    /// fields come from the same CLI payload (`pane_id`, `target`,
+    /// `workspace`); bundling them keeps the per-handler signatures
+    /// from leaking that detail.
+    struct WebPaneScope: Equatable {
+        let paneID: UUID?
+        let target: String?
+        let workspaceFilter: String?
+    }
+
     /// Resolve a pane-target reference to a `.web` pane. Replies with
     /// the structured error on a miss and returns nil so the caller
     /// can short-circuit cleanly.
     private func resolveWebPane(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         reply: SocketServer.ReplyHandle?
     ) -> (paneID: UUID, workspace: WorkspaceFeature.State, webState: WebPaneState)? {
-        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        switch resolvePaneTarget(
+            state: state, paneID: scope.paneID,
+            target: scope.target, workspaceFilter: scope.workspaceFilter
+        ) {
         case .found(let resolvedID, let ws):
             guard let pane = ws.panes[id: resolvedID] else {
                 reply?.error("pane not found: \(resolvedID.uuidString)")
@@ -1550,15 +1561,11 @@ struct AppReducer {
 
     func handleWebURL(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
 
         // Destructure into Sendable locals — Swift 6 strict
         // concurrency rejects capturing the resolved tuple
@@ -1591,16 +1598,12 @@ struct AppReducer {
 
     func handleWebNav(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         action: WebNavAction,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
 
         reply?.sendAndClose([
             "ok": true,
@@ -1624,16 +1627,12 @@ struct AppReducer {
 
     func handleWebCapture(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         mode: String,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         guard let tab = resolved.webState.activeTab else {
             reply?.error("web pane has no active tab")
             return .none
@@ -1706,6 +1705,301 @@ struct AppReducer {
         }
     }
 
+    // MARK: - Web pane actuator handlers
+
+    /// Dispatch a `__nexAct.<method>(<args>)` call against the resolved
+    /// web pane's active tab and translate the parsed envelope into a
+    /// `ReplyHandle` reply. Shared body for every actuator-backed
+    /// verb (click / type / q* / wait / select / scroll / hover / key /
+    /// exec).
+    private func runWebPaneActuator(
+        state: State,
+        scope: WebPaneScope,
+        errorLabel: String,
+        reply: SocketServer.ReplyHandle?,
+        body: @escaping @Sendable (WebPaneCoordinator, UUID) async -> WebPaneActuator.Result
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
+        guard let tab = resolved.webState.activeTab else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+
+        let store = webPaneStore
+        let resolvedPaneID = resolved.paneID
+        let workspaceID = resolved.workspace.id
+        let tabID = tab.id
+        let isPrivate = resolved.webState.isPrivate
+
+        return .run { _ in
+            let coordinator = await MainActor.run {
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate)
+            }
+            let outcome = await body(coordinator, tabID)
+            switch outcome {
+            case .unknownTab:
+                reply?.error("web pane has no live tab \(tabID.uuidString)")
+            case .evaluationFailed(let message):
+                reply?.error("\(errorLabel) evaluation failed: \(message)")
+            case .success(let envelope):
+                var payload = (try? JSONSerialization.jsonObject(
+                    with: envelope.raw
+                ) as? [String: Any]) ?? [:]
+                payload["pane_id"] = resolvedPaneID.uuidString
+                payload["workspace_id"] = workspaceID.uuidString
+                payload["tab_id"] = tabID.uuidString
+                reply?.sendAndClose(payload)
+            }
+        }
+    }
+
+    private func handleWebActuatorCall(
+        state: State,
+        scope: WebPaneScope,
+        method: String,
+        args: [JSValue],
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        runWebPaneActuator(
+            state: state, scope: scope, errorLabel: "actuator", reply: reply
+        ) { coordinator, tabID in
+            await WebPaneActuator.invoke(
+                coordinator: coordinator, tabID: tabID, method: method, args: args
+            )
+        }
+    }
+
+    func handleWebClick(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        double: Bool,
+        right: Bool,
+        atX: Double?,
+        atY: Double?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if double { opts.append(JSPair(key: "double", value: .bool(true))) }
+        if right { opts.append(JSPair(key: "right", value: .bool(true))) }
+        if let x = atX, let y = atY {
+            opts.append(JSPair(key: "at", value: .object([
+                JSPair(key: "x", value: .double(x)),
+                JSPair(key: "y", value: .double(y))
+            ])))
+        }
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "click",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebType(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        text: String,
+        submit: Bool,
+        replace: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if submit { opts.append(JSPair(key: "submit", value: .bool(true))) }
+        // `replace` defaults true in the JS side; only ship the flag
+        // when the caller overrode it so the wire payload stays small.
+        if !replace { opts.append(JSPair(key: "replace", value: .bool(false))) }
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "type",
+            args: [.string(selector), .string(text), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebQText(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        maxBytes: Int?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let maxBytes { opts.append(JSPair(key: "maxBytes", value: .int(maxBytes))) }
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "text",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebQAttr(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        attribute: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "attr",
+            args: [.string(selector), .string(attribute)],
+            reply: reply
+        )
+    }
+
+    func handleWebQCount(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "count",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebQExists(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "exists",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebQDom(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        maxBytes: Int?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let maxBytes { opts.append(JSPair(key: "maxBytes", value: .int(maxBytes))) }
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "dom",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebWait(
+        state: State,
+        scope: WebPaneScope,
+        selector: String?,
+        urlMatch: String?,
+        forCondition: String?,
+        timeoutMs: Int,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let selector { opts.append(JSPair(key: "selector", value: .string(selector))) }
+        if let urlMatch { opts.append(JSPair(key: "urlMatch", value: .string(urlMatch))) }
+        if let forCondition { opts.append(JSPair(key: "for", value: .string(forCondition))) }
+        opts.append(JSPair(key: "timeout", value: .int(timeoutMs)))
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "wait",
+            args: [.object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebSelect(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        valueOrLabel: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "select",
+            args: [.string(selector), .string(valueOrLabel)],
+            reply: reply
+        )
+    }
+
+    func handleWebScroll(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        block: String,
+        behavior: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let opts: [JSPair] = [
+            JSPair(key: "block", value: .string(block)),
+            JSPair(key: "behavior", value: .string(behavior))
+        ]
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "scroll",
+            args: [.string(selector), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebHover(
+        state: State,
+        scope: WebPaneScope,
+        selector: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "hover",
+            args: [.string(selector)],
+            reply: reply
+        )
+    }
+
+    func handleWebKey(
+        state: State,
+        scope: WebPaneScope,
+        keyName: String,
+        selector: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        var opts: [JSPair] = []
+        if let selector { opts.append(JSPair(key: "selector", value: .string(selector))) }
+        return handleWebActuatorCall(
+            state: state, scope: scope,
+            method: "key",
+            args: [.string(keyName), .object(opts)],
+            reply: reply
+        )
+    }
+
+    func handleWebExec(
+        state: State,
+        scope: WebPaneScope,
+        script: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let wrappedSource = WebPaneExecWrapper.wrap(script)
+        return runWebPaneActuator(
+            state: state, scope: scope, errorLabel: "exec", reply: reply
+        ) { coordinator, tabID in
+            await WebPaneActuator.evaluate(
+                coordinator: coordinator, tabID: tabID, source: wrappedSource
+            )
+        }
+    }
+
     // MARK: - Web pane tab handlers
 
     enum TabRefResolution {
@@ -1747,15 +2041,11 @@ struct AppReducer {
 
     func handleWebTabs(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let activeID = resolved.webState.activeTab?.id
         let entries = resolved.webState.tabs.enumerated().map { idx, tab in
             tabJSON(tab, isActive: tab.id == activeID, index: idx)
@@ -1771,17 +2061,13 @@ struct AppReducer {
 
     func handleWebTabNew(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         url: String,
         makeActive: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let newTabID = uuid()
         reply?.sendAndClose([
             "ok": true,
@@ -1804,16 +2090,12 @@ struct AppReducer {
 
     func handleWebTabClose(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         tabRef: String,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         switch resolveTabRef(tabRef, in: resolved.webState) {
         case .error(let message):
             reply?.error(message)
@@ -1838,16 +2120,12 @@ struct AppReducer {
 
     func handleWebTabSelect(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         tabRef: String,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         switch resolveTabRef(tabRef, in: resolved.webState) {
         case .error(let message):
             reply?.error(message)
@@ -1909,18 +2187,14 @@ struct AppReducer {
 
     func handleWebConsole(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         since: UInt64,
         level: String?,
         clear: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let entries = resolved.webState.consoleBuffer.entries(since: since)
         let filtered: [RingBuffer<ConsoleLine>.Entry] = if let level {
             entries.filter { $0.value.level.rawValue == level }
@@ -1958,18 +2232,14 @@ struct AppReducer {
 
     func handleWebInspect(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         sendTo: String?,
         submit: Bool,
         disarm: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
 
         // Explicit disarm path: no arming, just clear server-side
         // state and the in-page picker.
@@ -2008,8 +2278,8 @@ struct AppReducer {
         let sendToPaneID: UUID?
         if let sendTo {
             switch resolvePaneTarget(
-                state: state, paneID: paneID, target: sendTo,
-                workspaceFilter: workspaceFilter
+                state: state, paneID: scope.paneID, target: sendTo,
+                workspaceFilter: scope.workspaceFilter
             ) {
             case .found(let resolvedID, let workspace):
                 guard let destPane = workspace.panes[id: resolvedID] else {
@@ -2072,16 +2342,12 @@ struct AppReducer {
 
     func handleWebInspectResult(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         clear: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         // Drain *both* sources: the legacy single-shot queue
         // (`inspectResultQueue`, written by `nex web inspect`
         // without `--send-to`) and the batch panel items (the
@@ -2125,16 +2391,12 @@ struct AppReducer {
 
     func handleWebPrivate(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         enabled: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let already = resolved.webState.isPrivate == enabled
         reply?.sendAndClose([
             "ok": true,
@@ -2149,15 +2411,11 @@ struct AppReducer {
 
     func handleWebCookiesList(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let store = webPaneStore
         let resolvedPaneID = resolved.paneID
         let workspaceID = resolved.workspace.id
@@ -2187,9 +2445,7 @@ struct AppReducer {
 
     func handleWebCookiesClear(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         domain: String?,
         all: Bool,
         reply: SocketServer.ReplyHandle?
@@ -2198,10 +2454,8 @@ struct AppReducer {
             reply?.error("--all and --domain are mutually exclusive")
             return .none
         }
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let store = webPaneStore
         let resolvedPaneID = resolved.paneID
         let workspaceID = resolved.workspace.id
@@ -2252,17 +2506,13 @@ struct AppReducer {
 
     func handleWebCookiesDelete(
         state: State,
-        paneID: UUID?,
-        target: String?,
-        workspaceFilter: String?,
+        scope: WebPaneScope,
         name: String,
         domain: String?,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let resolved = resolveWebPane(
-            state: state, paneID: paneID, target: target,
-            workspaceFilter: workspaceFilter, reply: reply
-        ) else { return .none }
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
         let store = webPaneStore
         let resolvedPaneID = resolved.paneID
         let workspaceID = resolved.workspace.id
@@ -4566,18 +4816,14 @@ struct AppReducer {
                 case .webURL(let paneID, let target, let workspaceFilter):
                     return handleWebURL(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         reply: reply
                     )
 
                 case .webBack(let paneID, let target, let workspaceFilter):
                     return handleWebNav(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         action: .back,
                         reply: reply
                     )
@@ -4585,9 +4831,7 @@ struct AppReducer {
                 case .webForward(let paneID, let target, let workspaceFilter):
                     return handleWebNav(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         action: .forward,
                         reply: reply
                     )
@@ -4595,9 +4839,7 @@ struct AppReducer {
                 case .webReload(let paneID, let target, let workspaceFilter, let hard):
                     return handleWebNav(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         action: hard ? .reloadHard : .reload,
                         reply: reply
                     )
@@ -4605,9 +4847,7 @@ struct AppReducer {
                 case .webCapture(let paneID, let target, let workspaceFilter, let mode):
                     return handleWebCapture(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         mode: mode,
                         reply: reply
                     )
@@ -4615,18 +4855,14 @@ struct AppReducer {
                 case .webTabs(let paneID, let target, let workspaceFilter):
                     return handleWebTabs(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         reply: reply
                     )
 
                 case .webTabNew(let paneID, let target, let workspaceFilter, let url, let makeActive):
                     return handleWebTabNew(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         url: url,
                         makeActive: makeActive,
                         reply: reply
@@ -4635,9 +4871,7 @@ struct AppReducer {
                 case .webTabClose(let paneID, let target, let workspaceFilter, let tabRef):
                     return handleWebTabClose(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         tabRef: tabRef,
                         reply: reply
                     )
@@ -4645,9 +4879,7 @@ struct AppReducer {
                 case .webTabSelect(let paneID, let target, let workspaceFilter, let tabRef):
                     return handleWebTabSelect(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         tabRef: tabRef,
                         reply: reply
                     )
@@ -4655,9 +4887,7 @@ struct AppReducer {
                 case .webConsole(let paneID, let target, let workspaceFilter, let since, let level, let clear):
                     return handleWebConsole(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         since: since,
                         level: level,
                         clear: clear,
@@ -4667,9 +4897,7 @@ struct AppReducer {
                 case .webInspect(let paneID, let target, let workspaceFilter, let sendTo, let submit, let disarm):
                     return handleWebInspect(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         sendTo: sendTo,
                         submit: submit,
                         disarm: disarm,
@@ -4679,9 +4907,7 @@ struct AppReducer {
                 case .webInspectResult(let paneID, let target, let workspaceFilter, let clear):
                     return handleWebInspectResult(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         clear: clear,
                         reply: reply
                     )
@@ -4689,9 +4915,7 @@ struct AppReducer {
                 case .webPrivate(let paneID, let target, let workspaceFilter, let enabled):
                     return handleWebPrivate(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         enabled: enabled,
                         reply: reply
                     )
@@ -4699,18 +4923,14 @@ struct AppReducer {
                 case .webCookiesList(let paneID, let target, let workspaceFilter):
                     return handleWebCookiesList(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         reply: reply
                     )
 
                 case .webCookiesClear(let paneID, let target, let workspaceFilter, let domain, let all):
                     return handleWebCookiesClear(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         domain: domain,
                         all: all,
                         reply: reply
@@ -4719,11 +4939,130 @@ struct AppReducer {
                 case .webCookiesDelete(let paneID, let target, let workspaceFilter, let name, let domain):
                     return handleWebCookiesDelete(
                         state: state,
-                        paneID: paneID,
-                        target: target,
-                        workspaceFilter: workspaceFilter,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         name: name,
                         domain: domain,
+                        reply: reply
+                    )
+
+                case .webClick(let paneID, let target, let workspaceFilter, let selector, let double, let right, let atX, let atY):
+                    return handleWebClick(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        double: double,
+                        right: right,
+                        atX: atX,
+                        atY: atY,
+                        reply: reply
+                    )
+
+                case .webType(let paneID, let target, let workspaceFilter, let selector, let text, let submit, let replace):
+                    return handleWebType(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        text: text,
+                        submit: submit,
+                        replace: replace,
+                        reply: reply
+                    )
+
+                case .webQText(let paneID, let target, let workspaceFilter, let selector, let maxBytes):
+                    return handleWebQText(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        maxBytes: maxBytes,
+                        reply: reply
+                    )
+
+                case .webQAttr(let paneID, let target, let workspaceFilter, let selector, let attribute):
+                    return handleWebQAttr(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        attribute: attribute,
+                        reply: reply
+                    )
+
+                case .webQCount(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebQCount(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webQExists(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebQExists(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webQDom(let paneID, let target, let workspaceFilter, let selector, let maxBytes):
+                    return handleWebQDom(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        maxBytes: maxBytes,
+                        reply: reply
+                    )
+
+                case .webWait(let paneID, let target, let workspaceFilter, let selector, let urlMatch, let forCondition, let timeoutMs):
+                    return handleWebWait(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        urlMatch: urlMatch,
+                        forCondition: forCondition,
+                        timeoutMs: timeoutMs,
+                        reply: reply
+                    )
+
+                case .webSelect(let paneID, let target, let workspaceFilter, let selector, let valueOrLabel):
+                    return handleWebSelect(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        valueOrLabel: valueOrLabel,
+                        reply: reply
+                    )
+
+                case .webScroll(let paneID, let target, let workspaceFilter, let selector, let block, let behavior):
+                    return handleWebScroll(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        block: block,
+                        behavior: behavior,
+                        reply: reply
+                    )
+
+                case .webHover(let paneID, let target, let workspaceFilter, let selector):
+                    return handleWebHover(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webKey(let paneID, let target, let workspaceFilter, let keyName, let selector):
+                    return handleWebKey(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        keyName: keyName,
+                        selector: selector,
+                        reply: reply
+                    )
+
+                case .webExec(let paneID, let target, let workspaceFilter, let script):
+                    return handleWebExec(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        script: script,
                         reply: reply
                     )
                 }

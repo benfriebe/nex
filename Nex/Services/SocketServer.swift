@@ -166,6 +166,107 @@ enum SocketMessage: Equatable {
         paneID: UUID?, target: String?, workspace: String?,
         name: String, domain: String?
     )
+
+    // Actuator commands (Phase B) — semantic verbs over the in-page
+    // `window.__nexAct` namespace.
+
+    /// `nex web click <selector> [--double] [--right] [--at x,y]` —
+    /// synthesise a pointer+mouse click sequence on the first element
+    /// matching `selector`.
+    case webClick(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, double: Bool, right: Bool, atX: Double?, atY: Double?
+    )
+    /// `nex web type <selector> <text> [--submit] [--no-replace]` —
+    /// set the value of a typable element via the prototype native
+    /// setter and dispatch input + change events. Optional Enter
+    /// keystroke + form.requestSubmit when `submit` is true.
+    case webType(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, text: String, submit: Bool, replace: Bool
+    )
+
+    // Actuator read verbs (Phase C). Wire keys are prefixed `web-q-`
+    // (q for query) so future allowlist tuning + audit grep can
+    // distinguish reads from actions at a glance.
+
+    /// `nex web text <selector> [--max-bytes N]`.
+    case webQText(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, maxBytes: Int?
+    )
+    /// `nex web attr <selector> <attribute>`.
+    case webQAttr(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, attribute: String
+    )
+    /// `nex web count <selector>` — number of smallest-enclosing
+    /// matches.
+    case webQCount(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web exists <selector>` — boolean. CLI exits 0/1 from the
+    /// `found` field rather than the `ok` flag.
+    case webQExists(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web dom <selector> [--max-bytes N]` — outerHTML.
+    case webQDom(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, maxBytes: Int?
+    )
+
+    /// `nex web wait` — server-side polling (Phase D). Exactly one of
+    /// `selector` / `urlMatch` is required at the server; the CLI
+    /// enforces this client-side, so a wire payload with neither
+    /// reaches the JS-side validator and surfaces a structured error.
+    ///
+    /// `forCondition` is the literal `--for` token (`visible`,
+    /// `hidden`, `exists`, `count=N`, `text=X`, `url-match`); the JS
+    /// side parses the `count=N`/`text=X` suffix.
+    case webWait(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String?, urlMatch: String?,
+        forCondition: String?, timeoutMs: Int
+    )
+
+    // Actuator long-tail verbs (Phase E).
+
+    /// `nex web select <selector> <value-or-label>` — set the value
+    /// of a `<select>` element. Matches options by `value` first,
+    /// then by visible label.
+    case webSelect(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, valueOrLabel: String
+    )
+    /// `nex web scroll <selector> [--top|--bottom|--smooth]` —
+    /// `block` is one of `start`/`center`/`end`; `behavior` is
+    /// `instant` or `smooth`. CLI flags map to these directly.
+    case webScroll(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String, block: String, behavior: String
+    )
+    /// `nex web hover <selector>` — synthetic hover.
+    case webHover(
+        paneID: UUID?, target: String?, workspace: String?,
+        selector: String
+    )
+    /// `nex web key <key-name> [--selector <sel>]` — dispatch a
+    /// named keystroke to `selector` (or `document.activeElement`
+    /// when `selector` is nil).
+    case webKey(
+        paneID: UUID?, target: String?, workspace: String?,
+        keyName: String, selector: String?
+    )
+
+    /// `nex web exec` — author JS evaluated inside an async IIFE with
+    /// `$`/`$$`/`nex` aliases bound to the actuator.
+    case webExec(
+        paneID: UUID?, target: String?, workspace: String?,
+        script: String
+    )
 }
 
 /// Commands that expect a single-line JSON reply followed by EOF. For any
@@ -179,7 +280,12 @@ private let replyCommandAllowlist: Set<String> = [
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
     "web-console", "web-inspect", "web-inspect-result",
-    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete"
+    "web-private", "web-cookies-list", "web-cookies-clear", "web-cookies-delete",
+    "web-click", "web-type",
+    "web-q-text", "web-q-attr", "web-q-count", "web-q-exists", "web-q-dom",
+    "web-wait",
+    "web-select", "web-scroll", "web-hover", "web-key",
+    "web-exec"
 ]
 
 /// Unix domain socket server that listens for structured JSON messages
@@ -626,6 +732,41 @@ final class SocketServer: Sendable {
         /// `web-cookies-clear --all` extends deletion to caches +
         /// local storage + indexed db.
         var all: Bool?
+        /// `web-click` / `web-type` — actuator selector string. Raw
+        /// (`css:`/`text:`/`role:`/auto-detect); the JS side parses.
+        var selector: String?
+        /// `web-click --double`.
+        var double: Bool?
+        /// `web-click --right`.
+        var right: Bool?
+        /// `web-click --at x,y` — element-local offsets. Both must be
+        /// present to apply; otherwise the centre of the bounding box
+        /// is used.
+        var atX: Double?
+        var atY: Double?
+        /// `web-type --no-replace` → false. When omitted the typed
+        /// text replaces existing content (matches Playwright `fill`).
+        var replace: Bool?
+        /// `web-q-text` / `web-q-dom` — byte-budget cap. nil = JS default.
+        var maxBytes: Int?
+        /// `web-q-attr` — attribute name to read.
+        var attribute: String?
+        /// `web-wait` — match condition. Literal value of the `--for`
+        /// flag (visible, hidden, exists, count=N, text=X, url-match).
+        /// JS-side parses count=/text= suffixes.
+        var forCondition: String?
+        /// `web-wait --url-match` — substring or /regex/flags.
+        var urlMatch: String?
+        /// `web-wait --timeout` (milliseconds). 0 / nil → JS default 10000.
+        var timeoutMs: Int?
+        /// `web-select` — option value or visible label.
+        var valueOrLabel: String?
+        /// `web-scroll` — scrollIntoView block: start|center|end.
+        var block: String?
+        /// `web-scroll` — scrollIntoView behavior: instant|smooth.
+        var behavior: String?
+        /// `web-exec` — author-supplied JS body.
+        var script: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -649,6 +790,18 @@ final class SocketServer: Sendable {
             case submit, disarm
             case isPrivate = "private"
             case domain, all
+            case selector, double, right
+            case atX = "at_x"
+            case atY = "at_y"
+            case replace
+            case maxBytes = "max_bytes"
+            case attribute
+            case forCondition = "for"
+            case urlMatch = "url_match"
+            case timeoutMs = "timeout_ms"
+            case valueOrLabel = "value_or_label"
+            case block, behavior
+            case script
         }
     }
 
@@ -924,6 +1077,187 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 name: name,
                 domain: (wire.domain?.isEmpty == true) ? nil : wire.domain
+            ), wire)
+        }
+
+        if wire.command == "web-click" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webClick(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                double: wire.double ?? false,
+                right: wire.right ?? false,
+                atX: wire.atX,
+                atY: wire.atY
+            ), wire)
+        }
+
+        if wire.command == "web-type" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let text = wire.text else { return nil }
+            return (.webType(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                text: text,
+                submit: wire.submit ?? false,
+                replace: wire.replace ?? true
+            ), wire)
+        }
+
+        if wire.command == "web-q-text" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQText(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                maxBytes: wire.maxBytes
+            ), wire)
+        }
+
+        if wire.command == "web-q-attr" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let attribute = wire.attribute, !attribute.isEmpty else { return nil }
+            return (.webQAttr(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                attribute: attribute
+            ), wire)
+        }
+
+        if wire.command == "web-q-count" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQCount(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-q-exists" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQExists(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-q-dom" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webQDom(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                maxBytes: wire.maxBytes
+            ), wire)
+        }
+
+        if wire.command == "web-select" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty,
+                  let valueOrLabel = wire.valueOrLabel else { return nil }
+            return (.webSelect(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                valueOrLabel: valueOrLabel
+            ), wire)
+        }
+
+        if wire.command == "web-scroll" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            let block = wire.block.flatMap { $0.isEmpty ? nil : $0 } ?? "center"
+            let behavior = wire.behavior.flatMap { $0.isEmpty ? nil : $0 } ?? "instant"
+            return (.webScroll(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                block: block,
+                behavior: behavior
+            ), wire)
+        }
+
+        if wire.command == "web-hover" {
+            guard let scope = parseWebTarget(wire),
+                  let selector = wire.selector, !selector.isEmpty else { return nil }
+            return (.webHover(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-key" {
+            guard let scope = parseWebTarget(wire),
+                  let keyName = wire.key, !keyName.isEmpty else { return nil }
+            let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
+            return (.webKey(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                keyName: keyName,
+                selector: selector
+            ), wire)
+        }
+
+        if wire.command == "web-exec" {
+            guard let scope = parseWebTarget(wire),
+                  let script = wire.script, !script.isEmpty else { return nil }
+            return (.webExec(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                script: script
+            ), wire)
+        }
+
+        if wire.command == "web-wait" {
+            guard let scope = parseWebTarget(wire) else { return nil }
+            let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
+            let urlMatch = (wire.urlMatch?.isEmpty == true) ? nil : wire.urlMatch
+            // Exactly one of selector / urlMatch must be present. The
+            // CLI catches both-missing and both-present before sending,
+            // but the wire validates too so misuse from other clients
+            // surfaces as a clean rejection — otherwise both-present
+            // would silently pick whichever the JS default rule lands
+            // on, ignoring the other field.
+            switch (selector, urlMatch) {
+            case (nil, nil), (.some, .some): return nil
+            default: break
+            }
+            let forCondition = (wire.forCondition?.isEmpty == true)
+                ? nil : wire.forCondition
+            // 0/nil flows through; the JS `wait` body owns the default.
+            let timeoutMs = wire.timeoutMs ?? 0
+            return (.webWait(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                selector: selector,
+                urlMatch: urlMatch,
+                forCondition: forCondition,
+                timeoutMs: timeoutMs
             ), wire)
         }
 

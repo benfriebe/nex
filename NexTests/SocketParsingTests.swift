@@ -1086,4 +1086,369 @@ struct SocketParsingTests {
         """)
         #expect(SocketServer.parseWireMessage(data) == nil)
     }
+
+    // MARK: - Phase B — actuator verbs (click / type)
+
+    @Test func parseWebClickMinimal() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)","selector":"text:Add to order"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webClick(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Add to order",
+            double: false, right: false, atX: nil, atY: nil
+        ))
+    }
+
+    @Test func parseWebClickWithAllFlags() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)","selector":"css:.btn","double":true,"right":true,"at_x":10.5,"at_y":20}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webClick(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:.btn",
+            double: true, right: true, atX: 10.5, atY: 20
+        ))
+    }
+
+    @Test func parseWebClickRequiresSelector() {
+        let data = jsonData("""
+        {"command":"web-click","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebClickRequiresScope() {
+        // Neither pane_id nor target -> no scope, parser rejects.
+        let data = jsonData("""
+        {"command":"web-click","selector":"text:Go"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebTypeMinimal() {
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input","text":"hello"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:input", text: "hello",
+            submit: false, replace: true
+        ))
+    }
+
+    @Test func parseWebTypeAcceptsEmptyText() {
+        // text="" is meaningful: clears the field when combined with the
+        // default replace=true. Parser must not reject it.
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input","text":""}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:input", text: "",
+            submit: false, replace: true
+        ))
+    }
+
+    @Test func parseWebTypeWithSubmitAndNoReplace() {
+        let data = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"text:Search","text":"q","submit":true,"replace":false}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webType(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Search", text: "q",
+            submit: true, replace: false
+        ))
+    }
+
+    @Test func parseWebTypeRequiresSelectorAndText() {
+        let missingSelector = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","text":"x"}
+        """)
+        #expect(SocketServer.parseWireMessage(missingSelector) == nil)
+
+        let missingText = jsonData("""
+        {"command":"web-type","pane_id":"\(Self.paneIDString)","selector":"css:input"}
+        """)
+        #expect(SocketServer.parseWireMessage(missingText) == nil)
+    }
+
+    // MARK: - Phase C — read verbs (web-q-*)
+
+    @Test func parseWebQText() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)","selector":"css:#p"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQText(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#p", maxBytes: nil
+        ))
+    }
+
+    @Test func parseWebQTextWithMaxBytes() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)","selector":"css:#p","max_bytes":1024}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQText(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#p", maxBytes: 1024
+        ))
+    }
+
+    @Test func parseWebQTextRequiresSelector() {
+        let data = jsonData("""
+        {"command":"web-q-text","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebQAttr() {
+        let data = jsonData("""
+        {"command":"web-q-attr","pane_id":"\(Self.paneIDString)","selector":"css:a","attribute":"href"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQAttr(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:a", attribute: "href"
+        ))
+    }
+
+    @Test func parseWebQAttrRequiresAttribute() {
+        let data = jsonData("""
+        {"command":"web-q-attr","pane_id":"\(Self.paneIDString)","selector":"css:a"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebQCount() {
+        let data = jsonData("""
+        {"command":"web-q-count","pane_id":"\(Self.paneIDString)","selector":"css:li"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQCount(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:li"
+        ))
+    }
+
+    @Test func parseWebQExists() {
+        let data = jsonData("""
+        {"command":"web-q-exists","pane_id":"\(Self.paneIDString)","selector":"text:Loaded"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQExists(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Loaded"
+        ))
+    }
+
+    @Test func parseWebQDom() {
+        let data = jsonData("""
+        {"command":"web-q-dom","pane_id":"\(Self.paneIDString)","selector":"css:#a","max_bytes":4096}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webQDom(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#a", maxBytes: 4096
+        ))
+    }
+
+    // MARK: - Phase D — wait (web-wait)
+
+    @Test func parseWebWaitSelectorOnly() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"text:Loaded","timeout_ms":5000}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:Loaded", urlMatch: nil,
+            forCondition: nil, timeoutMs: 5000
+        ))
+    }
+
+    @Test func parseWebWaitUrlMatchOnly() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","url_match":"/checkout"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        // Missing timeout_ms → 0 flows through; the JS `wait` body
+        // substitutes its 10000ms default.
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: nil, urlMatch: "/checkout",
+            forCondition: nil, timeoutMs: 0
+        ))
+    }
+
+    @Test func parseWebWaitWithForCondition() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"css:.spinner","for":"hidden","timeout_ms":3000}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webWait(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:.spinner", urlMatch: nil,
+            forCondition: "hidden", timeoutMs: 3000
+        ))
+    }
+
+    @Test func parseWebWaitRequiresSelectorOrUrlMatch() {
+        // Neither field present → reject. (Different from a JS-side
+        // validation error; this is the wire-layer guard so other
+        // clients can't ship a bare wait and stall the actuator.)
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","timeout_ms":1000}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebWaitEmptyStringsTreatedAsAbsent() {
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"","url_match":""}
+        """)
+        // Both empty → both absent → reject.
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebWaitRejectsBothSelectorAndUrlMatch() {
+        // Both fields populated → reject at the wire. The JS-side
+        // default rule would silently prefer one and ignore the other,
+        // which is confusing for direct socket clients.
+        let data = jsonData("""
+        {"command":"web-wait","pane_id":"\(Self.paneIDString)","selector":"css:#a","url_match":"/x"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    // MARK: - Phase E — select / scroll / hover / key
+
+    @Test func parseWebSelect() {
+        let data = jsonData("""
+        {"command":"web-select","pane_id":"\(Self.paneIDString)","selector":"css:#s","value_or_label":"Large"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webSelect(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#s", valueOrLabel: "Large"
+        ))
+    }
+
+    @Test func parseWebSelectRequiresValueOrLabel() {
+        let data = jsonData("""
+        {"command":"web-select","pane_id":"\(Self.paneIDString)","selector":"css:#s"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebScrollDefaults() {
+        let data = jsonData("""
+        {"command":"web-scroll","pane_id":"\(Self.paneIDString)","selector":"css:#footer"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        // Missing block / behavior default to center / instant so the
+        // JS side never receives empty strings (invalid scrollIntoView
+        // options would otherwise silently fall back to "auto").
+        #expect(result?.0 == .webScroll(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#footer", block: "center", behavior: "instant"
+        ))
+    }
+
+    @Test func parseWebScrollWithBlockAndSmooth() {
+        let data = jsonData("""
+        {"command":"web-scroll","pane_id":"\(Self.paneIDString)","selector":"css:#hero","block":"end","behavior":"smooth"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webScroll(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "css:#hero", block: "end", behavior: "smooth"
+        ))
+    }
+
+    @Test func parseWebHover() {
+        let data = jsonData("""
+        {"command":"web-hover","pane_id":"\(Self.paneIDString)","selector":"text:More"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webHover(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            selector: "text:More"
+        ))
+    }
+
+    @Test func parseWebKeyBare() {
+        // No --selector → keystroke goes to document.activeElement.
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)","key":"Escape"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webKey(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            keyName: "Escape", selector: nil
+        ))
+    }
+
+    @Test func parseWebKeyWithSelector() {
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)","key":"ArrowDown","selector":"css:#search"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webKey(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            keyName: "ArrowDown", selector: "css:#search"
+        ))
+    }
+
+    @Test func parseWebKeyRequiresName() {
+        let data = jsonData("""
+        {"command":"web-key","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    // MARK: - Phase F — web-exec
+
+    @Test func parseWebExec() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)","script":"document.title"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webExec(
+            paneID: Self.paneUUID, target: nil, workspace: nil,
+            script: "document.title"
+        ))
+    }
+
+    @Test func parseWebExecRequiresScript() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebExecRejectsEmptyScript() {
+        let data = jsonData("""
+        {"command":"web-exec","pane_id":"\(Self.paneIDString)","script":""}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebExecWithTargetAndWorkspace() {
+        let data = jsonData("""
+        {"command":"web-exec","target":"web","workspace":"Dev","script":"return 1"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webExec(
+            paneID: nil, target: "web", workspace: "Dev",
+            script: "return 1"
+        ))
+    }
 }

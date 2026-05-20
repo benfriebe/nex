@@ -189,10 +189,22 @@ nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow
 ### Web Pane Commands
 
 A `web` pane is a full in-pane browser with URL bar, multi-tab
-strip, console capture, an element picker that pastes structured
-payloads into a chosen pane, private mode, and a cookies editor.
-The CLI surface is the orchestration angle: an agent in pane A can
-drive or observe a web app in pane B.
+strip, console capture, an element picker, private mode, and a
+cookies editor. The CLI surface is the orchestration angle: an
+agent in pane A can drive or observe a web app in pane B with
+semantic verbs over the same DOM that the picker sees.
+
+The agent-driving surface splits into four layers. Reach for the
+lowest layer that solves your problem; `exec` is the escape hatch.
+
+| Layer | Verbs | Use when |
+|---|---|---|
+| **Action** | `click`, `type`, `select`, `scroll`, `hover`, `key` | mutate the page |
+| **Query** | `text`, `attr`, `count`, `exists`, `dom` | read state |
+| **Wait** | `wait` | block until DOM / URL transition fires |
+| **Exec** | `exec` | compose actuator calls + custom logic in one call |
+
+#### Infrastructure (pane + tabs + capture + cookies)
 
 ```bash
 # Create a new web pane in the active workspace
@@ -224,12 +236,9 @@ nex web console --target <name-or-uuid> [--since N] [--level error|warn|info|log
 # Default is paste-only — pass --submit if the receiving pane should
 # auto-execute (rarely what you want for an agent prompt).
 nex web inspect --target <name-or-uuid> [--send-to <pane>] [--submit] [--disarm]
-
-# Drain the per-pane inspect-result queue without arming
 nex web inspect-result --target <name-or-uuid> [--clear] [--json]
 
-# Toggle private mode (rebuilds the coordinator with a nonPersistent
-# data store; live JS state is lost on transition)
+# Toggle private mode (rebuilds the coordinator; live JS state lost)
 nex web private on|off --target <name-or-uuid>
 
 # Cookies (per-pane data store)
@@ -238,6 +247,152 @@ nex web cookies clear  --target <name-or-uuid> [--domain X] [--all]
 nex web cookies delete <name> --target <name-or-uuid> [--domain X]
 ```
 
+#### Action verbs
+
+```bash
+nex web click  --target <X> <selector> [--double] [--right] [--at x,y] [--json]
+nex web type   --target <X> <selector> <text> [--submit] [--no-replace] [--json]
+nex web select --target <X> <selector> <value-or-label> [--json]
+nex web scroll --target <X> <selector> [--top|--bottom|--smooth] [--json]
+nex web hover  --target <X> <selector> [--json]
+nex web key    --target <X> <key-name> [--selector <sel>] [--json]
+```
+
+- `click` always synthesises a full pointerdown → mousedown →
+  pointerup → mouseup envelope (with real centre coords) so
+  libraries that listen for pointer / mouse events (react-dnd,
+  framer-motion, custom dropdowns) fire. `--at x,y` overrides the
+  centre offset and routes the final click through a synthesised
+  `MouseEvent('click')` so listeners read the coords; without
+  `--at` the final click goes through `target.click()` (form /
+  anchor / disabled semantics intact, but `clientX/Y = 0` on the
+  click event itself).
+- `type` uses the prototype native setter so React / Vue / Svelte
+  controlled inputs accept the write, then dispatches `input` +
+  `change`. `--submit` fires Enter and `form.requestSubmit()`.
+  `--no-replace` appends instead of overwriting.
+- `select` matches `<option>`s by `value` first, then by visible
+  label.
+- `key` accepts `enter`, `return`, `tab`, `escape`/`esc`, `space`,
+  `backspace`, `delete`, `up`/`down`/`left`/`right` (also
+  `arrowup` etc.), `home`, `end`, `pageup`, `pagedown`. Without
+  `--selector` the keystroke goes to `document.activeElement`.
+
+#### Query verbs
+
+```bash
+nex web text   --target <X> <selector> [--max-bytes N] [--json]
+nex web attr   --target <X> <selector> <attribute> [--json]
+nex web count  --target <X> <selector> [--json]
+nex web exists --target <X> <selector>                 # exit 0 = yes, 1 = no
+nex web dom    --target <X> <selector> [--max-bytes N] [--json]
+```
+
+- `text` clips at 1MB by default and reports `truncated` in the
+  envelope; `dom` at 16KB; `attr` at 64KB.
+- `attr` distinguishes attribute absent (exit 1, no output) from
+  attribute present with empty value (exit 0, empty stdout) via a
+  `present` field in `--json` mode.
+- `exists` is the cheap one-shot "is it there?" check — exit code
+  is the signal, no stdout. For polling, prefer `wait`.
+
+#### Wait
+
+```bash
+nex web wait --target <X>
+    (--selector <sel> | --url-match <substring-or-regex>)
+    [--for visible|hidden|exists|count=N|text=X]
+    [--timeout 10]
+    [--json]
+```
+
+One socket roundtrip blocks until the condition is met or the
+timeout fires. Polls inside the page at 100ms — replaces shell
+`until ...; do sleep 1; done` loops at significantly lower
+overhead (a single 100ms tick past the event vs. the next 1s
+sleep boundary).
+
+Conditions:
+
+| `--for` | Meaning |
+|---|---|
+| `exists` (default with `--selector`) | selector resolves to a non-null element |
+| `visible` | element `isConnected` AND `getClientRects().length !== 0` AND `getComputedStyle().visibility !== 'hidden'` (catches `display:none` via the no-rects path; correctly classifies `position:fixed` overlays as visible) |
+| `hidden` | element absent OR not visible (above) |
+| `count=N` | `findAll(selector).length === N` |
+| `text=X` | element matches AND its trimmed `textContent` equals `X` (or matches `/regex/flags`) |
+| `url-match` (default with `--url-match`) | `location.href` matches the substring or regex |
+
+Exit 0 on match (prints `matched <condition> in <N> ms`); exit 1
+on timeout (`nex web wait: timeout` to stderr; `waited_ms` is in
+the `--json` envelope).
+
+#### Selector forms
+
+A single string carries the selector. Four forms, one CLI flag:
+
+| Form | Example | Behaviour |
+|---|---|---|
+| `css:<sel>` | `css:button.primary` | `document.querySelector(sel)` |
+| `text:<exact>` | `text:Add to order` | smallest element whose trimmed `textContent` equals `<exact>` |
+| `text:/<pattern>/<flags>` | `text:/^Add to (cart\|order)$/i` | same, regex matching |
+| `role:<role>[:name=<name>]` | `role:button:name=Confirm` | first element with the ARIA role (explicit or implicit) and matching accessible name |
+| _bare_ | `.foo`, `#bar`, `[data-x]`, `Add to order` | auto: CSS if starts with `. # [ > * :`, otherwise `text:` |
+
+Text matching uses the smallest-enclosing-element rule (Playwright-
+style): `text:Submit` on a page with `<button>Submit</button>`
+resolves to the button, not `<html>` or `<body>`. Skips `<script>`,
+`<style>`, and `<template>` subtrees.
+
+#### Advanced: `web exec` for composition
+
+When you need to compose several actuator calls plus custom JS
+logic in one CLI invocation, reach for `exec`:
+
+```bash
+nex web exec --target <X> (--file <path> | <js>) [--timeout 30] [--json]
+```
+
+The author script runs inside an async wrapper with three aliases
+bound:
+
+| Alias | Resolves to |
+|---|---|
+| `$` | `__nexAct.find` (single element by selector) |
+| `$$` | `__nexAct.findAll` |
+| `nex` | the full `__nexAct` namespace (`nex.click`, `nex.type`, `nex.wait`, ...) |
+
+A single trailing expression returns its value implicitly. Source
+containing `return` / `throw` / `if` / `for` / `while` / `switch`
+/ `try` / `do` / `let` / `const` / `var` switches to statement-
+body mode where the author owns the explicit `return`.
+
+```bash
+# Trivial one-liner
+nex web exec --target X 'document.title'
+
+# Reach into framework state
+nex web exec --target X 'window.__REDUX__.getState().cart.items.length'
+
+# jQuery-style across the page
+nex web exec --target X '$$("li.product").map(e => e.dataset.sku)'
+
+# Compose actuator calls in one socket roundtrip
+nex web exec --target X '
+  await nex.wait({selector: "text:Add to order", for: "visible"});
+  await nex.click("text:Add to order");
+  await nex.wait({selector: "[role=alert]", for: "exists"});
+  return nex.text("[role=alert]").text;
+'
+```
+
+Reply envelope matches every other actuator verb: `{ok:true,
+result:<json>}` on success; `{ok:false, error:<message>,
+js_error:{name, message, line, column}}` on a page-side exception.
+`--timeout` extends the CLI's socket read budget (default 30s) so
+exec scripts with embedded `nex.wait(...)` calls don't get cut
+off; the JS-side `wait` timeout is independent.
+
 All `web` verbs follow the same `--target` / `--workspace`
 scoping as `pane send` (issue #92): label targets need an origin
 pane or `--workspace`; UUID targets resolve globally. All are
@@ -245,10 +400,12 @@ reply-allowlisted — they return JSON and the CLI exits non-zero on
 failure.
 
 **Known limitation.** `WKUserContentController` user-script injection
-is unreliable on `data:` URLs (opaque origin). Console capture +
-element picker rely on injected scripts, so reach for a real
-`http(s)://` URL when validating those paths. Smoke tests can still
-use `data:` URLs for navigation / capture --mode text / tabs.
+is unreliable on `data:` URLs (opaque origin). Console capture, the
+element picker, and the actuator (`__nexAct.*`, hence every action /
+query / wait / exec verb) rely on injected scripts, so reach for a
+real `http(s)://` or `file://` URL when validating those paths.
+Smoke tests can still use `data:` URLs for navigation, `capture
+--mode text`, and tab management.
 
 ### Key Behaviors
 
@@ -420,14 +577,42 @@ nex pane send --target coder "You are a coder. Write code for the task in .nex-t
 ### Pattern 4: Agent driving / observing a web app via web pane
 
 The web pane closes the loop where an agent in one pane drives or
-observes a web app in another. Common shapes:
+observes a web app in another. The action / query / wait verbs
+cover the common case; reach for `web exec` only when composing
+them with custom logic. Common shapes:
 
-**(a) Capture-then-fix loop** — agent runs the app in a web pane,
+**(a) Drive a flow with semantic verbs.** No JS authoring needed
+— the verbs cover the typical "find element, act on it, wait for
+the response, read the result" loop. Example: add an item to a
+restaurant cart from a fresh session.
+
+```bash
+# Open the menu in a private pane so the agent's exploration doesn't
+# pollute the user's real cart.
+nex web open --private https://example-restaurant.test
+WEB=<the-printed-uuid>
+
+# Wait for the menu to render, dismiss the table modal.
+nex web wait  --target $WEB --selector "text:Choose your table" --for visible
+nex web type  --target $WEB "css:input[type=text]" "5"
+nex web click --target $WEB "text:Confirm"
+
+# Wait for the first menu item to be tappable, then add it.
+nex web wait  --target $WEB --selector "text:Margherita" --for visible
+nex web click --target $WEB "text:Margherita"
+nex web wait  --target $WEB --selector "text:Add to order" --for visible
+nex web click --target $WEB "text:Add to order"
+
+# Verify the toast.
+nex web wait --target $WEB --selector "[role=alert]" --for exists
+nex web text --target $WEB "[role=alert]"
+# → "Margherita added to your order"
+```
+
+**(b) Capture-then-fix loop** — agent runs the app in a web pane,
 polls its console for errors, fixes the code, reloads, repeats.
 
 ```bash
-# Coordinator opens the dev server's URL in a web pane and an agent
-# pane that watches it.
 nex web open http://localhost:3000              # → prints `open ok: <web-uuid>`
 nex pane create --name dev-agent
 sleep 2
@@ -436,30 +621,52 @@ nex pane send --target dev-agent claude --permission-mode acceptEdits
 # Agent prompt (typed into dev-agent):
 #   "Watch the console buffer of web pane <web-uuid>. Every 10s run
 #    `nex web console --target <web-uuid> --json --since $cursor`
-#    (track the cursor between polls). When you see a JS error,
-#    open the relevant source file and propose a fix. Reload the web
-#    pane after each edit via `nex web reload --target <web-uuid>`."
+#    (track the cursor between polls). When you see a JS error, open
+#    the relevant source file and propose a fix. After each edit,
+#    `nex web reload --target <web-uuid>` and
+#    `nex web wait --target <web-uuid> --selector '#app' --for visible`
+#    before re-checking the console."
 ```
 
-**(b) Click-to-locate-source** — the human clicks an element on the
-page, an agent gets the selector + outerHTML and finds the code that
-rendered it. The picker is single-shot by default (one click → one
-delivery), or sticky via the chrome's batch-annotate panel.
+**(c) Compose multi-step flows in one call via `web exec`.** Use
+this for branches that depend on intermediate values, framework
+state reads, or anything that would otherwise round-trip through
+the shell three times.
 
 ```bash
-# Arm the picker on the web pane, route the next click into the agent
+nex web exec --target $WEB '
+  // Add each available size to the cart until we hit 3 items.
+  for (const size of ["Small", "Medium", "Large"]) {
+    await nex.click("text:" + size);
+    await nex.wait({selector: "[role=alert]", for: "exists", timeout: 3000});
+    await nex.wait({selector: "[role=alert]", for: "hidden"});
+    const count = $$("li.cart-item").length;
+    if (count >= 3) break;
+  }
+  return $$("li.cart-item").map(e => e.dataset.sku);
+'
+# → ["s-margherita","m-margherita","l-margherita"]
+```
+
+**(d) Click-to-locate-source** — the human clicks an element on
+the page, an agent gets the selector + outerHTML and finds the
+code that rendered it. Still the right tool when the agent doesn't
+know the selector up front and a human is at the keyboard.
+
+```bash
 nex web inspect --target <web-uuid> --send-to dev-agent
 # → next click on the web page pastes a fenced JSON block into
-#   dev-agent's PTY (paste-only; agent reads it as input but does NOT
-#   auto-submit unless --submit was passed)
+#   dev-agent's PTY (paste-only by default; agent reads it as input
+#   but does NOT auto-submit unless --submit was passed)
 ```
 
 The pasted payload includes `selector`, `xpath`, `tag`, `id`,
-`outer_html` (clipped 16KB), `attributes`, `rect`, surrounding `text`,
-`context_html` (clipped 4KB), and `url`. ANSI / C0 control bytes are
-stripped before paste so the agent's prompt can't be smuggled into.
+`outer_html` (clipped 16KB), `attributes`, `rect`, surrounding
+`text`, `context_html` (clipped 4KB), and `url`. ANSI / C0 control
+bytes are stripped before paste so the agent's prompt can't be
+smuggled into.
 
-**(c) Headless visual diff** — capture screenshots before/after a
+**(e) Headless visual diff** — capture screenshots before/after a
 change to gate a deploy.
 
 ```bash
@@ -468,24 +675,21 @@ nex web capture --target <web-uuid> --mode screenshot
 #   PNG in the system temp dir (larger). The CLI prints the path.
 ```
 
-**(d) Sandbox a flaky integration** — open the integration target in a
-private web pane so the agent's exploration doesn't pollute the
-user's real session.
+**(f) Sandbox a flaky integration** — open the integration target
+in a private web pane so the agent's exploration doesn't pollute
+the user's real session.
 
 ```bash
 nex web open --private https://staging.example.com
 # Cookies + caches discarded on quit; tabs blank on restart.
 ```
 
-**Picker behaviour to design around:**
-- Arming is single-shot by default — exactly one click delivers, then
-  the picker disarms. Sticky mode (multiple clicks per arm) is only
-  reachable through the batch-annotate panel in the chrome.
-- Delivery defaults to paste-no-submit — the receiving agent reads
-  the JSON as input but does not execute it. Pass `--submit` only
-  when the receiver is at a prompt that should auto-fire on Enter.
-- The picker auto-disarms on tab switch, tab close, and Escape.
-- Page JS cannot spoof inbound payloads on the inspect channel.
+**Reach order:** lowest layer that works (see the table at the
+top of the Web Pane section); `exec` for composition; `inspect`
+when a human is at the keyboard and the agent doesn't know the
+selector. The picker auto-disarms on tab switch / close / Escape,
+sticky mode is only reachable via the chrome's batch-annotate
+panel, and page JS cannot spoof inbound payloads.
 
 ## Task File Format
 
