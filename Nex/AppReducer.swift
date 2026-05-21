@@ -1559,6 +1559,31 @@ struct AppReducer {
         }
     }
 
+    func handleWebNavigate(
+        state: State,
+        scope: WebPaneScope,
+        url: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
+        else { return .none }
+        guard resolved.webState.activeTab != nil else {
+            reply?.error("web pane has no active tab")
+            return .none
+        }
+        let normalized = WebPaneCoordinator.normalizeURLInput(url)
+        reply?.sendAndClose([
+            "ok": true,
+            "pane_id": resolved.paneID.uuidString,
+            "workspace_id": resolved.workspace.id.uuidString,
+            "url": normalized
+        ])
+        return .send(.workspaces(.element(
+            id: resolved.workspace.id,
+            action: .webPaneNavigate(paneID: resolved.paneID, url: url)
+        )))
+    }
+
     func handleWebURL(
         state: State,
         scope: WebPaneScope,
@@ -4810,6 +4835,14 @@ struct AppReducer {
                         paneID: paneID,
                         url: url,
                         isPrivate: isPrivate,
+                        reply: reply
+                    )
+
+                case .webNavigate(let paneID, let target, let workspaceFilter, let url):
+                    return handleWebNavigate(
+                        state: state,
+                        scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
+                        url: url,
                         reply: reply
                     )
 

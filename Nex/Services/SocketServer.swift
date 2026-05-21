@@ -93,6 +93,10 @@ enum SocketMessage: Equatable {
     /// `NEX_PANE_ID`) is informational; opening always creates a new
     /// pane in the active workspace, mirroring `nex diff`.
     case webOpen(paneID: UUID?, url: String, isPrivate: Bool)
+    /// Navigate the active tab of the resolved web pane to `url`.
+    /// Companion to `webOpen` for the "reuse an existing pane" case;
+    /// for "new tab" callers use `webTabNew` instead.
+    case webNavigate(paneID: UUID?, target: String?, workspace: String?, url: String)
     /// Read the active tab's current URL + title for the resolved pane.
     case webURL(paneID: UUID?, target: String?, workspace: String?)
     case webBack(paneID: UUID?, target: String?, workspace: String?)
@@ -276,7 +280,7 @@ enum SocketMessage: Equatable {
 private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "graft-start", "graft-stop", "graft-status",
-    "web-open", "web-url", "web-back",
+    "web-open", "web-navigate", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
     "web-console", "web-inspect", "web-inspect-result",
@@ -938,6 +942,17 @@ final class SocketServer: Sendable {
             guard let url = wire.url, !url.isEmpty else { return nil }
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
             return (.webOpen(paneID: paneID, url: url, isPrivate: wire.isPrivate ?? false), wire)
+        }
+
+        if wire.command == "web-navigate" {
+            guard let scope = parseWebTarget(wire),
+                  let url = wire.url, !url.isEmpty else { return nil }
+            return (.webNavigate(
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
+                url: url
+            ), wire)
         }
 
         if wire.command == "web-url" {
