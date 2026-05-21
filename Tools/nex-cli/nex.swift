@@ -102,6 +102,7 @@ func printUsage() {
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft status [--json]
       nex web open [--private] <url>
+      nex web navigate <url> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web url|back|forward|reload [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
       nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
       nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -802,8 +803,9 @@ func handlePane(_ args: inout ArraySlice<String>) {
 func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
     fputs("""
     Usage:
-      nex web open [--private] <url>
-      nex web url      [--target <name-or-uuid>] [--workspace <name-or-uuid>]
+      nex web open      [--private] <url>
+      nex web navigate  [--target <name-or-uuid>] [--workspace <name-or-uuid>] <url>
+      nex web url       [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web back     [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web forward  [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web reload   [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
@@ -903,8 +905,18 @@ func handleWeb(_ args: inout ArraySlice<String>) {
     switch action {
     case "open":
         let isPrivate = popSwitch("--private", from: &args)
+        if args.contains("--target") || args.contains("--workspace") {
+            fputs("nex web open: --target / --workspace are not supported (open always creates a new pane).\n", stderr)
+            fputs("       Use `nex web navigate <url> --target X [--workspace Y]` to redirect an existing pane's active tab,\n", stderr)
+            fputs("       or `nex web tab-new <url> --target X` to open in a new tab.\n", stderr)
+            exit(1)
+        }
         guard let url = args.popFirst(), !url.isEmpty else {
             fputs("Usage: nex web open [--private] <url>\n", stderr)
+            exit(1)
+        }
+        if url.hasPrefix("-") {
+            fputs("nex web open: unexpected option '\(url)' (URL must not start with '-')\n", stderr)
             exit(1)
         }
         var payload: [String: Any] = [
@@ -919,6 +931,24 @@ func handleWeb(_ args: inout ArraySlice<String>) {
             payload["pane_id"] = originPaneID
         }
         sendWebReplyAndPrintBasic(payload, command: "open")
+
+    case "navigate":
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        guard let url = args.popFirst(), !url.isEmpty else {
+            fputs("Usage: nex web navigate <url> [--target <name-or-uuid>] [--workspace <name-or-uuid>]\n", stderr)
+            exit(1)
+        }
+        if url.hasPrefix("-") {
+            fputs("nex web navigate: unexpected option '\(url)' (URL must not start with '-')\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "web-navigate",
+            "url": url
+        ]
+        attachWebTargetScope(&payload, target: target, workspace: workspace, command: "navigate")
+        sendWebReplyAndPrintBasic(payload, command: "navigate")
 
     case "url":
         let target = parseFlag("--target", from: &args)

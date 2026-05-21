@@ -1013,6 +1013,40 @@ struct SocketParsingTests {
         ))
     }
 
+    @Test func parseWebNavigateByTargetLabel() {
+        let data = jsonData("""
+        {"command":"web-navigate","target":"web","workspace":"Dev","url":"https://example.com"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webNavigate(
+            paneID: nil, target: "web", workspace: "Dev", url: "https://example.com"
+        ))
+    }
+
+    @Test func parseWebNavigateByPaneID() {
+        let data = jsonData("""
+        {"command":"web-navigate","pane_id":"\(Self.paneIDString)","url":"https://example.com/path"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webNavigate(
+            paneID: Self.paneUUID, target: nil, workspace: nil, url: "https://example.com/path"
+        ))
+    }
+
+    @Test func parseWebNavigateRequiresURL() {
+        let data = jsonData("""
+        {"command":"web-navigate","pane_id":"\(Self.paneIDString)"}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebNavigateRejectsEmptyURL() {
+        let data = jsonData("""
+        {"command":"web-navigate","pane_id":"\(Self.paneIDString)","url":""}
+        """)
+        #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
     @Test func parseWebPrivateOn() {
         let data = jsonData("""
         {"command":"web-private","pane_id":"\(Self.paneIDString)","private":true}
