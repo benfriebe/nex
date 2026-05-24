@@ -207,8 +207,13 @@ lowest layer that solves your problem; `exec` is the escape hatch.
 #### Infrastructure (pane + tabs + capture + cookies)
 
 ```bash
-# Create a new web pane in the active workspace
+# Create a new web pane in the active workspace.
+# `web open` always creates a NEW pane; --target / --workspace are rejected.
+# Use `web navigate` to redirect an existing pane, or `web tab-new` for a new tab.
 nex web open [--private] <url>
+
+# Redirect the active tab of an existing web pane to <url>
+nex web navigate <url> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
 
 # Read the active tab's URL + title
 nex web url --target <name-or-uuid> [--workspace <name-or-uuid>]
