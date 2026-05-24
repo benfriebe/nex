@@ -181,6 +181,7 @@ struct WebPaneChrome: View {
             WebURLBar(
                 initialURL: displayedURL,
                 paneID: paneID,
+                activeTabID: activeTabID,
                 focusRequestToken: focusRequestToken,
                 onSubmit: onNavigate,
                 isStarred: favourites.firstMatching(url: displayedURL) != nil,
@@ -364,6 +365,14 @@ private struct WebTabPill: View {
 struct WebURLBar: View {
     let initialURL: String
     let paneID: UUID
+    /// Identifies the active tab. When it changes, `WebURLField`
+    /// arms a one-shot flag that force-overwrites the field text on
+    /// the next URL update, even if the user is currently editing —
+    /// otherwise a tab switch while the URL bar has focus leaves
+    /// the bar showing the previous tab's URL (issue #151). The URL
+    /// arrives a render later than the tabID because `WebPaneView`'s
+    /// `refreshState` runs from `.onChange` after body returns.
+    let activeTabID: UUID?
     let focusRequestToken: UInt64
     let onSubmit: (String) -> Void
     /// Star state for the embedded toggle. Star is shown disabled
@@ -378,6 +387,7 @@ struct WebURLBar: View {
             WebURLField(
                 initialURL: initialURL,
                 paneID: paneID,
+                activeTabID: activeTabID,
                 focusRequestToken: focusRequestToken,
                 onSubmit: onSubmit
             )
@@ -416,6 +426,10 @@ struct WebURLBar: View {
 struct WebURLField: NSViewRepresentable {
     let initialURL: String
     let paneID: UUID
+    /// See `WebURLBar.activeTabID` — a change here arms a one-shot
+    /// flag in the coordinator that force-overwrites the field on
+    /// the next URL update, bypassing the skip-if-editing guard.
+    let activeTabID: UUID?
     let focusRequestToken: UInt64
     let onSubmit: (String) -> Void
 
@@ -438,18 +452,41 @@ struct WebURLField: NSViewRepresentable {
         context.coordinator.field = field
         context.coordinator.lastSeenToken = focusRequestToken
         context.coordinator.lastSeenURL = initialURL
+        context.coordinator.lastSeenActiveTabID = activeTabID
         return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         let coord = context.coordinator
-        // Only overwrite the URL bar when the underlying URL actually
-        // changes and the user isn't actively editing — otherwise the
-        // user's in-progress typing would be wiped on every render.
-        if coord.lastSeenURL != initialURL,
-           field.window?.firstResponder !== field.currentEditor() {
-            field.stringValue = initialURL
-            coord.lastSeenURL = initialURL
+        // Tab switch lands a render before the new URL does (refreshState
+        // runs from .onChange after body, then mutates @State which
+        // triggers a second render with the new initialURL). Arm a
+        // one-shot flag here; consume it on the next URL change.
+        //
+        // Skip the arm when transitioning to/from nil — that's a tab
+        // being closed (or the first tab being added), not a real
+        // switch, and the user's in-progress typing should be left
+        // alone (they may still want to submit it via Enter to
+        // create a new tab).
+        if coord.lastSeenActiveTabID != activeTabID {
+            let isRealSwitch = coord.lastSeenActiveTabID != nil && activeTabID != nil
+            coord.lastSeenActiveTabID = activeTabID
+            if isRealSwitch {
+                coord.forceNextURLOverwrite = true
+            }
+        }
+
+        if coord.lastSeenURL != initialURL {
+            let isEditing = field.window?.firstResponder === field.currentEditor()
+            let force = coord.forceNextURLOverwrite
+            coord.forceNextURLOverwrite = false
+            // Only overwrite when forced by a tab switch, or when the
+            // user isn't editing — otherwise their in-progress typing
+            // gets wiped by same-tab WKWebView state notifications.
+            if force || !isEditing {
+                field.stringValue = initialURL
+                coord.lastSeenURL = initialURL
+            }
         }
         if coord.lastSeenToken != focusRequestToken {
             coord.lastSeenToken = focusRequestToken
@@ -466,6 +503,11 @@ struct WebURLField: NSViewRepresentable {
         weak var field: NSTextField?
         var lastSeenToken: UInt64 = 0
         var lastSeenURL: String = ""
+        var lastSeenActiveTabID: UUID?
+        /// Armed when `activeTabID` changes and disarmed on the next
+        /// URL overwrite. Survives across the two-render tab-switch
+        /// sequence (tabID arrives first, URL arrives next render).
+        var forceNextURLOverwrite: Bool = false
 
         init(onSubmit: @escaping (String) -> Void) {
             self.onSubmit = onSubmit
