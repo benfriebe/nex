@@ -65,15 +65,18 @@ struct WorkspaceInspectorView: View {
                     RepoPickerView(
                         repos: store.repoRegistry,
                         alreadyAssociatedRepoIDs: Set(workspace.repoAssociations.map(\.repoID)),
-                        onSelect: { repo in
-                            let assoc = RepoAssociation(
-                                repoID: repo.id,
-                                worktreePath: repo.path
-                            )
-                            store.send(.workspaces(.element(
-                                id: activeID,
-                                action: .addRepoAssociation(assoc)
-                            )))
+                        selectionMode: .multiple,
+                        onConfirm: { chosen in
+                            for repo in chosen {
+                                let assoc = RepoAssociation(
+                                    repoID: repo.id,
+                                    worktreePath: repo.path
+                                )
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .addRepoAssociation(assoc)
+                                )))
+                            }
                             isRepoPickerPresented = false
                         },
                         onCancel: {
@@ -85,7 +88,10 @@ struct WorkspaceInspectorView: View {
                     RepoPickerView(
                         repos: store.repoRegistry,
                         alreadyAssociatedRepoIDs: [],
-                        onSelect: { repo in
+                        selectionMode: .single,
+                        confirmLabel: "Choose",
+                        onConfirm: { chosen in
+                            guard let repo = chosen.first else { return }
                             isWorktreePickerPresented = false
                             worktreeRepoID = repo.id
                             worktreeName = ""
