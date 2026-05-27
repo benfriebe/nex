@@ -125,7 +125,14 @@ struct RepoPickerView: View {
         .contentShape(Rectangle())
         .opacity(isAlready ? 0.5 : 1.0)
         .onTapGesture {
-            if !isAlready { onSelect(repo) }
+            guard !isAlready else { return }
+            // The click moves focus into the list, which makes
+            // `isHighlighted` true for whichever row matches
+            // `highlightedRepoID`. Without updating it here, the
+            // initial value (first row) is highlighted just before
+            // the sheet dismisses, not the clicked row (#144).
+            highlightedRepoID = repo.id
+            onSelect(repo)
         }
     }
 
