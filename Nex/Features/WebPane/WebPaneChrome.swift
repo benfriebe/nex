@@ -437,19 +437,36 @@ struct WebURLField: NSViewRepresentable {
         field.delegate = context.coordinator
         context.coordinator.field = field
         context.coordinator.lastSeenToken = focusRequestToken
-        context.coordinator.lastSeenURL = initialURL
+        context.coordinator.lastWrittenURL = initialURL
         return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         let coord = context.coordinator
         // Only overwrite the URL bar when the underlying URL actually
-        // changes and the user isn't actively editing — otherwise the
+        // changes and the user isn't actively typing — otherwise the
         // user's in-progress typing would be wiped on every render.
-        if coord.lastSeenURL != initialURL,
-           field.window?.firstResponder !== field.currentEditor() {
-            field.stringValue = initialURL
-            coord.lastSeenURL = initialURL
+        // "Actively typing" requires BOTH focus AND a divergence from
+        // what we last wrote; focus alone isn't enough (⌘L and click
+        // focus without typing, and tab switches must still update the
+        // bar even while the field is focused).
+        if coord.lastWrittenURL != initialURL {
+            let isFocused = field.window?.firstResponder === field.currentEditor()
+            let userIsEditing = isFocused && field.stringValue != coord.lastWrittenURL
+            if userIsEditing {
+                // Stash the pending URL; apply on blur in
+                // controlTextDidEndEditing so the user doesn't wind
+                // up staring at a stale draft after abandoning the edit.
+                coord.pendingURL = initialURL
+            } else {
+                field.stringValue = initialURL
+                coord.lastWrittenURL = initialURL
+                coord.pendingURL = nil
+            }
+        } else {
+            // The active URL matches what we last wrote; any stored
+            // pending update is moot.
+            coord.pendingURL = nil
         }
         if coord.lastSeenToken != focusRequestToken {
             coord.lastSeenToken = focusRequestToken
@@ -465,7 +482,16 @@ struct WebURLField: NSViewRepresentable {
         let onSubmit: (String) -> Void
         weak var field: NSTextField?
         var lastSeenToken: UInt64 = 0
-        var lastSeenURL: String = ""
+        /// Last URL we wrote into the field's `stringValue`. Tracks
+        /// our writes, not SwiftUI's intent — so when `updateNSView`
+        /// skips because the user is editing, this stays at the
+        /// pre-skip value (and `pendingURL` carries the intent forward).
+        var lastWrittenURL: String = ""
+        /// URL change that arrived while the user was editing.
+        /// Applied on blur (`controlTextDidEndEditing`) so a tab
+        /// switch or background navigation eventually shows up
+        /// instead of the user's abandoned draft.
+        var pendingURL: String?
 
         init(onSubmit: @escaping (String) -> Void) {
             self.onSubmit = onSubmit
@@ -474,11 +500,23 @@ struct WebURLField: NSViewRepresentable {
         func control(_: NSControl, textView _: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if let value = field?.stringValue {
+                    // The user submitted their own URL; whatever was
+                    // pending from a tab switch is now irrelevant —
+                    // the navigation they just triggered will surface
+                    // the canonical URL via stateDidChange.
+                    pendingURL = nil
                     onSubmit(value)
                 }
                 return true
             }
             return false
+        }
+
+        func controlTextDidEndEditing(_: Notification) {
+            guard let field, let pending = pendingURL else { return }
+            field.stringValue = pending
+            lastWrittenURL = pending
+            pendingURL = nil
         }
     }
 }
