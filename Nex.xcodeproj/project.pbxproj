@@ -28,6 +28,7 @@
 		1569F35B72EC7C133643190E /* PaneType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377C07C6C4B00D0699682EA3 /* PaneType.swift */; };
 		1E6354C9BBDF122BF0FB255F /* WorktreeOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */; };
 		2061570DEABB0E43847DBB5D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A198A2F5EA992907A3031ED /* ContentView.swift */; };
+		21BAC97B61C9367EADD1315A /* WebTabNewFocusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52ED6952E87B8F73B2450D7 /* WebTabNewFocusTests.swift */; };
 		2364A5458060B16493954543 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 281D0362CA8542610B8329F6 /* Metal.framework */; };
 		2522628FFD6A46B52CE2D490 /* GraftService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E79DA6455C6FF3D2124CBA9 /* GraftService.swift */; };
 		27D6386295651D4FE9A3DF6B /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D96CD47FF756C95404DF4F6 /* Pane.swift */; };
@@ -330,6 +331,7 @@
 		E0625B2E7935BDDF63DC5D19 /* RingBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingBufferTests.swift; sourceTree = "<group>"; };
 		E08D39F8F87D7505CD32D25D /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		E3F9EB3CC6EA8ED5CEE1F156 /* WebPaneExecWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneExecWrapper.swift; sourceTree = "<group>"; };
+		E52ED6952E87B8F73B2450D7 /* WebTabNewFocusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebTabNewFocusTests.swift; sourceTree = "<group>"; };
 		E5859C5B2E1850D1262AFE4B /* Nex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E5A4C5D8F4C099C65A7EA890 /* ScratchpadEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScratchpadEditorView.swift; sourceTree = "<group>"; };
 		E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSpacesBinding.swift; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 				12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */,
 				310A7BC6CBE6160568122935 /* WebPaneExecWrapperTests.swift */,
 				06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */,
+				E52ED6952E87B8F73B2450D7 /* WebTabNewFocusTests.swift */,
 				94D09D767C96B3F96E4DF7C5 /* WindowSpacesBindingTests.swift */,
 				28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */,
 				E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */,
@@ -884,6 +887,7 @@
 				B0FA5E756635F6DFC402CD7C /* WebPaneActuatorWaitTests.swift in Sources */,
 				2AB792CA68A7B12D55C2F834 /* WebPaneExecWrapperTests.swift in Sources */,
 				53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */,
+				21BAC97B61C9367EADD1315A /* WebTabNewFocusTests.swift in Sources */,
 				DDD05A3B3A535DEA66485A47 /* WindowSpacesBindingTests.swift in Sources */,
 				5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */,
 				F01CDB667AE2A0CF2A825AD3 /* WorkspaceDropTargetTests.swift in Sources */,
