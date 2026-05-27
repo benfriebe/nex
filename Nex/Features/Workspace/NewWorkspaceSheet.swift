@@ -160,8 +160,9 @@ struct NewWorkspaceSheet: View {
                 RepoPickerView(
                     repos: store.repoRegistry,
                     alreadyAssociatedRepoIDs: Set(selectedRepos.map(\.id)),
-                    onSelect: { repo in
-                        selectedRepos.append(repo)
+                    selectionMode: .multiple,
+                    onConfirm: { chosen in
+                        selectedRepos.append(contentsOf: chosen)
                         isRepoPickerPresented = false
                     },
                     onCancel: {
