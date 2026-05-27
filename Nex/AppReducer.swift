@@ -3990,6 +3990,12 @@ struct AppReducer {
             case .webPaneOpenNewTab(let paneID, let url):
                 guard let workspace = state.workspaceContainingPane(paneID) else { return .none }
                 let newTabID = uuid()
+                // Blank new tab → auto-focus the URL bar so the user can
+                // type a URL immediately. A tab opened with a preset URL
+                // is loading content, so leave focus to the WKWebView.
+                if url?.isEmpty ?? true {
+                    state.webPaneURLFocusTokens[paneID, default: 0] &+= 1
+                }
                 return .send(.workspaces(.element(
                     id: workspace.id,
                     action: .webPaneTabOpen(
