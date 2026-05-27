@@ -305,7 +305,8 @@ struct InspectTargetOption: Identifiable, Equatable {
 
 /// A single tab pill in the strip. Shows the tab's title (or host as
 /// a fallback) plus a close `x`. Click anywhere on the pill to select;
-/// hovering reveals the close button.
+/// hovering reveals the close button overlaid on the right edge of the
+/// pill so the tab footprint does not change on hover (issue #154).
 private struct WebTabPill: View {
     let tab: WebTab
     let isActive: Bool
@@ -314,42 +315,63 @@ private struct WebTabPill: View {
 
     @State private var isHovered = false
 
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(tab.displayLabel)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(isActive ? Color.primary : Color.secondary)
+    private var showsCloseButton: Bool { isHovered || isActive }
 
-            if isHovered || isActive {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
+    var body: some View {
+        Text(tab.displayLabel)
+            .font(.system(size: 11, design: .monospaced))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundStyle(isActive ? Color.primary : Color.secondary)
+            .mask(titleMask)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .frame(maxWidth: 180, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isActive ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(
+                        isActive ? Color.accentColor.opacity(0.4) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+            .overlay(alignment: .trailing) {
+                if showsCloseButton {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 14, height: 14)
+                            .background(.thickMaterial, in: Circle())
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close tab (⌘W)")
+                    .padding(.trailing, 4)
                 }
-                .buttonStyle(.plain)
-                .help("Close tab (⌘W)")
             }
+            .onTapGesture(perform: onSelect)
+            .onHover { isHovered = $0 }
+    }
+
+    @ViewBuilder
+    private var titleMask: some View {
+        if showsCloseButton {
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0.0),
+                    .init(color: .black, location: 0.82),
+                    .init(color: .clear, location: 1.0)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        } else {
+            Color.black
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .frame(maxWidth: 180, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isActive ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(
-                    isActive ? Color.accentColor.opacity(0.4) : Color.clear,
-                    lineWidth: 1
-                )
-        )
-        .onTapGesture(perform: onSelect)
-        .onHover { isHovered = $0 }
     }
 }
 
