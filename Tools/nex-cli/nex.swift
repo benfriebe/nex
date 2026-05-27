@@ -2098,7 +2098,7 @@ func handlePaneList(_ args: inout ArraySlice<String>) {
 }
 
 /// Render the `pane-list` response as a fixed-width table. Columns:
-/// ID (truncated UUID), LABEL, WORKSPACE, STATUS, CWD.
+/// ID (truncated UUID), LABEL, TYPE, WORKSPACE, STATUS, CWD.
 ///
 /// We truncate the UUID (first 8 + last 4) for readability; the
 /// `--json` output keeps the full UUID for scripts. Other fields
@@ -2107,6 +2107,7 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     struct Row {
         let id: String
         let label: String
+        let type: String
         let workspace: String
         let status: String
         let cwd: String
@@ -2128,9 +2129,11 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
         if !home.isEmpty, cwd.hasPrefix(home) {
             cwd = "~" + cwd.dropFirst(home.count)
         }
+        let typeRaw = (entry["type"] as? String) ?? ""
         return Row(
             id: shortID,
             label: (entry["label"] as? String) ?? "-",
+            type: typeRaw.isEmpty ? "-" : typeRaw,
             workspace: (entry["workspace_name"] as? String) ?? "",
             status: (entry["status"] as? String) ?? "",
             cwd: cwd
@@ -2138,8 +2141,8 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     }
 
     // Compute column widths from data (and headers if shown).
-    var widths = [0, 0, 0, 0, 0]
-    let headers = ["ID", "LABEL", "WORKSPACE", "STATUS", "CWD"]
+    var widths = [0, 0, 0, 0, 0, 0]
+    let headers = ["ID", "LABEL", "TYPE", "WORKSPACE", "STATUS", "CWD"]
     if !noHeader {
         for (i, h) in headers.enumerated() {
             widths[i] = max(widths[i], h.count)
@@ -2148,9 +2151,10 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     for r in rows {
         widths[0] = max(widths[0], r.id.count)
         widths[1] = max(widths[1], r.label.count)
-        widths[2] = max(widths[2], r.workspace.count)
-        widths[3] = max(widths[3], r.status.count)
-        widths[4] = max(widths[4], r.cwd.count)
+        widths[2] = max(widths[2], r.type.count)
+        widths[3] = max(widths[3], r.workspace.count)
+        widths[4] = max(widths[4], r.status.count)
+        widths[5] = max(widths[5], r.cwd.count)
     }
 
     func pad(_ s: String, _ w: Int) -> String {
@@ -2160,10 +2164,10 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
 
     if !noHeader {
         // Last column is not padded so trailing whitespace is avoided.
-        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(headers[4])")
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(pad(headers[4], widths[4]))  \(headers[5])")
     }
     for r in rows {
-        print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.workspace, widths[2]))  \(pad(r.status, widths[3]))  \(r.cwd)")
+        print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.type, widths[2]))  \(pad(r.workspace, widths[3]))  \(pad(r.status, widths[4]))  \(r.cwd)")
     }
 }
 
