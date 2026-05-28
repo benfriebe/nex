@@ -38,6 +38,7 @@ struct MarkdownPaneView: NSViewRepresentable {
         let handler = context.coordinator
         config.userContentController.add(handler, name: "scrollHandler")
         config.userContentController.add(handler, name: "nexFind")
+        config.userContentController.add(handler, name: "copyCodeBlock")
         config.userContentController.addUserScript(WKUserScript(
             source: """
             window.addEventListener('scroll', function() {
@@ -51,6 +52,11 @@ struct MarkdownPaneView: NSViewRepresentable {
         ))
         config.userContentController.addUserScript(WKUserScript(
             source: MarkdownFindScript.source,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
+        config.userContentController.addUserScript(WKUserScript(
+            source: MarkdownCodeCopyScript.source,
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
@@ -222,6 +228,11 @@ struct MarkdownPaneView: NSViewRepresentable {
                     object: nil,
                     userInfo: ["paneID": paneID, "total": total, "current": current]
                 )
+            case "copyCodeBlock":
+                guard let text = message.body as? String, !text.isEmpty else { return }
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
             default:
                 break
             }
@@ -397,6 +408,12 @@ struct MarkdownPaneView: NSViewRepresentable {
                 );
                 for (var i = 0; i < fm.length; i++) {
                     fm[i].parentNode.removeChild(fm[i]);
+                }
+                // Strip the in-DOM copy buttons so they don't leak into the
+                // RTF/HTML pasteboard payloads as a literal "Copy" glyph.
+                var btns = clone.querySelectorAll('.code-copy-btn');
+                for (var j = 0; j < btns.length; j++) {
+                    btns[j].parentNode.removeChild(btns[j]);
                 }
                 return clone.innerHTML;
             })();

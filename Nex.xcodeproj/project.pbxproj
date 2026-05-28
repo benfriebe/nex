@@ -158,6 +158,7 @@
 		ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */; };
 		EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */; };
 		EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */; };
+		EEE8E1F9A5BF3A99FF11CF0D /* MarkdownCodeCopyScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDE8815715F4B6A37D353E8 /* MarkdownCodeCopyScript.swift */; };
 		EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */; };
 		EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9EC869803E36C99B3653FF5 /* CLIInstallService.swift */; };
 		F01CDB667AE2A0CF2A825AD3 /* WorkspaceDropTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */; };
@@ -313,6 +314,7 @@
 		CBF3FB912BD029F17AF0AA25 /* KeyBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBinding.swift; sourceTree = "<group>"; };
 		CD30BE0FDF3CC57813A5DB46 /* GroupCustomEmojiSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupCustomEmojiSheet.swift; sourceTree = "<group>"; };
 		CF4114D723403D4FF8F4AC1B /* ConfigParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigParser.swift; sourceTree = "<group>"; };
+		CFDE8815715F4B6A37D353E8 /* MarkdownCodeCopyScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCodeCopyScript.swift; sourceTree = "<group>"; };
 		CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		D0CED7EFE254E4491327CAE0 /* EditorService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorService.swift; sourceTree = "<group>"; };
 		D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducerTests.swift; sourceTree = "<group>"; };
@@ -683,6 +685,7 @@
 			isa = PBXGroup;
 			children = (
 				852AC6AE9B24B4528577F454 /* LineNumberRulerView.swift */,
+				CFDE8815715F4B6A37D353E8 /* MarkdownCodeCopyScript.swift */,
 				7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */,
 				37DDBBE36E6F9BC00B9EB07E /* MarkdownFindController.swift */,
 				3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */,
@@ -940,6 +943,7 @@
 				E0ABD2D68012C6BF24A92E7D /* KeybindingService.swift in Sources */,
 				6CF210BA0C7BFE62B90844F7 /* KeybindingsSettingsView.swift in Sources */,
 				6C50041FBB0F31598067D4FA /* LineNumberRulerView.swift in Sources */,
+				EEE8E1F9A5BF3A99FF11CF0D /* MarkdownCodeCopyScript.swift in Sources */,
 				291A22061671351813971551 /* MarkdownEditorView.swift in Sources */,
 				F4F95104BEADCDD6F5C79CF2 /* MarkdownFindController.swift in Sources */,
 				692A08796F7DF555CFAF0653 /* MarkdownFindScript.swift in Sources */,

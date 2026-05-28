@@ -69,7 +69,14 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
         let lang = codeBlock.language ?? ""
         let langAttr = lang.isEmpty ? "" : " class=\"language-\(escapeHTML(lang))\""
         let code = escapeHTML(codeBlock.code)
-        return "<pre><code\(langAttr)>\(code)</code></pre>\n"
+        // Wrap fenced/indented code blocks so the copy button can anchor
+        // against the wrapper without affecting <pre>'s horizontal scroll.
+        // Front-matter pres emit no inner <code>, so the JS click handler's
+        // `:scope > pre > code` selector skips them naturally.
+        return "<div class=\"code-block\">"
+            + "<pre><code\(langAttr)>\(code)</code></pre>"
+            + "<button class=\"code-copy-btn\" type=\"button\" aria-label=\"Copy code\"></button>"
+            + "</div>\n"
     }
 
     mutating func visitUnorderedList(_ list: UnorderedList) -> String {
@@ -441,6 +448,63 @@ enum MarkdownRenderer {
             margin: 0 0 1.5em;
         }
         .dark pre.frontmatter-raw { border-left-color: #3d444d; }
+        .code-block { position: relative; }
+        /* Margin/padding on the wrapper, not on the <pre>, so the <pre>'s
+           default block spacing collapses naturally and code-block stacks the
+           same way as the old bare <pre>. */
+        .code-block > pre { margin: 0; }
+        .code-block { margin: 1em 0; }
+        .code-copy-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 28px;
+            height: 24px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid #d1d9e0;
+            border-radius: 4px;
+            color: #1f2328;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s ease, color 0.15s ease;
+        }
+        .code-block:hover .code-copy-btn,
+        .code-block:focus-within .code-copy-btn,
+        .code-copy-btn:focus { opacity: 1; }
+        .code-copy-btn:focus-visible {
+            outline: 2px solid #0969da;
+            outline-offset: 1px;
+        }
+        .code-copy-btn:hover { background: #f6f8fa; }
+        .code-copy-btn.copied { color: #1a7f37; }
+        .dark .code-copy-btn {
+            background: rgba(22, 27, 34, 0.85);
+            border-color: #3d444d;
+            color: #e6edf3;
+        }
+        .dark .code-copy-btn:hover { background: #21262d; }
+        .dark .code-copy-btn.copied { color: #3fb950; }
+        .dark .code-copy-btn:focus-visible { outline-color: #58a6ff; }
+        /* Icon drawn via mask so it picks up the button's `currentColor`
+           (greys in light/dark, green when .copied). */
+        .code-copy-btn::before {
+            content: "";
+            display: block;
+            width: 14px;
+            height: 14px;
+            background-color: currentColor;
+            -webkit-mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            -webkit-mask-size: 14px 14px;
+            -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z'/%3E%3Cpath d='M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z'/%3E%3C/svg%3E");
+        }
+        .code-copy-btn.copied::before {
+            -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'/%3E%3C/svg%3E");
+        }
         """
     }
 }
