@@ -1282,7 +1282,7 @@ struct AppReducer {
         let paneIDs = workspace.syncedPaneIDs
         let mgr = surfaceManager
         return .run { _ in
-            await mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
+            mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
         }
     }
 
@@ -1392,7 +1392,10 @@ struct AppReducer {
         workspace: WorkspaceFeature.State
     ) {
         var excluded: [[String: Any]] = []
-        for paneID in workspace.syncInputExcluded {
+        // Sort by uuidString so the JSON reply has a stable order across
+        // calls — otherwise Set<UUID> iteration order would make scripts
+        // diffing `pane sync status --json` output flake intermittently.
+        for paneID in workspace.syncInputExcluded.sorted(by: { $0.uuidString < $1.uuidString }) {
             guard let pane = workspace.panes[id: paneID] else { continue }
             var entry: [String: Any] = ["id": paneID.uuidString]
             if let label = pane.label { entry["label"] = label }
@@ -2923,12 +2926,17 @@ struct AppReducer {
 
                 let stopEffects = assocIDs.map { Effect.send(Action.stopHeadWatcher(associationID: $0)) }
                 let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                let mgr = surfaceManager
                 return .merge(
                     [
                         .run { _ in
                             for paneID in paneIDs {
-                                await surfaceManager.destroySurface(paneID: paneID)
+                                await mgr.destroySurface(paneID: paneID)
                             }
+                            // Drop the sync-input group for the deleted
+                            // workspace so SurfaceManager.syncGroups
+                            // doesn't leak the entry indefinitely.
+                            mgr.setSyncGroup(workspaceID: id, paneIDs: [])
                         },
                         .send(.persistState)
                     ] + stopEffects + graftStopEffects
@@ -3180,12 +3188,19 @@ struct AppReducer {
                 state.lastSelectionAnchor = nil
 
                 let paneIDs = panesToDestroy
+                let deletedWorkspaceIDs = ids
                 let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                let mgr = surfaceManager
                 return .merge(
                     [
                         .run { _ in
                             for paneID in paneIDs {
-                                await surfaceManager.destroySurface(paneID: paneID)
+                                await mgr.destroySurface(paneID: paneID)
+                            }
+                            // Drop sync-input groups for the deleted
+                            // workspaces (mirrors `deleteWorkspace`).
+                            for wsID in deletedWorkspaceIDs {
+                                mgr.setSyncGroup(workspaceID: wsID, paneIDs: [])
                             }
                         },
                         .send(.persistState)
@@ -3390,12 +3405,19 @@ struct AppReducer {
                     state.groupDeleteConfirmation = nil
 
                     let captured = paneIDs
+                    let cascadedWorkspaceIDs = childIDs
                     let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                    let mgr = surfaceManager
                     return .merge(
                         [
                             .run { _ in
                                 for paneID in captured {
-                                    await surfaceManager.destroySurface(paneID: paneID)
+                                    await mgr.destroySurface(paneID: paneID)
+                                }
+                                // Drop sync-input groups for the cascaded
+                                // workspaces (mirrors `deleteWorkspace`).
+                                for wsID in cascadedWorkspaceIDs {
+                                    mgr.setSyncGroup(workspaceID: wsID, paneIDs: [])
                                 }
                             },
                             .send(.persistState)
@@ -4800,6 +4822,10 @@ struct AppReducer {
                     if webStateToTransfer != nil {
                         state.workspaces[id: sourceWSID]?.webPanes.removeValue(forKey: paneID)
                     }
+                    // Drop any source-side sync exclusion for this pane.
+                    // Otherwise a later move-back would silently re-apply
+                    // the orphan opt-out with no UI hint to explain why.
+                    state.workspaces[id: sourceWSID]?.syncInputExcluded.remove(paneID)
                     let newSourceLayout = state.workspaces[id: sourceWSID]!.layout.removing(paneID: paneID)
                     state.workspaces[id: sourceWSID]?.layout = newSourceLayout
                     state.workspaces[id: sourceWSID]?.currentLayoutIndex = nil

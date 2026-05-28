@@ -895,6 +895,11 @@ func printPaneSyncUsage(stream: UnsafeMutablePointer<FILE>) {
     specific pane out of (or back into) the sync group. `status` reports the
     current sync state without mutating it.
 
+    Excludes are ephemeral within a single on-cycle: any `on` / `off` /
+    `toggle` clears the exclusion set. Sequence is `sync on` first, then
+    `sync exclude --target <pane>`; running exclude while sync is off has
+    no effect on the next on-cycle.
+
     Workspace defaults to the calling pane's workspace (via NEX_PANE_ID)
     when --workspace is not supplied.
     \n

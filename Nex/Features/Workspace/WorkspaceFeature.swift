@@ -65,12 +65,15 @@ struct WorkspaceFeature {
         /// panes opened while sync is active auto-join the group.
         /// Transient — resets on app restart.
         var isSyncInputActive: Bool = false
-        /// Panes explicitly opted out of the active sync group. The set
-        /// is honoured only while `isSyncInputActive` is true and is
-        /// cleared whenever sync toggles off — re-enabling sync starts
-        /// from a fresh "all shell panes participate" baseline rather
-        /// than restoring potentially-stale opt-outs from a previous
-        /// session. Transient.
+        /// Panes explicitly opted out of the active sync group.
+        /// Strictly ephemeral within a single on-cycle: the set is
+        /// cleared on every transition of `isSyncInputActive` (both
+        /// off→on and on→off) so each on-cycle starts from a fresh
+        /// "all shell panes participate" baseline. This means
+        /// `nex pane sync exclude` run while sync is off has no
+        /// effect on the next on-cycle — coordinators should sequence
+        /// `sync on` first, then `sync exclude --target <pane>`.
+        /// Transient — also resets on app restart.
         var syncInputExcluded: Set<UUID> = []
 
         /// Pane IDs that should mirror each other's keystrokes right
@@ -396,7 +399,7 @@ struct WorkspaceFeature {
         let paneIDs = state.syncedPaneIDs
         let mgr = surfaceManager
         return .run { _ in
-            await mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
+            mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
         }
     }
 
@@ -1556,22 +1559,18 @@ struct WorkspaceFeature {
 
             case .toggleSyncInput:
                 state.isSyncInputActive.toggle()
-                // Clearing the exclusion set on toggle-off keeps the
-                // workspace tidy: re-enabling sync later starts from a
-                // fresh "all panes participate" baseline rather than
-                // restoring potentially-stale opt-outs from a previous
-                // session. Excludes can still be re-applied per pane.
-                if !state.isSyncInputActive {
-                    state.syncInputExcluded.removeAll()
-                }
+                // Clear on every transition so re-enabling sync always
+                // starts from a fresh "all panes participate" baseline.
+                // Clearing on toggle-off alone would let a pre-staged
+                // `pane sync exclude` (run while sync was off) survive
+                // into the next on-cycle and silently exclude a pane.
+                state.syncInputExcluded.removeAll()
                 return refreshSyncGroup(state)
 
             case .setSyncInputActive(let active):
                 guard state.isSyncInputActive != active else { return .none }
                 state.isSyncInputActive = active
-                if !active {
-                    state.syncInputExcluded.removeAll()
-                }
+                state.syncInputExcluded.removeAll()
                 return refreshSyncGroup(state)
 
             case .setSyncInputExcluded(let paneID, let excluded):

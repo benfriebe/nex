@@ -205,12 +205,21 @@ final class SurfaceManager: Sendable {
 
     /// Resolve the sibling pane IDs to live `SurfaceView` instances.
     /// Surfaces that have been torn down (PTY exited, view destroyed)
-    /// are dropped silently — broadcast is best-effort.
+    /// are dropped silently — broadcast is best-effort. Single lock
+    /// acquisition so the group lookup and the surface dictionary
+    /// snapshot can't drift between two acquisitions.
     func syncTargets(sourcePaneID: UUID) -> [SurfaceView] {
-        let targetIDs = syncTargetIDs(sourcePaneID: sourcePaneID)
-        if targetIDs.isEmpty { return [] }
-        let snapshot = lock.withLock { surfaces }
-        return targetIDs.compactMap { snapshot[$0] }
+        lock.withLock {
+            var result: [SurfaceView] = []
+            for (_, group) in syncGroups where group.contains(sourcePaneID) {
+                for id in group where id != sourcePaneID {
+                    if let view = surfaces[id] {
+                        result.append(view)
+                    }
+                }
+            }
+            return result
+        }
     }
 
     /// Mirror a libghostty key event to every sibling pane in the
