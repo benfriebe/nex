@@ -360,6 +360,63 @@ struct MarkdownHTMLRendererTests {
         #expect(html.contains("two line two"))
     }
 
+    // MARK: - Code block copy button
+
+    @Test func fencedCodeBlockWrappedWithCopyButton() {
+        let html = MarkdownRenderer.renderToHTML("```\nhello\n```")
+        #expect(html.contains("<div class=\"code-block\">"))
+        #expect(html.contains("<pre><code>hello\n</code></pre>"))
+        #expect(html.contains("class=\"code-copy-btn\""))
+        #expect(html.contains("aria-label=\"Copy code\""))
+    }
+
+    @Test func fencedCodeBlockWithLanguageStillWrapped() {
+        let html = MarkdownRenderer.renderToHTML("```swift\nlet x = 1\n```")
+        #expect(html.contains("<div class=\"code-block\">"))
+        #expect(html.contains("class=\"language-swift\""))
+        #expect(html.contains("class=\"code-copy-btn\""))
+    }
+
+    @Test func inlineCodeNotWrapped() {
+        let html = MarkdownRenderer.renderToHTML("Use `foo` here.")
+        #expect(html.contains("<code>foo</code>"))
+        // The class names appear in the inlined stylesheet — assert on the
+        // wrapper element instead so a body-side wrap is what fails.
+        #expect(!html.contains("<div class=\"code-block\">"))
+        #expect(!html.contains("class=\"code-copy-btn\""))
+    }
+
+    @Test func frontMatterRawNotWrapped() {
+        // Malformed YAML falls back to <pre class="frontmatter-raw"> with no
+        // inner <code> — copy button must not be injected.
+        let yaml = "---\n: malformed:\n---\nbody"
+        let html = MarkdownRenderer.renderToHTML(yaml)
+        #expect(html.contains("frontmatter-raw"))
+        #expect(!html.contains("class=\"code-copy-btn\""))
+    }
+
+    @Test func frontMatterNestedNotWrapped() {
+        // Multi-line nested YAML values render via <pre class="frontmatter-nested">
+        // (no inner <code>) — copy button must not be injected.
+        let yaml = """
+        ---
+        block: |
+          line one
+          line two
+        ---
+        """
+        let html = MarkdownRenderer.renderToHTML(yaml)
+        #expect(html.contains("frontmatter-nested"))
+        #expect(!html.contains("class=\"code-copy-btn\""))
+    }
+
+    @Test func htmlInsideFencedCodeStillEscaped() {
+        // Wrapping must not affect inner-content escaping.
+        let html = MarkdownRenderer.renderToHTML("```\n<script>alert(1)</script>\n```")
+        #expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
+        #expect(!html.contains("<script>alert(1)"))
+    }
+
     @Test func frontMatterAliasResolvedByYamsCompose() {
         // Yams.compose resolves aliases to their anchored value, so an alias
         // reference surfaces as the target's content. Both cells should render
