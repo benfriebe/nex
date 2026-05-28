@@ -75,6 +75,19 @@ enum SocketMessage: Equatable {
     /// Replies with `{"ok":true,"text":"..."}` or `{"ok":false,"error":...}`
     /// (request/response — see `replyCommandAllowlist`).
     case paneCapture(paneID: UUID?, target: String?, workspace: String?, lines: Int?, includeScrollback: Bool)
+    /// `nex pane sync (on|off|toggle|status)` (issue #121).
+    /// `action` is one of `"on"`, `"off"`, `"toggle"`, `"status"`.
+    /// `paneID` (from `NEX_PANE_ID`) scopes the request to the
+    /// caller's workspace when `workspace` is unset. `status` is
+    /// read-only and never mutates state. Request/response — see
+    /// `replyCommandAllowlist`.
+    case paneSync(paneID: UUID?, workspace: String?, action: String)
+    /// `nex pane sync exclude|include` — adjust the per-workspace
+    /// exclusion set. `target` resolves a pane via the same rules as
+    /// `paneSend` / `paneClose` (label or UUID, with `--workspace`
+    /// scoping for labels). Idempotent: excluding an already-excluded
+    /// pane (or vice versa) is a no-op success.
+    case paneSyncExclude(paneID: UUID?, target: String, workspace: String?, excluded: Bool)
     /// `nex graft start` — begin worktree-to-root mirroring. `paneID`
     /// comes from `NEX_PANE_ID` and scopes resolution to the caller's
     /// workspace when neither `workspace` nor `repo` is supplied.
@@ -279,6 +292,7 @@ enum SocketMessage: Equatable {
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
+    "pane-sync", "pane-sync-exclude",
     "graft-start", "graft-stop", "graft-status",
     "web-open", "web-navigate", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
@@ -771,6 +785,11 @@ final class SocketServer: Sendable {
         var behavior: String?
         /// `web-exec` — author-supplied JS body.
         var script: String?
+        /// `pane-sync` — one of `on`, `off`, `toggle`, `status`.
+        var action: String?
+        /// `pane-sync-exclude` — true to exclude the target pane,
+        /// false to re-include. Required for that command.
+        var excluded: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -806,6 +825,7 @@ final class SocketServer: Sendable {
             case valueOrLabel = "value_or_label"
             case block, behavior
             case script
+            case action, excluded
         }
     }
 
@@ -1273,6 +1293,23 @@ final class SocketServer: Sendable {
                 urlMatch: urlMatch,
                 forCondition: forCondition,
                 timeoutMs: timeoutMs
+            ), wire)
+        }
+
+        if wire.command == "pane-sync" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard let action = wire.action, !action.isEmpty else { return nil }
+            return (.paneSync(paneID: paneID, workspace: workspace, action: action), wire)
+        }
+
+        if wire.command == "pane-sync-exclude" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            guard let target = wire.target, !target.isEmpty,
+                  let excluded = wire.excluded else { return nil }
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            return (.paneSyncExclude(
+                paneID: paneID, target: target, workspace: workspace, excluded: excluded
             ), wire)
         }
 

@@ -278,12 +278,20 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     private func sendKey(_ key: ghostty_input_key_s, text: String?) {
         guard let text else {
             _ = ghosttySurface?.sendKey(key)
+            // Mirror to sync-input peers (issue #121). No-op when this
+            // pane isn't in any sync group, so the overhead is a single
+            // dictionary lookup in `SurfaceManager`.
+            SurfaceManager.liveValue.broadcastKey(from: paneID, key: key)
             return
         }
         var keyWithText = key
         text.withCString { ptr in
             keyWithText.text = ptr
             _ = ghosttySurface?.sendKey(keyWithText)
+            // Broadcast inside `withCString` so `keyWithText.text`
+            // (which points into this stack frame) is still live for
+            // each sibling's `sendKey` call.
+            SurfaceManager.liveValue.broadcastKey(from: paneID, key: keyWithText)
         }
     }
 
@@ -437,6 +445,10 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         } else {
             // Outside keyDown (dictation, services menu paste, drag-drop): send directly.
             ghosttySurface?.sendText(str)
+            // Mirror to sync-input peers (issue #121). The keyDown path
+            // covers normal typing; this branch covers IME / dictation /
+            // paste fall-throughs.
+            SurfaceManager.liveValue.broadcastText(from: paneID, text: str)
         }
     }
 

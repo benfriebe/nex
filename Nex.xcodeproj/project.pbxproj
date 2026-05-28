@@ -155,6 +155,7 @@
 		EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9335AE3C92A37DD50A5715A /* AppReducer.swift */; };
 		ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */; };
 		ECB2D027885F6AAC05BFBA22 /* GraftInspectorButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110ABCD54BF803110E5F5060 /* GraftInspectorButton.swift */; };
+		ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */; };
 		ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */; };
 		EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */; };
 		EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */; };
@@ -195,6 +196,7 @@
 		06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneURLNormalisationTests.swift; sourceTree = "<group>"; };
 		0689D085597FF9C7F4D87401 /* RepoPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPickerView.swift; sourceTree = "<group>"; };
 		09102B6ADEAB463454E7F15E /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
+		09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncInputTests.swift; sourceTree = "<group>"; };
 		0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTarget.swift; sourceTree = "<group>"; };
 		0E79DA6455C6FF3D2124CBA9 /* GraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftService.swift; sourceTree = "<group>"; };
 		110ABCD54BF803110E5F5060 /* GraftInspectorButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftInspectorButton.swift; sourceTree = "<group>"; };
@@ -475,6 +477,7 @@
 				ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */,
 				AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */,
 				1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */,
+				09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */,
 				9AA64A9054515A57ED6B2ECA /* WebPaneActuatorActionTests.swift */,
 				9F338E618A147E5BAAFF5FE5 /* WebPaneActuatorSelectorTests.swift */,
 				12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */,
@@ -885,6 +888,7 @@
 				EAF43DC55C5612F3AE83BF02 /* SettingsFeatureTests.swift in Sources */,
 				2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */,
 				EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */,
+				ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */,
 				04A463E95398A50F5AD5AA2B /* WebPaneActuatorActionTests.swift in Sources */,
 				E5D6BDD247E0BE03F097B4A2 /* WebPaneActuatorSelectorTests.swift in Sources */,
 				B0FA5E756635F6DFC402CD7C /* WebPaneActuatorWaitTests.swift in Sources */,

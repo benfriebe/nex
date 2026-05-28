@@ -15,6 +15,9 @@
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 //   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 //   nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+//   nex pane sync (on|off|toggle|status) [--workspace <name-or-uuid>] [--json]
+//   nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
+//   nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane id
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
@@ -88,6 +91,9 @@ func printUsage() {
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
       nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
       nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+      nex pane sync (on|off|toggle|status) [--workspace <name-or-uuid>] [--json]
+      nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
+      nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane id
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
@@ -453,7 +459,7 @@ func handleEvent(_ args: inout ArraySlice<String>) {
 
 func handlePane(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex pane split|create|close|name|send|send-key|move|list|capture|id [...]\n", stderr)
+        fputs("Usage: nex pane split|create|close|name|send|send-key|move|list|capture|sync|id [...]\n", stderr)
         exit(1)
     }
 
@@ -791,10 +797,164 @@ func handlePane(_ args: inout ArraySlice<String>) {
     case "capture":
         handlePaneCapture(&args)
 
+    case "sync":
+        handlePaneSync(&args)
+
     default:
         fputs("Unknown pane action: \(action)\n", stderr)
-        fputs("Valid actions: split, create, close, name, send, send-key, move, move-to-workspace, list, capture, id\n", stderr)
+        fputs("Valid actions: split, create, close, name, send, send-key, move, move-to-workspace, list, capture, sync, id\n", stderr)
         exit(1)
+    }
+}
+
+// MARK: - pane sync (issue #121)
+
+/// Implements `nex pane sync (on|off|toggle|status|exclude|include)`.
+/// All forms are request/response and exit non-zero on server error.
+func handlePaneSync(_ args: inout ArraySlice<String>) {
+    guard let mode = args.popFirst() else {
+        printPaneSyncUsage(stream: stderr)
+        exit(1)
+    }
+
+    if mode == "-h" || mode == "--help" || mode == "help" {
+        printPaneSyncUsage(stream: stdout)
+        exit(0)
+    }
+
+    let workspace = parseFlag("--workspace", from: &args)
+    let asJSON = popSwitch("--json", from: &args)
+
+    switch mode {
+    case "on", "off", "toggle", "status":
+        // `--target` doesn't make sense for the whole-workspace
+        // toggle — surface the typo rather than silently dropping it.
+        if let stray = parseFlag("--target", from: &args) {
+            fputs("nex pane sync \(mode): --target \(stray) is not valid here " +
+                "(the toggle is workspace-wide). Use `nex pane sync exclude --target ...` " +
+                "to opt a pane out.\n", stderr)
+            exit(1)
+        }
+        if let stray = args.first {
+            fputs("nex pane sync \(mode): unexpected argument '\(stray)'\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "pane-sync",
+            "action": mode
+        ]
+        if let workspace, !workspace.isEmpty {
+            payload["workspace"] = workspace
+        }
+        if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+           !originPaneID.isEmpty {
+            payload["pane_id"] = originPaneID
+        }
+        sendPaneSyncReply(payload, command: "sync \(mode)", asJSON: asJSON)
+
+    case "exclude", "include":
+        let target = parseFlag("--target", from: &args)
+        guard let target, !target.isEmpty else {
+            fputs("Usage: nex pane sync \(mode) --target <name-or-uuid> [--workspace <name-or-uuid>]\n", stderr)
+            exit(1)
+        }
+        if let stray = args.first {
+            fputs("nex pane sync \(mode): unexpected argument '\(stray)'\n", stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
+            "command": "pane-sync-exclude",
+            "target": target,
+            "excluded": mode == "exclude"
+        ]
+        if let workspace, !workspace.isEmpty {
+            payload["workspace"] = workspace
+        }
+        if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+           !originPaneID.isEmpty {
+            payload["pane_id"] = originPaneID
+        }
+        sendPaneSyncReply(payload, command: "sync \(mode)", asJSON: asJSON)
+
+    default:
+        fputs("Unknown sync mode: \(mode)\n", stderr)
+        printPaneSyncUsage(stream: stderr)
+        exit(1)
+    }
+}
+
+func printPaneSyncUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane sync (on|off|toggle|status) [--workspace <name-or-uuid>] [--json]
+      nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
+      nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
+
+    When `on`, every keystroke typed in any pane of the workspace is mirrored
+    to the other panes in the workspace. Use `exclude` / `include` to opt a
+    specific pane out of (or back into) the sync group. `status` reports the
+    current sync state without mutating it.
+
+    Workspace defaults to the calling pane's workspace (via NEX_PANE_ID)
+    when --workspace is not supplied.
+    \n
+    """, stream)
+}
+
+private func sendPaneSyncReply(
+    _ payload: [String: Any], command: String, asJSON: Bool
+) {
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        fputs("nex pane \(command): transport failure (is Nex running?)\n", stderr)
+        exit(1)
+    }
+    if replyData.isEmpty {
+        fputs("nex pane \(command): empty reply (Nex version may not support this command)\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex pane \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex pane \(command): \(msg)\n", stderr)
+        exit(1)
+    }
+
+    if asJSON {
+        // Strip the `ok` field so JSON consumers see the same shape
+        // they'd get from a status-only query without the success flag
+        // (success is implicit since we exit non-zero on `ok: false`).
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let string = String(data: data, encoding: .utf8) {
+            print(string)
+        }
+        return
+    }
+
+    // Default human-readable summary.
+    let active = (json["active"] as? Bool) ?? false
+    let synced = (json["synced_pane_ids"] as? [String]) ?? []
+    let excluded = (json["excluded"] as? [[String: Any]]) ?? []
+    let workspaceName = (json["workspace_name"] as? String) ?? "?"
+
+    let stateStr = active ? "on" : "off"
+    print("workspace: \(workspaceName)")
+    print("sync     : \(stateStr)")
+    if active {
+        print("synced   : \(synced.count) pane\(synced.count == 1 ? "" : "s")")
+        if !excluded.isEmpty {
+            let labels = excluded.compactMap { entry -> String in
+                if let label = entry["label"] as? String, !label.isEmpty {
+                    return label
+                }
+                return (entry["id"] as? String) ?? "?"
+            }
+            print("excluded : \(labels.joined(separator: ", "))")
+        }
     }
 }
 

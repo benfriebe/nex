@@ -1267,6 +1267,149 @@ struct AppReducer {
         }
     }
 
+    // MARK: - Sync-input helpers (issue #121)
+
+    /// Push the workspace's current sync group to `SurfaceManager`.
+    /// Mirrors `WorkspaceFeature.refreshSyncGroup` but callable from
+    /// the AppReducer layer — used by `paneMoveToWorkspace` which
+    /// mutates `state.workspaces` directly and so bypasses the
+    /// per-workspace bookkeeping reducer. Returns `.none` when the
+    /// workspace has gone missing (race / typo) so we don't crash.
+    private func refreshSyncGroupForWorkspace(
+        workspaceID: UUID, state: State
+    ) -> Effect<Action> {
+        guard let workspace = state.workspaces[id: workspaceID] else { return .none }
+        let paneIDs = workspace.syncedPaneIDs
+        let mgr = surfaceManager
+        return .run { _ in
+            await mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
+        }
+    }
+
+    // MARK: - Sync-input socket handlers (issue #121)
+
+    /// Dispatch `pane-sync (on|off|toggle|status)`. Resolves the
+    /// workspace from `workspaceFilter` first, then `NEX_PANE_ID`.
+    /// Replies with `{ok:true,active:Bool,excluded:[...]}` on success;
+    /// `status` is read-only and never mutates state.
+    func handlePaneSync(
+        state: State,
+        paneID: UUID?,
+        workspaceFilter: String?,
+        action: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ error: String) -> Effect<Action> {
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        let workspace: WorkspaceFeature.State
+        if let workspaceFilter {
+            guard let ws = state.resolveWorkspace(workspaceFilter) else {
+                return fail("workspace not found: \(workspaceFilter)")
+            }
+            workspace = ws
+        } else if let paneID, let ws = state.workspaceContainingPane(paneID) {
+            workspace = ws
+        } else {
+            return fail("pane sync requires --workspace or NEX_PANE_ID")
+        }
+
+        let normalized = action.lowercased()
+        let nextActive: Bool
+        switch normalized {
+        case "on":
+            nextActive = true
+        case "off":
+            nextActive = false
+        case "toggle":
+            nextActive = !workspace.isSyncInputActive
+        case "status":
+            // Read-only — reply with current snapshot and bail.
+            replySyncStatus(reply: reply, workspace: workspace)
+            return .none
+        default:
+            return fail("unknown sync action '\(action)' (valid: on, off, toggle, status)")
+        }
+
+        // Reply with the post-change snapshot. Mirrors the read-only
+        // status payload so a CLI caller can rely on the same fields
+        // regardless of which subcommand they invoked.
+        var snapshot = workspace
+        snapshot.isSyncInputActive = nextActive
+        if !nextActive { snapshot.syncInputExcluded.removeAll() }
+        replySyncStatus(reply: reply, workspace: snapshot)
+
+        return .send(.workspaces(.element(
+            id: workspace.id,
+            action: .setSyncInputActive(nextActive)
+        )))
+    }
+
+    /// Dispatch `pane-sync exclude|include`. Reuses `resolvePaneTarget`
+    /// so target / workspace resolution matches `pane send` etc.
+    func handlePaneSyncExclude(
+        state: State,
+        paneID: UUID?,
+        target: String,
+        workspaceFilter: String?,
+        excluded: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.send(["ok": false, "error": error])
+            reply?.close()
+            return .none
+        }
+
+        var snapshot = workspace
+        if excluded {
+            snapshot.syncInputExcluded.insert(resolvedID)
+        } else {
+            snapshot.syncInputExcluded.remove(resolvedID)
+        }
+        replySyncStatus(reply: reply, workspace: snapshot)
+
+        return .send(.workspaces(.element(
+            id: workspace.id,
+            action: .setSyncInputExcluded(paneID: resolvedID, excluded: excluded)
+        )))
+    }
+
+    /// Build and send the standard sync-status reply payload.
+    /// Mirrors the structure `pane sync status` returns so every
+    /// sync subcommand surfaces consistent fields.
+    private func replySyncStatus(
+        reply: SocketServer.ReplyHandle?,
+        workspace: WorkspaceFeature.State
+    ) {
+        var excluded: [[String: Any]] = []
+        for paneID in workspace.syncInputExcluded {
+            guard let pane = workspace.panes[id: paneID] else { continue }
+            var entry: [String: Any] = ["id": paneID.uuidString]
+            if let label = pane.label { entry["label"] = label }
+            excluded.append(entry)
+        }
+        let synced = workspace.syncedPaneIDs.map(\.uuidString).sorted()
+        reply?.send([
+            "ok": true,
+            "workspace_id": workspace.id.uuidString,
+            "workspace_name": workspace.name,
+            "active": workspace.isSyncInputActive,
+            "synced_pane_ids": synced,
+            "excluded": excluded
+        ])
+        reply?.close()
+    }
+
     // MARK: - Graft socket handlers
 
     /// Outcome of `resolveGraftAssociations`. Carries either the
@@ -4586,6 +4729,25 @@ struct AppReducer {
                         reply: reply
                     )
 
+                case .paneSync(let paneID, let workspaceFilter, let action):
+                    return handlePaneSync(
+                        state: state,
+                        paneID: paneID,
+                        workspaceFilter: workspaceFilter,
+                        action: action,
+                        reply: reply
+                    )
+
+                case .paneSyncExclude(let paneID, let target, let workspaceFilter, let excluded):
+                    return handlePaneSyncExclude(
+                        state: state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        excluded: excluded,
+                        reply: reply
+                    )
+
                 case .paneMove(let paneID, let direction):
                     guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
                     else { return .none }
@@ -4696,6 +4858,20 @@ struct AppReducer {
                     state.workspaces[id: targetWSID]?.currentLayoutIndex = nil
                     state.activeWorkspaceID = targetWSID
 
+                    // Issue #121 — cross-workspace move bypasses the
+                    // WorkspaceFeature bookkeeping reducer, so we have
+                    // to push fresh sync-group snapshots for both
+                    // source and target explicitly. Without these, the
+                    // source workspace's `SurfaceManager.syncGroups`
+                    // entry would still reference the moved pane and
+                    // the target would never broadcast to it.
+                    let sourceSyncEffect = refreshSyncGroupForWorkspace(
+                        workspaceID: sourceWSID, state: state
+                    )
+                    let targetSyncEffect = refreshSyncGroupForWorkspace(
+                        workspaceID: targetWSID, state: state
+                    )
+
                     if dropMarkdownFind {
                         return .merge(
                             .run { _ in
@@ -4703,10 +4879,12 @@ struct AppReducer {
                                     MarkdownFindController.shared.close(paneID: paneID)
                                 }
                             },
+                            sourceSyncEffect,
+                            targetSyncEffect,
                             .send(.persistState)
                         )
                     }
-                    return .send(.persistState)
+                    return .merge(sourceSyncEffect, targetSyncEffect, .send(.persistState))
 
                 // MARK: Workspace commands
 

@@ -23,6 +23,17 @@ struct PaneHeaderView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRename: (() -> Void)?
     var onMoveToWorkspace: ((UUID) -> Void)?
+    /// True when sync is on for the workspace but this pane has been
+    /// opted out. Used to render the "Include in sync" context menu
+    /// entry and the dimmed `SYNC OFF` badge.
+    var isSyncExcluded: Bool = false
+    /// Workspace-level sync flag (issue #121). When true the amber
+    /// `SYNC` badge fires for every non-excluded pane in the
+    /// workspace, and the context menu offers exclude/include.
+    var workspaceSyncActive: Bool = false
+    /// Toggle this pane's membership in the sync group. Nil when the
+    /// host hasn't wired it (tests, previews).
+    var onToggleSyncExcluded: (() -> Void)?
 
     @State private var isDragging = false
 
@@ -91,6 +102,45 @@ struct PaneHeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Toggle zoom")
+            }
+
+            // Sync chrome — issue #121. The amber `SYNC` badge fires
+            // whenever the workspace toggle is on AND this pane isn't
+            // excluded, even if no peer is currently around (e.g. a
+            // single-pane workspace where the broadcast would no-op
+            // anyway). The user explicitly asked for a clear "I forgot
+            // it was on" cue, so the visual presence of the toggle
+            // takes priority over the abstract "are we currently
+            // mirroring anything" question.
+            if workspaceSyncActive, !isSyncExcluded {
+                HStack(spacing: 2) {
+                    Image(systemName: "rectangle.connected.to.line.below")
+                        .font(.system(size: 8))
+                    Text("SYNC")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                .help("Synchronise input is on — keystrokes mirror to peer panes")
+            } else if workspaceSyncActive, isSyncExcluded {
+                // Sync is on for the workspace but this pane is opted
+                // out. Distinct affordance so the user can tell the
+                // difference between "no sync" and "sync, but skipped".
+                HStack(spacing: 2) {
+                    Image(systemName: "rectangle.dashed")
+                        .font(.system(size: 8))
+                    Text("SYNC OFF")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+                .help("Excluded from the workspace sync group")
             }
 
             Spacer()
@@ -248,6 +298,12 @@ struct PaneHeaderView: View {
                 ForEach(otherWorkspaces, id: \.id) { ws in
                     Button(ws.name) { onMoveToWorkspace(ws.id) }
                 }
+            }
+        }
+        if workspaceSyncActive, let onToggleSyncExcluded {
+            Divider()
+            Button(isSyncExcluded ? "Include in Sync" : "Exclude from Sync") {
+                onToggleSyncExcluded()
             }
         }
         Divider()
