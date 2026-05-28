@@ -834,6 +834,14 @@ struct SocketParsingTests {
         #expect(result?.0 == .graftStatus)
     }
 
+    @Test func parsePing() {
+        let data = jsonData("""
+        {"command":"ping"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .ping)
+    }
+
     // MARK: - parseWireMessage — Phase 3 web console/inspector
 
     @Test func parseWebConsoleDefaults() {
