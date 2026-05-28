@@ -284,6 +284,20 @@ struct PaneGridView: View {
                 )
             }
         }
+        // Clamp the VStack to the computed pane rect and clip overflow.
+        // `.frame(width:height:)` only assigns a layout slot — SwiftUI
+        // does not strictly force the inner content to render within
+        // those bounds. PaneHeaderView's `.background { Color }` and
+        // its focused accent line size to the HStack's actual rendered
+        // width, and the embedded `NSViewRepresentable` can keep stale
+        // Auto Layout bounds during inspector / sidebar toggles. The
+        // result was that the header chrome and focus ring spilled past
+        // the pane's right edge into the inspector strip (#143).
+        // `.clipped()` enforces the visible bounds; the outer `.frame`
+        // at the end of the chain stays put so `.onHover` hit-testing
+        // is anchored to the same rect.
+        .frame(width: frame.width, height: frame.height)
+        .clipped()
         .overlay(alignment: .topTrailing) {
             if searchingPaneID == pane.id {
                 PaneSearchOverlay(
