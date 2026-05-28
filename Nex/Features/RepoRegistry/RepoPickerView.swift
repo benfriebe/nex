@@ -235,7 +235,7 @@ struct RepoPickerView: View {
         }
         let lo = min(i, j)
         let hi = max(i, j)
-        return Set(rows[lo...hi].map(\.id).filter { !alreadyAssociatedRepoIDs.contains($0) })
+        return Set(rows[lo ... hi].map(\.id).filter { !alreadyAssociatedRepoIDs.contains($0) })
     }
 
     private var filteredRepos: IdentifiedArrayOf<Repo> {
@@ -314,7 +314,7 @@ struct RepoPickerView: View {
             if extend {
                 let lo = min(currentIdx, newIdx)
                 let hi = max(currentIdx, newIdx)
-                let span = rows[lo...hi].map(\.id).filter { !alreadyAssociatedRepoIDs.contains($0) }
+                let span = rows[lo ... hi].map(\.id).filter { !alreadyAssociatedRepoIDs.contains($0) }
                 selectedRepoIDs.formUnion(span)
             }
         }

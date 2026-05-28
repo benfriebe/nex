@@ -284,6 +284,14 @@ struct PaneGridView: View {
                 )
             }
         }
+        // Clamp the VStack to the computed pane rect BEFORE the overlays
+        // and background attach, so they size to this rect rather than the
+        // underlying view's natural bounds. Without this the focus-ring
+        // overlay sat on stale bounds when the inspector was toggled and
+        // appeared shifted past the pane edge (#143). The outer `.frame`
+        // at the end of the chain stays — it keeps `.onHover` hit-testing
+        // anchored to the same rect.
+        .frame(width: frame.width, height: frame.height)
         .overlay(alignment: .topTrailing) {
             if searchingPaneID == pane.id {
                 PaneSearchOverlay(
