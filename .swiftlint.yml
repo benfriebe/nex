@@ -1,6 +1,7 @@
 excluded:
   - ghostty/
   - .build/
+  - build/
   - Nex.xcodeproj/
 
 disabled_rules:

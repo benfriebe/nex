@@ -32,6 +32,13 @@ struct PaneGridView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
+    /// Issue #121 sync-input state. `isSyncInputActive` flips the
+    /// workspace toggle (drives the per-pane SYNC badge for every
+    /// non-excluded pane); `syncInputExcluded` lists panes opted out.
+    /// Wired by `ContentView`.
+    var isSyncInputActive: Bool = false
+    var syncInputExcluded: Set<UUID> = []
+    var onToggleSyncExcluded: ((UUID) -> Void)?
     /// Sidecar state for `.web` panes in this workspace. Keyed by pane id.
     var webPanes: [UUID: WebPaneState] = [:]
     /// URL bar focus token bumped by ⌘L. Used by `WebPaneView` to
@@ -177,6 +184,11 @@ struct PaneGridView: View {
                 onRename: onRenamePane.map { handler in { handler(pane.id) } },
                 onMoveToWorkspace: onMovePaneToWorkspace.map { handler in
                     { targetWS in handler(pane.id, targetWS) }
+                },
+                isSyncExcluded: syncInputExcluded.contains(pane.id),
+                workspaceSyncActive: isSyncInputActive,
+                onToggleSyncExcluded: onToggleSyncExcluded.map { handler in
+                    { handler(pane.id) }
                 }
             )
 

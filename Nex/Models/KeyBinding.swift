@@ -247,6 +247,7 @@ enum NexAction: String, CaseIterable {
     case commandPalette = "command_palette"
     case newGroup = "new_group"
     case openDiff = "open_diff"
+    case toggleSyncInput = "toggle_sync_input"
 
     // Web pane actions. All ship unbound; the priority layer in
     // `PaneShortcutMonitor` dispatches them directly when the focused
@@ -320,6 +321,7 @@ enum NexAction: String, CaseIterable {
         case .commandPalette: "Command Palette"
         case .newGroup: "New Group"
         case .openDiff: "Open Diff"
+        case .toggleSyncInput: "Toggle Synchronise Input"
         case .openWebPane: "Open Web Pane"
         case .webFocusURLBar: "Web: Focus URL Bar"
         case .webBack: "Web: Back"
@@ -337,7 +339,8 @@ enum NexAction: String, CaseIterable {
     var category: String {
         switch self {
         case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout,
-             .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, .createScratchpad:
+             .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, .createScratchpad,
+             .toggleSyncInput:
             "Pane Management"
         case .focusNextPane, .focusPreviousPane, .commandPalette:
             "Navigation"

@@ -446,6 +446,34 @@ Smoke tests can still use `data:` URLs for navigation, `capture
   `backspace`, `up`/`down`/`left`/`right`, and `ctrl-c`. It uses the same
   `--target` / `--workspace` resolution as `pane send`.
 
+### Broadcasting to every worker pane (`pane sync`)
+
+When you want the same keystrokes (e.g. `/compact`, `clear`, an interrupt)
+to land in every worker pane of the workspace at once, toggle tmux-style
+synchronise-input:
+
+```bash
+nex pane sync on            # mirror keystrokes across this workspace
+# ... type in any pane; every other pane in the workspace gets the same input
+nex pane sync off           # back to per-pane input
+
+nex pane sync toggle        # flip without caring about the current state
+nex pane sync status --json # read-only snapshot, machine-readable
+```
+
+Opt a single pane out of the active sync group (handy for a coordinator
+pane you don't want broadcasting into):
+
+```bash
+nex pane sync exclude --target coordinator
+nex pane sync include --target coordinator   # undo
+```
+
+Scope defaults to the calling pane's workspace via `NEX_PANE_ID`. Pass
+`--workspace <name-or-uuid>` to target another workspace from an
+external script. New panes opened while sync is on auto-join the group;
+closed panes drop out automatically.
+
 ## Multi-Agent Workflow Patterns
 
 ### Pattern 1: Fan-Out with Markdown Communication (Recommended)

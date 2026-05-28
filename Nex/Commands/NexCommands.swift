@@ -377,6 +377,10 @@ final class PaneShortcutMonitor {
         case .openDiff:
             return handleOpenDiff(activeWorkspaceID: id)
 
+        case .toggleSyncInput:
+            store.send(.workspaces(.element(id: id, action: .toggleSyncInput)))
+            return true
+
         case .openWebPane:
             // Open a fresh web pane on a blank URL — user can type
             // one in the URL bar. Matches what ⌘L does for a brand-new

@@ -59,6 +59,42 @@ struct WorkspaceFeature {
         /// Drives the sidebar filter — see `WorkspaceListView` filter
         /// field and `WorkspaceInspectorView` label editor.
         var labels: [String] = []
+        /// Tmux-style synchronise-input toggle (issue #121). When true,
+        /// keystrokes typed in any pane of this workspace are mirrored
+        /// to every other pane that isn't in `syncInputExcluded`. New
+        /// panes opened while sync is active auto-join the group.
+        /// Transient — resets on app restart.
+        var isSyncInputActive: Bool = false
+        /// Panes explicitly opted out of the active sync group.
+        /// Strictly ephemeral within a single on-cycle: the set is
+        /// cleared on every transition of `isSyncInputActive` (both
+        /// off→on and on→off) so each on-cycle starts from a fresh
+        /// "all shell panes participate" baseline. This means
+        /// `nex pane sync exclude` run while sync is off has no
+        /// effect on the next on-cycle — coordinators should sequence
+        /// `sync on` first, then `sync exclude --target <pane>`.
+        /// Transient — also resets on app restart.
+        var syncInputExcluded: Set<UUID> = []
+
+        /// Pane IDs that should mirror each other's keystrokes right
+        /// now. Empty when sync is off OR when fewer than two shell
+        /// panes would participate (mirroring to nothing is a no-op
+        /// anyway). Non-shell panes (markdown / scratchpad / diff /
+        /// web) are filtered out even when they host a ghostty
+        /// surface — e.g. markdown panes in `$EDITOR` mode register
+        /// a surface to host vim/nano, and mirroring `/compact`-style
+        /// agent prompts into that editor would be a footgun. Pushed
+        /// into `SurfaceManager.setSyncGroup` by the reducer whenever
+        /// `isSyncInputActive`, `syncInputExcluded`, or `panes` change.
+        var syncedPaneIDs: Set<UUID> {
+            guard isSyncInputActive else { return [] }
+            let candidates = panes
+                .lazy
+                .filter { $0.type == .shell && !syncInputExcluded.contains($0.id) }
+                .map(\.id)
+            let result = Set(candidates)
+            return result.count >= 2 ? result : []
+        }
 
         init(
             id: UUID = UUID(),
@@ -323,6 +359,11 @@ struct WorkspaceFeature {
         case searchClose
         case searchTotalUpdated(paneID: UUID, total: Int)
         case searchSelectedUpdated(paneID: UUID, selected: Int)
+
+        // Synchronise input (issue #121)
+        case toggleSyncInput
+        case setSyncInputActive(Bool)
+        case setSyncInputExcluded(paneID: UUID, excluded: Bool)
     }
 
     private enum SearchDebounceID: Hashable { case debounce }
@@ -348,6 +389,19 @@ struct WorkspaceFeature {
     @Dependency(\.webPaneStore) var webPaneStore
     @Dependency(\.date.now) var now
     @Dependency(\.uuid) var uuid
+
+    /// Push the workspace's current sync group to `SurfaceManager`.
+    /// Cheap when sync is off (the manager clears the entry); cheap
+    /// when on (a single dict assignment). Returned by any action
+    /// that mutates `panes` or the sync-state fields.
+    private func refreshSyncGroup(_ state: WorkspaceFeature.State) -> Effect<Action> {
+        let workspaceID = state.id
+        let paneIDs = state.syncedPaneIDs
+        let mgr = surfaceManager
+        return .run { _ in
+            mgr.setSyncGroup(workspaceID: workspaceID, paneIDs: paneIDs)
+        }
+    }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -1503,6 +1557,31 @@ struct WorkspaceFeature {
                 state.searchSelected = selected
                 return .none
 
+            case .toggleSyncInput:
+                state.isSyncInputActive.toggle()
+                // Clear on every transition so re-enabling sync always
+                // starts from a fresh "all panes participate" baseline.
+                // Clearing on toggle-off alone would let a pre-staged
+                // `pane sync exclude` (run while sync was off) survive
+                // into the next on-cycle and silently exclude a pane.
+                state.syncInputExcluded.removeAll()
+                return refreshSyncGroup(state)
+
+            case .setSyncInputActive(let active):
+                guard state.isSyncInputActive != active else { return .none }
+                state.isSyncInputActive = active
+                state.syncInputExcluded.removeAll()
+                return refreshSyncGroup(state)
+
+            case .setSyncInputExcluded(let paneID, let excluded):
+                guard state.panes[id: paneID] != nil else { return .none }
+                if excluded {
+                    state.syncInputExcluded.insert(paneID)
+                } else {
+                    state.syncInputExcluded.remove(paneID)
+                }
+                return refreshSyncGroup(state)
+
             case .reopenClosedPane:
                 guard let snapshot = state.recentlyClosedPanes.popLast() else { return .none }
                 guard let focusedID = state.focusedPaneID else { return .none }
@@ -1554,6 +1633,24 @@ struct WorkspaceFeature {
                         )
                     }
                 }
+            }
+        }
+        // Sync-input bookkeeping (issue #121). When sync is active for
+        // this workspace and an action mutated the pane set, push the
+        // updated group to `SurfaceManager` so brand-new panes join
+        // and closed panes drop out without the caller having to
+        // remember. The explicit sync-toggle actions already refresh
+        // synchronously, so they're filtered out here.
+        Reduce { state, action in
+            guard state.isSyncInputActive else { return .none }
+            switch action {
+            case .createPane, .splitPane, .splitPaneAtPath, .closePane,
+                 .openMarkdownFile, .openDiffPane, .openWebPane,
+                 .createScratchpad, .reopenClosedPane,
+                 .paneProcessTerminated:
+                return refreshSyncGroup(state)
+            default:
+                return .none
             }
         }
     }

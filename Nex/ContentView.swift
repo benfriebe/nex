@@ -116,6 +116,15 @@ struct ContentView: View {
                                 reply: nil
                             ))
                         },
+                        isSyncInputActive: workspace.isSyncInputActive,
+                        syncInputExcluded: workspace.syncInputExcluded,
+                        onToggleSyncExcluded: { paneID in
+                            let excluded = workspace.syncInputExcluded.contains(paneID)
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .setSyncInputExcluded(paneID: paneID, excluded: !excluded)
+                            )))
+                        },
                         webPanes: workspace.webPanes,
                         webPaneURLFocusToken: store.webPaneURLFocusTokens,
                         onWebNavigate: { paneID, url in
