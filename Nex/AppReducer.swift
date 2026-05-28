@@ -1618,6 +1618,26 @@ struct AppReducer {
         return .none
     }
 
+    /// `nex ping` — cheap IPC round-trip used by `nex doctor` and as
+    /// a version probe. Reads the version + build out of the main
+    /// bundle's Info.plist; `pid` is the running app's process id so
+    /// callers can confirm which Nex instance owns the socket
+    /// (e.g. helpful when triaging stale `/tmp/nex.sock` files).
+    func handlePing(reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        let info = Bundle.main.infoDictionary
+        let version = (info?["CFBundleShortVersionString"] as? String) ?? "unknown"
+        let build = (info?["CFBundleVersion"] as? String) ?? "unknown"
+        let payload: [String: Any] = [
+            "ok": true,
+            "version": version,
+            "build": build,
+            "pid": Int(ProcessInfo.processInfo.processIdentifier)
+        ]
+        reply?.send(payload)
+        reply?.close()
+        return .none
+    }
+
     // MARK: - Web pane handlers (Phase 1)
 
     enum WebNavAction { case back, forward, reload, reloadHard }
@@ -5038,6 +5058,9 @@ struct AppReducer {
 
                 case .graftStatus:
                     return handleGraftStatus(state: state, reply: reply)
+
+                case .ping:
+                    return handlePing(reply: reply)
 
                 case .webOpen(let paneID, let url, let isPrivate):
                     return handleWebOpen(

@@ -117,6 +117,32 @@ nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 nex pane id
 ```
 
+### `nex doctor` — when CLI commands stop working
+
+If `nex` commands suddenly start failing with `Error: nex …: cannot reach
+Nex …` or `no response from Nex` (issue #100), run `nex doctor` first.
+It runs five named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
+plus a concrete repair line for any failure:
+
+- `transport` — Unix socket path or TCP destination in use.
+- `socket` / `resolve` — file exists on disk (Unix) or hostname resolves (TCP).
+- `ping` — round-trip a `ping` command and parse the JSON reply.
+- `process` — `pgrep` for `Nex.app`. If `ping` failed but the process is up,
+  the app is wedged (restart it); if no process, Nex isn't running.
+- `version` — CLI version vs running-app version. Warn on drift (rebuild Nex).
+
+Pass `--json` for a machine-readable report. Exit 0 if all checks pass,
+non-zero if any failed. Use this as the first triage step before
+restarting the app.
+
+Every CLI error now emits an `Error: …\nRepair: …` pair pointing at the
+matching repair step. Fire-and-forget commands (`nex event …`, hooks)
+print a `Warning: …` to stderr but still exit 0 so Claude Code Stop
+hooks etc. don't break — set `NEX_SILENT=1` to suppress entirely.
+`nex event …` (the Claude Code hook entrypoint) suppresses the warning
+by default to avoid stderr spam when Nex is closed; set
+`NEX_VERBOSE_HOOKS=1` to surface them again.
+
 ### `pane list` — reconcile with live state
 
 `pane list` is the only Nex command that returns data. Use it whenever a

@@ -98,6 +98,15 @@ enum SocketMessage: Equatable {
     /// `nex graft status` — list active sessions across all workspaces.
     case graftStatus
 
+    /// `nex ping` — IPC health check. Request/response. Replies with
+    /// `{"ok":true,"version":"<short>","build":"<build>","pid":<n>}`
+    /// where `version` is `CFBundleShortVersionString` and `build` is
+    /// `CFBundleVersion`. Used by `nex doctor` to verify the running
+    /// app can dispatch socket commands round-trip, and as a cheap
+    /// version probe so the CLI can warn when the installed binary
+    /// and the running app drift.
+    case ping
+
     // Web pane commands (Phase 1). `web` is a first-class top-level
     // CLI verb (not a `pane` subcommand), so the wire names follow
     // suit: `web-open` / `web-url` / etc.
@@ -294,6 +303,7 @@ private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-sync", "pane-sync-exclude",
     "graft-start", "graft-stop", "graft-status",
+    "ping",
     "web-open", "web-navigate", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
     "web-tabs", "web-tab-new", "web-tab-close", "web-tab-select",
@@ -956,6 +966,10 @@ final class SocketServer: Sendable {
 
         if wire.command == "graft-status" {
             return (.graftStatus, wire)
+        }
+
+        if wire.command == "ping" {
+            return (.ping, wire)
         }
 
         if wire.command == "web-open" {

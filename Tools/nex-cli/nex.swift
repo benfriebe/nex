@@ -28,6 +28,7 @@
 //   nex layout select <name>
 //   nex open [--here] <filepath>
 //   nex diff [<path>]
+//   nex doctor [--json]
 //
 // Reads NEX_PANE_ID from the environment (injected by Nex when the PTY was created).
 // Reads NEX_SOCKET from the environment to select transport:
@@ -73,6 +74,113 @@ let nexVersion: String = {
     }
     return "dev"
 }()
+
+// MARK: - Transport diagnostics
+
+//
+// The CLI's transport helpers (`sendViaUnix`/`sendViaTCP`) used to
+// collapse every failure into a single `nil` return, which left
+// callers printing terse, unhelpful text like "transport failure
+// (is Nex running?)". Issue #100 surfaced that for users hitting
+// edge cases (stale socket from a crashed app, version drift, etc.)
+// the generic message left no path forward.
+//
+// The helpers now classify each failure into a `TransportFailure`
+// case and stash it in `lastTransportFailure` so `printTransportFailure`
+// can produce an error line plus a concrete "Repair:" suggestion at
+// each call site. `nex doctor` reads from the same enum.
+
+enum TransportFailure {
+    /// Unix socket path doesn't exist on disk. Most likely: Nex is
+    /// not running, or it's running with TCP transport only.
+    case unixSocketMissing(path: String)
+    /// Socket file exists but connect was refused — typically a stale
+    /// `/tmp/nex.sock` left behind by a previous Nex process that
+    /// didn't shut down cleanly.
+    case unixConnectRefused(path: String)
+    /// Some other connect-time errno on the Unix path (EACCES, etc.).
+    case unixConnectFailed(path: String, errno: Int32)
+    /// `getaddrinfo` failed — hostname doesn't resolve.
+    case tcpResolveFailed(host: String)
+    /// TCP `connect()` failed — most often "Nex isn't listening on
+    /// this host/port" (no `tcp-port` in `~/.config/nex/config`, or
+    /// SSH tunnel down).
+    case tcpConnectFailed(host: String, port: UInt16, errno: Int32)
+    /// `socket(2)` itself failed — process-level (FD exhaustion, etc.).
+    case createSocketFailed(errno: Int32)
+    /// Connection succeeded and bytes were sent, but the peer closed
+    /// (or the timeout elapsed) before any reply arrived. Usually
+    /// means an older Nex that doesn't recognise the command, or the
+    /// app's main-actor handler is wedged.
+    case emptyReply(command: String)
+}
+
+/// Stashed by `sendViaUnix`/`sendViaTCP` on failure so the call
+/// site can emit a structured error without having to plumb the
+/// classification through the existing `Data?` return.
+var lastTransportFailure: TransportFailure?
+
+/// Produces (one-line error, one-line repair tip) for a failure.
+/// `command` is the CLI subcommand name to make the error
+/// attributable in mixed pipelines (e.g. "nex pane close: ...").
+func describeTransportFailure(_ failure: TransportFailure, command: String) -> (String, String) {
+    switch failure {
+    case .unixSocketMissing(let path):
+        (
+            "\(command): cannot reach Nex — socket \(path) does not exist.",
+            "Is Nex running? Launch the app, then retry. If Nex is running but using TCP, set NEX_SOCKET=tcp:<host>:<port>."
+        )
+    case .unixConnectRefused(let path):
+        (
+            "\(command): socket \(path) exists but connect was refused — Nex is not listening (likely stale socket from a previous crash).",
+            "Restart Nex (panes and workspaces are persisted to ~/Library/Application Support/Nex/nex.db so they will be restored). If the file remains after Nex quits, remove it with `rm \(path)`."
+        )
+    case .unixConnectFailed(let path, let err):
+        (
+            "\(command): connect to \(path) failed (errno \(err): \(String(cString: strerror(err)))).",
+            "Run `nex doctor` for full IPC diagnostics."
+        )
+    case .tcpResolveFailed(let host):
+        (
+            "\(command): cannot resolve host \"\(host)\" (from NEX_SOCKET).",
+            "Check the hostname in NEX_SOCKET. From a dev container the usual value is `tcp:host.docker.internal:<port>`."
+        )
+    case .tcpConnectFailed(let host, let port, let err):
+        (
+            "\(command): TCP connect to \(host):\(port) failed (errno \(err): \(String(cString: strerror(err)))).",
+            "Confirm Nex has `tcp-port = \(port)` set in ~/.config/nex/config and is running. If you're tunneling, check the SSH reverse tunnel is up."
+        )
+    case .createSocketFailed(let err):
+        (
+            "\(command): socket(2) failed (errno \(err): \(String(cString: strerror(err)))).",
+            "Process-level failure — check for FD exhaustion. Run `nex doctor` for diagnostics."
+        )
+    case .emptyReply(let cmd):
+        (
+            "\(command): no response from Nex for `\(cmd)` (connected, then peer closed before replying).",
+            "Likely an older Nex that doesn't recognise the command, or the app is wedged. Run `nex doctor` to confirm. Restart Nex if the doctor reports the app pid is responsive but commands hang."
+        )
+    }
+}
+
+/// Print the most recent transport failure to `stream` as two lines
+/// (error + Repair tip). Use `fireAndForget: true` for commands that
+/// historically silently exited on transport failure — the prefix
+/// becomes "Warning" so scripted callers see something actionable
+/// without breaking the existing exit-0 behaviour.
+func printTransportFailure(
+    command: String,
+    to stream: UnsafeMutablePointer<FILE> = stderr,
+    fireAndForget: Bool = false
+) {
+    guard let failure = lastTransportFailure else {
+        fputs("\(command): transport failure (no diagnostic captured).\n", stream)
+        return
+    }
+    let (line, repair) = describeTransportFailure(failure, command: command)
+    let prefix = fireAndForget ? "Warning" : "Error"
+    fputs("\(prefix): \(line)\nRepair: \(repair)\n", stream)
+}
 
 // MARK: - Helpers
 
@@ -126,6 +234,7 @@ func printUsage() {
       nex web hover <selector> [--target X] [--workspace Y] [--json]
       nex web key <key-name> [--selector <sel>] [--target X] [--workspace Y] [--json]
       nex web exec (--file <path> | <js>) [--timeout 30] [--target X] [--workspace Y] [--json]
+      nex doctor [--json]                                   # IPC health check
     \n
     """, stderr)
 }
@@ -190,8 +299,8 @@ func requirePaneID() -> String {
     return paneID
 }
 
-func sendJSON(_ payload: [String: String]) {
-    sendJSONAny(payload as [String: Any])
+func sendJSON(_ payload: [String: String], commandLabel: String = "nex") {
+    sendJSONAny(payload as [String: Any], commandLabel: commandLabel)
 }
 
 /// Accepts mixed-type payloads (e.g. `cascade: true`, `index: 3`) so
@@ -199,12 +308,12 @@ func sendJSON(_ payload: [String: String]) {
 /// numbers instead of stringified ones. The server's `WireMessage`
 /// decoder requires native JSON types for `cascade: Bool?` and
 /// `index: Int?`.
-func sendJSONAny(_ payload: [String: Any]) {
+func sendJSONAny(_ payload: [String: Any], commandLabel: String = "nex") {
     switch transport {
     case .unix(let path):
-        sendViaUnix(path: path, payload: payload, expectsReply: false)
+        sendViaUnix(path: path, payload: payload, expectsReply: false, commandLabel: commandLabel)
     case .tcp(let host, let port):
-        sendViaTCP(host: host, port: port, payload: payload, expectsReply: false)
+        sendViaTCP(host: host, port: port, payload: payload, expectsReply: false, commandLabel: commandLabel)
     }
 }
 
@@ -284,11 +393,41 @@ func readUntilEOF(fd: Int32) -> Data? {
     }
 }
 
+/// Set by `nex event …` (Claude Code hook entrypoint) to avoid
+/// stderr spam in user terminals on every hook fire when Nex is
+/// closed. Distinct from `NEX_SILENT`, which is the user-facing
+/// opt-in for non-hook callers.
+var suppressFireAndForgetWarnings = false
+
+/// Fire-and-forget callers historically wanted a silent exit(0) when
+/// Nex wasn't reachable so Claude Code Stop hooks etc. wouldn't fail.
+/// We preserve the exit code, but surface a one-line stderr warning
+/// with a repair tip so the user can at least see why nothing
+/// happened. Set `NEX_SILENT=1` to fully suppress (matches the old
+/// behaviour for callers that explicitly opt in). `nex event …`
+/// hooks also suppress by default since they fire on every Claude
+/// Code stop/start — set `NEX_VERBOSE_HOOKS=1` to opt back in.
+func handleFireAndForgetTransportFailure(command: String) -> Never {
+    if !suppressFireAndForgetWarnings,
+       ProcessInfo.processInfo.environment["NEX_SILENT"] == nil {
+        printTransportFailure(command: command, fireAndForget: true)
+    }
+    exit(0)
+}
+
 @discardableResult
 func sendViaUnix(
     path: String, payload: [String: Any], expectsReply: Bool,
-    readTimeoutOverride: Int? = nil
+    readTimeoutOverride: Int? = nil,
+    commandLabel: String = "nex"
 ) -> Data? {
+    // Reset the global so a previous call's diagnostic can't leak
+    // into this call's failure path. Important for `nex doctor`,
+    // which makes multiple successive calls (ping + ps) — without
+    // this reset, a passed ping followed by a failed-but-no-update
+    // path could surface the stale prior diagnostic.
+    lastTransportFailure = nil
+
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -299,8 +438,9 @@ func sendViaUnix(
 
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else {
+        lastTransportFailure = .createSocketFailed(errno: errno)
         if expectsReply { return nil }
-        exit(0)
+        handleFireAndForgetTransportFailure(command: commandLabel)
     }
 
     var addr = sockaddr_un()
@@ -319,9 +459,18 @@ func sendViaUnix(
     }
 
     guard connectResult == 0 else {
+        let err = errno
         close(fd)
+        switch err {
+        case ENOENT:
+            lastTransportFailure = .unixSocketMissing(path: path)
+        case ECONNREFUSED:
+            lastTransportFailure = .unixConnectRefused(path: path)
+        default:
+            lastTransportFailure = .unixConnectFailed(path: path, errno: err)
+        }
         if expectsReply { return nil }
-        exit(0)
+        handleFireAndForgetTransportFailure(command: commandLabel)
     }
 
     jsonString.withCString { ptr in
@@ -334,14 +483,29 @@ func sendViaUnix(
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
+    if expectsReply, reply == nil {
+        // `readUntilEOF` returns nil when read(2) errors with
+        // something other than EINTR/EAGAIN before any bytes
+        // arrived (e.g. ECONNRESET after the peer closed mid-handshake).
+        // The connection succeeded so this isn't a "missing socket"
+        // condition — surface it as emptyReply so the caller's
+        // repair tip points at "wedged or pre-ping Nex" rather than
+        // the no-diagnostic-captured fallback.
+        lastTransportFailure = .emptyReply(command: (payload["command"] as? String) ?? commandLabel)
+    }
     return reply
 }
 
 @discardableResult
 func sendViaTCP(
     host: String, port: UInt16, payload: [String: Any], expectsReply: Bool,
-    readTimeoutOverride: Int? = nil
+    readTimeoutOverride: Int? = nil,
+    commandLabel: String = "nex"
 ) -> Data? {
+    // See note on `sendViaUnix` — reset so doctor / chained calls
+    // don't surface stale prior diagnostics.
+    lastTransportFailure = nil
+
     guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
           var jsonString = String(data: jsonData, encoding: .utf8)
     else {
@@ -358,23 +522,27 @@ func sendViaTCP(
     guard getaddrinfo(host, String(port), &hints, &result) == 0,
           let addrInfo = result
     else {
+        lastTransportFailure = .tcpResolveFailed(host: host)
         if expectsReply { return nil }
-        exit(0)
+        handleFireAndForgetTransportFailure(command: commandLabel)
     }
     defer { freeaddrinfo(result) }
 
     let fd = socket(addrInfo.pointee.ai_family, addrInfo.pointee.ai_socktype, addrInfo.pointee.ai_protocol)
     guard fd >= 0 else {
+        lastTransportFailure = .createSocketFailed(errno: errno)
         if expectsReply { return nil }
-        exit(0)
+        handleFireAndForgetTransportFailure(command: commandLabel)
     }
 
     let connectResult = connect(fd, addrInfo.pointee.ai_addr, addrInfo.pointee.ai_addrlen)
 
     guard connectResult == 0 else {
+        let err = errno
         close(fd)
+        lastTransportFailure = .tcpConnectFailed(host: host, port: port, errno: err)
         if expectsReply { return nil }
-        exit(0)
+        handleFireAndForgetTransportFailure(command: commandLabel)
     }
 
     jsonString.withCString { ptr in
@@ -387,12 +555,25 @@ func sendViaTCP(
     }
     let reply: Data? = expectsReply ? readUntilEOF(fd: fd) : nil
     close(fd)
+    if expectsReply, reply == nil {
+        // See note on the matching Unix path.
+        lastTransportFailure = .emptyReply(command: (payload["command"] as? String) ?? commandLabel)
+    }
     return reply
 }
 
 // MARK: - Subcommands
 
 func handleEvent(_ args: inout ArraySlice<String>) {
+    // `nex event …` is the Claude Code hook entrypoint (Stop, Start,
+    // Notification, etc.). These run on every hook fire — including
+    // when the user has Nex closed — so a stderr warning per call
+    // would spam the terminal. Silence transport warnings unless the
+    // user has explicitly opted in to verbose hook output.
+    if ProcessInfo.processInfo.environment["NEX_VERBOSE_HOOKS"] == nil {
+        suppressFireAndForgetWarnings = true
+    }
+
     guard let eventType = args.popFirst() else {
         fputs("Usage: nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]\n", stderr)
         exit(1)
@@ -454,7 +635,7 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     if let body { payload["body"] = body }
     if let sessionID { payload["session_id"] = sessionID }
 
-    sendJSON(payload)
+    sendJSON(payload, commandLabel: "nex event \(eventType)")
 }
 
 func handlePane(_ args: inout ArraySlice<String>) {
@@ -564,11 +745,11 @@ func handlePane(_ args: inout ArraySlice<String>) {
         }
 
         guard let replyData = sendJSONAndReadReply(payload) else {
-            fputs("nex pane close: transport failure (is Nex running?)\n", stderr)
+            printTransportFailure(command: "nex pane close")
             exit(1)
         }
         guard !replyData.isEmpty else {
-            fputs("nex pane close: no response from Nex (upgrade required? need v0.20+)\n", stderr)
+            fputs("nex pane close: no response from Nex (upgrade required? need v0.20+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
             exit(1)
         }
         guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
@@ -644,7 +825,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         }
 
         guard let replyData = sendJSONAndReadReply(payload) else {
-            fputs("nex pane send: transport failure (is Nex running?)\n", stderr)
+            printTransportFailure(command: "nex pane send")
             exit(1)
         }
         // Empty reply = older Nex that silently dropped the request.
@@ -728,7 +909,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         }
 
         guard let replyData = sendJSONAndReadReply(payload) else {
-            fputs("nex pane send-key: transport failure (is Nex running?)\n", stderr)
+            printTransportFailure(command: "nex pane send-key")
             exit(1)
         }
         // Empty reply = older Nex that doesn't know the command. Treat
@@ -910,7 +1091,7 @@ private func sendPaneSyncReply(
     _ payload: [String: Any], command: String, asJSON: Bool
 ) {
     guard let replyData = sendJSONAndReadReply(payload) else {
-        fputs("nex pane \(command): transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex pane \(command)")
         exit(1)
     }
     if replyData.isEmpty {
@@ -1640,11 +1821,11 @@ private func decodeWebReply(
     readTimeoutOverride: Int? = nil
 ) -> [String: Any] {
     guard let data = sendJSONAndReadReply(payload, readTimeoutOverride: readTimeoutOverride) else {
-        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web \(command)")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1787,11 +1968,11 @@ private func sendWebReplyAndPrintExec(
 
 private func sendWebReplyAndPrintTabs(_ payload: [String: Any], asJSON: Bool, noHeader: Bool) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web tabs: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web tabs")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web tabs: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web tabs: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1827,11 +2008,11 @@ private func sendWebReplyAndPrintTabs(_ payload: [String: Any], asJSON: Bool, no
 
 private func sendWebReplyAndPrintBasic(_ payload: [String: Any], command: String) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web \(command)")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1850,11 +2031,11 @@ private func sendWebReplyAndPrintBasic(_ payload: [String: Any], command: String
 
 private func sendWebReplyAndPrintURL(_ payload: [String: Any]) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web url: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web url")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web url: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web url: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1877,11 +2058,11 @@ private func sendWebReplyAndPrintURL(_ payload: [String: Any]) {
 
 private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web capture: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web capture")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web capture: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web capture: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1920,11 +2101,11 @@ private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
 
 private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web console: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web console")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web console: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web console: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1960,11 +2141,11 @@ private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool)
 
 private func sendWebReplyAndPrintInspect(_ payload: [String: Any]) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web inspect: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web inspect")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web inspect: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web inspect: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1993,11 +2174,11 @@ private func sendWebReplyAndPrintInspect(_ payload: [String: Any]) {
 
 private func sendWebReplyAndPrintInspectResult(_ payload: [String: Any], asJSON: Bool) {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web inspect-result: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web inspect-result")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web inspect-result: no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web inspect-result: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -2108,11 +2289,11 @@ private func printWebCookiesUsage(stream: UnsafeMutablePointer<FILE>) {
 /// error messages (e.g. "private", "cookies list").
 private func readWebReplyOrExit(_ payload: [String: Any], command: String) -> [String: Any] {
     guard let data = sendJSONAndReadReply(payload) else {
-        fputs("nex web \(command): transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex web \(command)")
         exit(1)
     }
     guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\n", stderr)
+        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -2227,12 +2408,12 @@ func handlePaneList(_ args: inout ArraySlice<String>) {
     }
 
     guard let replyData = sendJSONAndReadReply(payload) else {
-        fputs("nex pane list: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex pane list")
         exit(1)
     }
 
     guard !replyData.isEmpty else {
-        fputs("nex pane list: no response from Nex (upgrade required? need v0.20+)\n", stderr)
+        fputs("nex pane list: no response from Nex (upgrade required? need v0.20+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
 
@@ -2380,11 +2561,11 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
     }
 
     guard let replyData = sendJSONAndReadReply(payload) else {
-        fputs("nex pane capture: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex pane capture")
         exit(1)
     }
     guard !replyData.isEmpty else {
-        fputs("nex pane capture: no response from Nex (upgrade required? need v0.21+)\n", stderr)
+        fputs("nex pane capture: no response from Nex (upgrade required? need v0.21+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
@@ -2642,11 +2823,11 @@ private func handleGraftCommand(command: String, args: inout ArraySlice<String>)
     }
 
     guard let replyData = sendJSONAndReadReply(payload) else {
-        fputs("nex \(command): transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex \(command)")
         exit(1)
     }
     guard !replyData.isEmpty else {
-        fputs("nex \(command): no response from Nex (upgrade required? need v0.25+)\n", stderr)
+        fputs("nex \(command): no response from Nex (upgrade required? need v0.25+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
@@ -2699,11 +2880,11 @@ private func handleGraftStatus(args: inout ArraySlice<String>) {
     let asJSON = popSwitch("--json", from: &args)
     let payload: [String: Any] = ["command": "graft-status"]
     guard let replyData = sendJSONAndReadReply(payload) else {
-        fputs("nex graft status: transport failure (is Nex running?)\n", stderr)
+        printTransportFailure(command: "nex graft status")
         exit(1)
     }
     guard !replyData.isEmpty else {
-        fputs("nex graft status: no response from Nex (upgrade required? need v0.25+)\n", stderr)
+        fputs("nex graft status: no response from Nex (upgrade required? need v0.25+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
         exit(1)
     }
     guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
@@ -2729,6 +2910,381 @@ private func handleGraftStatus(args: inout ArraySlice<String>) {
         let path = (session["worktree_path"] as? String) ?? "-"
         let status = (session["status"] as? String) ?? "-"
         print("\(branch) [\(status)] \(path)")
+    }
+}
+
+// MARK: - Doctor
+
+/// `nex doctor` — run a sequence of IPC health checks and print
+/// pass/fail with concrete repair tips. Added for issue #100 so users
+/// have a single command to run when CLI commands stop reaching the
+/// running Nex app.
+///
+/// Exits 0 if every check passes, non-zero if any fail. Pass `--json`
+/// for a machine-readable report.
+func handleDoctor(_ args: inout ArraySlice<String>) {
+    let useJSON = popSwitch("--json", from: &args)
+
+    if let extra = args.first {
+        fputs("nex doctor: unexpected argument: \(extra)\n", stderr)
+        fputs("Usage: nex doctor [--json]\n", stderr)
+        exit(2)
+    }
+
+    var report = DoctorReport()
+    report.addTransportCheck(transport: transport)
+    report.addReachabilityCheck(transport: transport)
+    report.addPingCheck()
+    report.addProcessCheck(transport: transport)
+    report.addVersionCheck(cliVersion: nexVersion)
+
+    if useJSON {
+        report.printJSON()
+    } else {
+        report.printHuman()
+    }
+    exit(report.exitCode)
+}
+
+struct DoctorCheck {
+    let name: String
+    let status: Status
+    let detail: String
+    let repair: String?
+
+    enum Status: String {
+        case pass = "PASS"
+        case warn = "WARN"
+        case fail = "FAIL"
+        case skip = "SKIP"
+    }
+
+    func asJSON() -> [String: Any] {
+        var dict: [String: Any] = [
+            "name": name,
+            "status": status.rawValue.lowercased(),
+            "detail": detail
+        ]
+        if let repair { dict["repair"] = repair }
+        return dict
+    }
+}
+
+struct DoctorReport {
+    private(set) var checks: [DoctorCheck] = []
+    /// `pingPID` and `pingVersion` are populated by the ping check so
+    /// the version / process checks downstream can reuse them.
+    private var pingPID: Int?
+    private var pingVersion: String?
+
+    var exitCode: Int32 {
+        checks.contains { $0.status == .fail } ? 1 : 0
+    }
+
+    mutating func append(_ check: DoctorCheck) {
+        checks.append(check)
+    }
+
+    mutating func addTransportCheck(transport: Transport) {
+        switch transport {
+        case .unix(let path):
+            append(DoctorCheck(
+                name: "transport",
+                status: .pass,
+                detail: "Unix socket at \(path)",
+                repair: nil
+            ))
+        case .tcp(let host, let port):
+            append(DoctorCheck(
+                name: "transport",
+                status: .pass,
+                detail: "TCP \(host):\(port) (from NEX_SOCKET)",
+                repair: nil
+            ))
+        }
+    }
+
+    mutating func addReachabilityCheck(transport: Transport) {
+        switch transport {
+        case .unix(let path):
+            var st = stat()
+            if stat(path, &st) != 0 {
+                append(DoctorCheck(
+                    name: "socket",
+                    status: .fail,
+                    detail: "Unix socket file \(path) does not exist.",
+                    repair: "Is Nex running? Launch the Nex app and re-run `nex doctor`."
+                ))
+            } else {
+                append(DoctorCheck(
+                    name: "socket",
+                    status: .pass,
+                    detail: "socket file exists",
+                    repair: nil
+                ))
+            }
+        case .tcp(let host, _):
+            var hints = addrinfo()
+            hints.ai_family = AF_INET
+            hints.ai_socktype = SOCK_STREAM
+            var result: UnsafeMutablePointer<addrinfo>?
+            let rc = getaddrinfo(host, nil, &hints, &result)
+            if rc != 0 {
+                append(DoctorCheck(
+                    name: "resolve",
+                    status: .fail,
+                    detail: "cannot resolve host \"\(host)\"",
+                    repair: "Check the hostname in NEX_SOCKET. From a dev container use `tcp:host.docker.internal:<port>`."
+                ))
+            } else {
+                if result != nil { freeaddrinfo(result) }
+                append(DoctorCheck(
+                    name: "resolve",
+                    status: .pass,
+                    detail: "hostname resolves",
+                    repair: nil
+                ))
+            }
+        }
+    }
+
+    /// Round-trip `ping` over the configured transport. This is the
+    /// single check that actually exercises the same dispatch path the
+    /// real CLI commands use; if `ping` works and `pane list` doesn't
+    /// the app is wedged in a specific reducer path rather than the
+    /// socket layer.
+    mutating func addPingCheck() {
+        lastTransportFailure = nil
+        let payload: [String: Any] = ["command": "ping"]
+        // 2-second timeout — fast enough that a wedged app fails the
+        // check promptly without making healthy callers wait.
+        let reply = sendJSONAndReadReply(payload, readTimeoutOverride: 2)
+        if reply == nil {
+            // Transport failed. Emit a fail tied to the captured
+            // failure category so the user gets the same repair tip
+            // they would from a real failed command.
+            let cmd = "nex doctor"
+            let (line, repair): (String, String)
+            if let f = lastTransportFailure {
+                (line, repair) = describeTransportFailure(f, command: cmd)
+            } else {
+                line = "\(cmd): transport failure (no diagnostic captured)."
+                repair = "Re-run with more verbose tooling, or restart Nex."
+            }
+            append(DoctorCheck(
+                name: "ping",
+                status: .fail,
+                detail: line,
+                repair: repair
+            ))
+            return
+        }
+        guard let data = reply, !data.isEmpty else {
+            append(DoctorCheck(
+                name: "ping",
+                status: .fail,
+                detail: "connected, but Nex closed the connection before replying — likely a pre-ping (<v0.26) Nex, or the app is wedged.",
+                repair: "Rebuild and relaunch Nex if you're on a recent main; if `ping` still fails, restart the app."
+            ))
+            return
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["ok"] as? Bool) == true
+        else {
+            append(DoctorCheck(
+                name: "ping",
+                status: .fail,
+                detail: "received malformed reply (\(data.count) bytes).",
+                repair: "Restart Nex. If reproducible, file an issue with the raw bytes."
+            ))
+            return
+        }
+        pingPID = json["pid"] as? Int
+        pingVersion = json["version"] as? String
+        append(DoctorCheck(
+            name: "ping",
+            status: .pass,
+            detail: "round-trip ok (app pid \(pingPID.map(String.init) ?? "?"))",
+            repair: nil
+        ))
+    }
+
+    /// Cross-check `ping` against `pgrep` for `Nex.app`. Useful when
+    /// `ping` fails — if the process is still up, the app is wedged in
+    /// the reducer or main actor; if no process, Nex genuinely isn't
+    /// running and the user should launch it.
+    ///
+    /// Skipped for TCP transport: the running Nex is on a remote host
+    /// (dev container, SSH tunnel, etc.) and we can't see its process
+    /// list. A FAIL here would be misleading when ping is passing.
+    mutating func addProcessCheck(transport: Transport) {
+        if case .tcp = transport {
+            append(DoctorCheck(
+                name: "process",
+                status: .skip,
+                detail: "skipped (TCP transport — running Nex is on a remote host).",
+                repair: nil
+            ))
+            return
+        }
+        // Use `ps -axo pid,comm` rather than pgrep: on macOS, pgrep's
+        // matching against argv/comm is inconsistent across sandbox
+        // contexts (Claude Code's bash sandbox, login shells, agent
+        // contexts), but `ps -axo` consistently lists every visible
+        // process with its executable path. Filter rows where the comm
+        // path ends in `Nex.app/Contents/MacOS/Nex`.
+        let ps = runProcess("/bin/ps", args: ["-axo", "pid=,comm="])
+        let pids: [Int] = ps.stdout
+            .split(separator: "\n")
+            .compactMap { line -> Int? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                guard parts.count == 2 else { return nil }
+                let pidStr = String(parts[0])
+                let comm = String(parts[1])
+                guard comm.hasSuffix("Nex.app/Contents/MacOS/Nex") else { return nil }
+                return Int(pidStr)
+            }
+        if pids.isEmpty {
+            append(DoctorCheck(
+                name: "process",
+                status: .fail,
+                detail: "no running Nex.app process found",
+                repair: "Launch Nex from /Applications (or wherever you installed it), then re-run `nex doctor`."
+            ))
+            return
+        }
+        if let pingPID, !pids.contains(pingPID) {
+            append(DoctorCheck(
+                name: "process",
+                status: .warn,
+                detail: "found pids \(pids), but ping replied from pid \(pingPID) — multiple Nex instances?",
+                repair: "Quit the stale instances (`kill <pid>`) and keep one running."
+            ))
+            return
+        }
+        append(DoctorCheck(
+            name: "process",
+            status: .pass,
+            detail: "Nex.app running (pids: \(pids.map(String.init).joined(separator: ", ")))",
+            repair: nil
+        ))
+    }
+
+    /// Compare the running app's version against the bundled CLI's
+    /// version. Drift here is the usual cause of "no response from
+    /// Nex (upgrade required)" — typically after a `git pull` without
+    /// relaunching the app, or after copying the CLI from a different
+    /// install.
+    mutating func addVersionCheck(cliVersion: String) {
+        guard let appVersion = pingVersion else {
+            // Skip silently if ping failed; the ping fail already
+            // captures the actionable bit.
+            append(DoctorCheck(
+                name: "version",
+                status: .skip,
+                detail: "skipped (ping did not return a version)",
+                repair: nil
+            ))
+            return
+        }
+        if appVersion == cliVersion {
+            append(DoctorCheck(
+                name: "version",
+                status: .pass,
+                detail: "CLI \(cliVersion) matches app \(appVersion)",
+                repair: nil
+            ))
+        } else {
+            append(DoctorCheck(
+                name: "version",
+                status: .warn,
+                detail: "CLI is \(cliVersion); app is \(appVersion).",
+                repair: "Rebuild Nex (or relaunch from the latest build) so the bundled CLI matches the running app."
+            ))
+        }
+    }
+
+    func printHuman() {
+        for c in checks {
+            print("[\(c.status.rawValue)] \(c.name): \(c.detail)")
+            if let r = c.repair, c.status != .pass {
+                print("        → \(r)")
+            }
+        }
+        let fails = checks.count(where: { $0.status == .fail })
+        let warns = checks.count(where: { $0.status == .warn })
+        if fails == 0, warns == 0 {
+            print("\nAll checks passed.")
+        } else {
+            print("\nSummary: \(fails) fail(s), \(warns) warn(s).")
+        }
+    }
+
+    func printJSON() {
+        let payload: [String: Any] = [
+            "ok": exitCode == 0,
+            "checks": checks.map { $0.asJSON() }
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: payload),
+           let str = String(data: data, encoding: .utf8) {
+            print(str)
+        } else {
+            print("{\"ok\":false,\"error\":\"failed to serialise doctor report\"}")
+        }
+    }
+}
+
+/// Minimal subprocess runner — captures stdout + exit code. Doctor
+/// uses it for `pgrep`; we keep it scoped to doctor since the rest
+/// of the CLI talks to the app over the socket and doesn't shell out.
+struct ProcessResult {
+    let stdout: String
+    let exitCode: Int32
+}
+
+func runProcess(_ path: String, args: [String]) -> ProcessResult {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: path)
+    task.arguments = args
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    task.standardOutput = stdoutPipe
+    task.standardError = stderrPipe
+    do {
+        try task.run()
+        // Drain stdout AND stderr concurrently. The subprocess can
+        // block writing to either pipe once the OS buffer fills
+        // (~16 KB on macOS); a sequential drain that reads stdout
+        // first deadlocks if the child writes >16 KB to stderr and
+        // then exits cleanly, because the child can't close stderr
+        // until the parent drains it, and the parent is blocked
+        // reading stdout until the child closes that. `ps -axo` on a
+        // busy workstation is in this size range so this isn't
+        // theoretical.
+        let queue = DispatchQueue.global(qos: .userInitiated)
+        let group = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+        let stderrHandle = stderrPipe.fileHandleForReading
+        group.enter()
+        queue.async {
+            stdoutData = stdoutHandle.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        queue.async {
+            stderrData = stderrHandle.readDataToEndOfFile()
+            group.leave()
+        }
+        group.wait()
+        _ = stderrData
+        task.waitUntilExit()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        return ProcessResult(stdout: stdout, exitCode: task.terminationStatus)
+    } catch {
+        return ProcessResult(stdout: "", exitCode: -1)
     }
 }
 
@@ -2770,6 +3326,8 @@ case "graft":
     handleGraft(&args)
 case "web":
     handleWeb(&args)
+case "doctor":
+    handleDoctor(&args)
 default:
     fputs("Unknown command: \(subcommand)\n", stderr)
     printUsage()
