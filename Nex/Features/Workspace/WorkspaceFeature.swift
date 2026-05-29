@@ -223,9 +223,21 @@ struct WorkspaceFeature {
         case addLabel(String)
         case removeLabel(String)
         case setLabels([String])
-        case createPane
-        case splitPaneAtPath(String, label: String? = nil, direction: PaneLayout.SplitDirection = .horizontal)
-        case splitPane(direction: PaneLayout.SplitDirection, sourcePaneID: UUID?, label: String? = nil)
+        // `newPaneID` (issue #117): when set, the new pane is created with
+        // this caller-supplied UUID instead of a freshly minted one, so
+        // `nex pane split` / `pane create` can return the id in their reply
+        // before the pane is actually built. Defaulted to nil → all existing
+        // call sites are unchanged.
+        // `newPaneID` (issue #117): when set, the new pane is created with
+        // this caller-supplied UUID instead of a freshly minted one, so
+        // `nex pane split` / `pane create` can return the id in their reply
+        // before the pane is built. `label` / `workingDirectory` let
+        // `pane create` honour `--name` / `--path` when laying out the
+        // first pane of an empty workspace (where there is nothing to
+        // split). All defaulted to nil → existing call sites are unchanged.
+        case createPane(newPaneID: UUID? = nil, label: String? = nil, workingDirectory: String? = nil)
+        case splitPaneAtPath(String, label: String? = nil, direction: PaneLayout.SplitDirection = .horizontal, newPaneID: UUID? = nil)
+        case splitPane(direction: PaneLayout.SplitDirection, sourcePaneID: UUID?, label: String? = nil, newPaneID: UUID? = nil)
         case closePane(UUID)
         case focusPane(UUID)
         case focusNextPane
@@ -438,9 +450,16 @@ struct WorkspaceFeature {
                 state.labels = deduped
                 return .none
 
-            case .createPane:
-                let newPaneID = uuid()
-                let newPane = Pane(id: newPaneID)
+            case let .createPane(injectedID, label, workingDirectory):
+                let newPaneID = injectedID ?? uuid()
+                // `--path` (workingDirectory) and `--name` (label) let
+                // `pane create` populate the first pane of an empty
+                // workspace (issue #117); both default to nil for the
+                // existing GUI/CLI callers. Resolve into `let`s so the
+                // `@Sendable` effect below captures values, not a `var`.
+                let resolvedDir = (workingDirectory?.isEmpty == false)
+                    ? workingDirectory! : Pane(id: newPaneID).workingDirectory
+                let newPane = Pane(id: newPaneID, label: label, workingDirectory: resolvedDir)
                 state.panes.append(newPane)
                 state.layout = .leaf(newPaneID)
                 state.setFocus(newPaneID)
@@ -448,12 +467,12 @@ struct WorkspaceFeature {
                 return .run { _ in
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
-                        workingDirectory: newPane.workingDirectory,
+                        workingDirectory: resolvedDir,
                         backgroundOpacity: opacity
                     )
                 }
 
-            case .splitPaneAtPath(let path, let label, let direction):
+            case let .splitPaneAtPath(path, label, direction, injectedID):
                 if let saved = state.savedLayout {
                     state.layout = saved
                     state.zoomedPaneID = nil
@@ -461,7 +480,7 @@ struct WorkspaceFeature {
                 }
                 guard let sourceID = state.focusedPaneID else { return .none }
 
-                let newPaneID = uuid()
+                let newPaneID = injectedID ?? uuid()
                 let newPane = Pane(id: newPaneID, workingDirectory: path)
 
                 let (newLayout, _) = state.layout.splitting(
@@ -484,7 +503,7 @@ struct WorkspaceFeature {
                     )
                 }
 
-            case .splitPane(let direction, let sourcePaneID, let label):
+            case let .splitPane(direction, sourcePaneID, label, injectedID):
                 if let saved = state.savedLayout {
                     state.layout = saved
                     state.zoomedPaneID = nil
@@ -494,7 +513,7 @@ struct WorkspaceFeature {
                 guard let sourceID else { return .none }
                 guard let sourcPane = state.panes[id: sourceID] else { return .none }
 
-                let newPaneID = uuid()
+                let newPaneID = injectedID ?? uuid()
                 let newPane = Pane(
                     id: newPaneID,
                     workingDirectory: sourcPane.workingDirectory

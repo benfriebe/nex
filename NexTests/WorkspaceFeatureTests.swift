@@ -2263,4 +2263,47 @@ struct WorkspaceFeatureTests {
             #expect(state.labels == ["Backend", "backend"])
         }
     }
+
+    /// Issue #117: `pane create --workspace <empty> --name … --path …`
+    /// lays out the first pane via `.createPane`. That action must honour
+    /// the caller-supplied id, label and working directory so the pane the
+    /// reply acked actually carries them (finding 2).
+    @Test func createPaneAppliesInjectedIdLabelAndDirectory() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let newID = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.uuid = .constant(newID)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.createPane(
+            newPaneID: newID, label: "first", workingDirectory: "/tmp/wd117"
+        )) { state in
+            #expect(state.panes[id: newID]?.label == "first")
+            #expect(state.panes[id: newID]?.workingDirectory == "/tmp/wd117")
+            #expect(state.layout == .leaf(newID))
+        }
+    }
+
+    /// Issue #117: bare `.createPane()` (GUI / new-workspace path) keeps
+    /// its default working directory and no label — defaults unchanged.
+    @Test func createPaneDefaultsUnchanged() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let newID = UUID(uuidString: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")!
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.uuid = .constant(newID)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.createPane()) { state in
+            #expect(state.panes[id: newID]?.label == nil)
+            #expect(state.panes[id: newID]?.workingDirectory == NSHomeDirectory())
+        }
+    }
 }

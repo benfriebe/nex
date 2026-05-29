@@ -10,8 +10,8 @@ enum SocketMessage: Equatable {
     case notification(paneID: UUID, title: String, body: String)
     case sessionStarted(paneID: UUID, sessionID: String)
     // Pane commands
-    case paneSplit(paneID: UUID, direction: PaneLayout.SplitDirection?, path: String?, name: String?, target: String?)
-    case paneCreate(paneID: UUID, path: String?, name: String?, target: String?)
+    case paneSplit(paneID: UUID?, direction: PaneLayout.SplitDirection?, path: String?, name: String?, target: String?, workspace: String?)
+    case paneCreate(paneID: UUID?, path: String?, name: String?, target: String?, workspace: String?)
     /// Close a pane. In practice the CLI sends one or the other:
     /// `paneID` comes from `NEX_PANE_ID` for the no-flag form; `target`
     /// carries the `--target <name-or-uuid>` value. `workspace`
@@ -23,7 +23,7 @@ enum SocketMessage: Equatable {
     /// supplied and replies with a structured success/error payload
     /// (request/response — see `replyCommandAllowlist`).
     case paneClose(paneID: UUID?, target: String?, workspace: String?)
-    case paneName(paneID: UUID, name: String)
+    case paneName(paneID: UUID?, target: String?, workspace: String?, name: String)
     /// Send keystrokes to a pane resolved by `target` (label or UUID).
     /// Label lookups default to the sender's own workspace; pass
     /// `workspace` (name-or-UUID) to address a pane in another workspace
@@ -36,7 +36,7 @@ enum SocketMessage: Equatable {
     /// (e.g. `pane send --bare "ls /tm"` then `pane send-key tab`
     /// to trigger autocomplete). Default false preserves the
     /// pre-#98 contract.
-    case paneSend(paneID: UUID, target: String, text: String, workspace: String?, bare: Bool)
+    case paneSend(paneID: UUID?, target: String, text: String, workspace: String?, bare: Bool)
     /// Send a single named keystroke (Enter, Tab, Escape, ...) to a
     /// pane resolved by `target`. `key` is one of the names in
     /// `GhosttySurface.namedKeyAliases`. `paneID` is optional (mirrors
@@ -301,6 +301,7 @@ enum SocketMessage: Equatable {
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
+    "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
     "graft-start", "graft-stop", "graft-status",
     "ping",
@@ -1341,6 +1342,60 @@ final class SocketServer: Sendable {
             return (.paneSendKey(paneID: paneID, target: target, key: key, workspace: workspace), wire)
         }
 
+        // `pane-send` / `pane-split` / `pane-create` / `pane-name` are
+        // parsed here — before the mandatory-paneID guard below — so they
+        // work from a shell with no NEX_PANE_ID (issue #117). `paneID`
+        // (the caller's pane, when set) only scopes label resolution;
+        // routing is by `--target` (UUID = global, label = needs scope)
+        // and/or `--workspace`. Mirrors `pane-close` / `pane-send-key`.
+        if wire.command == "pane-send" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            guard let target = wire.target, !target.isEmpty,
+                  let text = wire.text, !text.isEmpty else { return nil }
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            return (.paneSend(
+                paneID: paneID, target: target, text: text,
+                workspace: workspace, bare: wire.bare ?? false
+            ), wire)
+        }
+
+        if wire.command == "pane-split" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            // Need at least one anchor: the caller pane, an explicit
+            // target pane, or a workspace to split within.
+            guard paneID != nil || target != nil || workspace != nil else { return nil }
+            let dir = wire.direction.flatMap { PaneLayout.SplitDirection(rawValue: $0) }
+            return (.paneSplit(
+                paneID: paneID, direction: dir, path: wire.path,
+                name: wire.name, target: target, workspace: workspace
+            ), wire)
+        }
+
+        if wire.command == "pane-create" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            // `create` can legitimately run with only `--workspace`
+            // (no anchor pane), so accept workspace as a sufficient hint.
+            guard paneID != nil || target != nil || workspace != nil else { return nil }
+            return (.paneCreate(
+                paneID: paneID, path: wire.path, name: wire.name,
+                target: target, workspace: workspace
+            ), wire)
+        }
+
+        if wire.command == "pane-name" {
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            // Need either the caller pane or an explicit target to rename.
+            guard paneID != nil || target != nil else { return nil }
+            return (.paneName(paneID: paneID, target: target, workspace: workspace, name: name), wire)
+        }
+
         guard let paneIDString = wire.paneID,
               let paneID = UUID(uuidString: paneIDString) else { return nil }
 
@@ -1361,22 +1416,8 @@ final class SocketServer: Sendable {
         case "session-start":
             guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
             socketMessage = .sessionStarted(paneID: paneID, sessionID: sessionID)
-        case "pane-split":
-            let dir = wire.direction.flatMap { PaneLayout.SplitDirection(rawValue: $0) }
-            socketMessage = .paneSplit(paneID: paneID, direction: dir, path: wire.path, name: wire.name, target: wire.target)
-        case "pane-create":
-            socketMessage = .paneCreate(paneID: paneID, path: wire.path, name: wire.name, target: wire.target)
-        case "pane-name":
-            guard let name = wire.name, !name.isEmpty else { return nil }
-            socketMessage = .paneName(paneID: paneID, name: name)
-        case "pane-send":
-            guard let target = wire.target, !target.isEmpty,
-                  let text = wire.text, !text.isEmpty else { return nil }
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            socketMessage = .paneSend(
-                paneID: paneID, target: target, text: text,
-                workspace: workspace, bare: wire.bare ?? false
-            )
+        // pane-split / pane-create / pane-name / pane-send are parsed
+        // before the mandatory-paneID guard above (issue #117).
         case "pane-move":
             guard let dirString = wire.direction,
                   let dir = PaneLayout.Direction(rawValue: dirString) else { return nil }

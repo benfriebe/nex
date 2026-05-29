@@ -28,11 +28,11 @@ Package.resolved
 
 # Claude
 .claude/
-.nex-tasks/
-.nex-results/
 
 # Python
 __pycache__/
 
 # Local working docs (plans, notes — not part of the public repo)
 docs/
+.nex-tasks/
+.nex-results/

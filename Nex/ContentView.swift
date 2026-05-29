@@ -28,7 +28,7 @@ struct ContentView: View {
                         panes: workspace.panes,
                         focusedPaneID: workspace.focusedPaneID,
                         onCreatePane: {
-                            store.send(.workspaces(.element(id: activeID, action: .createPane)))
+                            store.send(.workspaces(.element(id: activeID, action: .createPane())))
                         },
                         onSplitPane: { paneID, direction in
                             store.send(.workspaces(.element(
@@ -299,7 +299,7 @@ struct ContentView: View {
                         currentName: pane.label ?? "",
                         onRename: { newName in
                             store.send(.socketMessage(
-                                .paneName(paneID: paneID, name: newName),
+                                .paneName(paneID: paneID, target: nil, workspace: nil, name: newName),
                                 reply: nil
                             ))
                             store.send(.setRenamingPaneID(nil))

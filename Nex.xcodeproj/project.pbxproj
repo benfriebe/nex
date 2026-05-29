@@ -82,6 +82,7 @@
 		77C780C65EFA8114C681638B /* ComposableArchitecture in Frameworks */ = {isa = PBXBuildFile; productRef = 8B14B7BF7BD4FCD61EBB97A9 /* ComposableArchitecture */; };
 		77CF808E3AF2C06BD12D11C0 /* SplitDividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DED98594372C8E34542A5C2 /* SplitDividerView.swift */; };
 		77FB1142F26F5C33539E3F23 /* DiffHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */; };
+		7A2B4C36F55DC33D377045A1 /* PaneCommandReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09C155B27E089600B6E3FF2E /* PaneCommandReplyTests.swift */; };
 		7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */; };
 		7C49755ABEC49B51EC1333FB /* WorkspaceGroupCRUDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF88062F290789D98B545AC6 /* WorkspaceGroupCRUDTests.swift */; };
 		7C78EA65C2D22749546715A0 /* GhosttySurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD03468B083223FF50F68E0 /* GhosttySurface.swift */; };
@@ -131,6 +132,7 @@
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
 		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
 		C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */; };
+		C14C8EEDD9146F537341D02E /* SocketParsingOutsideNexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */; };
 		C1FC2BD79FF0D9DC86910028 /* WebPaneInspectorScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2BAD220346CCE551765FCD9 /* WebPaneInspectorScript.swift */; };
 		C276E6F9F7B46ED43FF491D5 /* NexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3714AA1F15C85762BF36B1FE /* NexApp.swift */; };
 		CCBCDD690DA8A082B0C3D1EF /* StatusBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */; };
@@ -196,6 +198,7 @@
 		06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneURLNormalisationTests.swift; sourceTree = "<group>"; };
 		0689D085597FF9C7F4D87401 /* RepoPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoPickerView.swift; sourceTree = "<group>"; };
 		09102B6ADEAB463454E7F15E /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
+		09C155B27E089600B6E3FF2E /* PaneCommandReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneCommandReplyTests.swift; sourceTree = "<group>"; };
 		09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncInputTests.swift; sourceTree = "<group>"; };
 		0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTarget.swift; sourceTree = "<group>"; };
 		0E79DA6455C6FF3D2124CBA9 /* GraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftService.swift; sourceTree = "<group>"; };
@@ -205,6 +208,7 @@
 		11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeOperationTests.swift; sourceTree = "<group>"; };
 		12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneActuatorWaitTests.swift; sourceTree = "<group>"; };
 		140051AE1CBF1087B5F289F7 /* RecursiveFSWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecursiveFSWatcher.swift; sourceTree = "<group>"; };
+		150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingOutsideNexTests.swift; sourceTree = "<group>"; };
 		1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteItem.swift; sourceTree = "<group>"; };
 		191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenamePaneSheet.swift; sourceTree = "<group>"; };
 		191E820170ADF2ADB58B8079 /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
@@ -464,6 +468,7 @@
 				200EB2588E40ABB7C51E24E6 /* MarkdownHTMLRendererTests.swift */,
 				8344DA5EFC15BF047C2003A4 /* PaneCaptureReplyTests.swift */,
 				F5CE8D708EEECA4A82BE0AC1 /* PaneCloseReplyTests.swift */,
+				09C155B27E089600B6E3FF2E /* PaneCommandReplyTests.swift */,
 				A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */,
 				F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */,
 				452A1B196F8438AD7A7DAC0A /* PaneSendKeyReplyTests.swift */,
@@ -475,6 +480,7 @@
 				1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */,
 				E0625B2E7935BDDF63DC5D19 /* RingBufferTests.swift */,
 				ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */,
+				150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */,
 				AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */,
 				1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */,
 				09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */,
@@ -875,6 +881,7 @@
 				EA22F9720B68648A78D237E3 /* MarkdownHTMLRendererTests.swift in Sources */,
 				7CFCDB77693B32481C402E8E /* PaneCaptureReplyTests.swift in Sources */,
 				3EB758164265D71D08B0156C /* PaneCloseReplyTests.swift in Sources */,
+				7A2B4C36F55DC33D377045A1 /* PaneCommandReplyTests.swift in Sources */,
 				4D7F4ECDA338E826904B584E /* PaneLayoutTests.swift in Sources */,
 				0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */,
 				A094A49881297881F9791F0A /* PaneSendKeyReplyTests.swift in Sources */,
@@ -886,6 +893,7 @@
 				B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */,
 				AD62C235AF0D846B08655B16 /* RingBufferTests.swift in Sources */,
 				EAF43DC55C5612F3AE83BF02 /* SettingsFeatureTests.swift in Sources */,
+				C14C8EEDD9146F537341D02E /* SocketParsingOutsideNexTests.swift in Sources */,
 				2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */,
 				EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */,
 				ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */,

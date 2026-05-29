@@ -1155,7 +1155,7 @@ struct AppReducer {
     /// success and silently drop on error so older CLIs keep working.
     func handlePaneSend(
         state: State,
-        paneID: UUID,
+        paneID: UUID?,
         target: String,
         text: String,
         workspaceFilter: String?,
@@ -1265,6 +1265,242 @@ struct AppReducer {
         return .run { _ in
             await mgr.sendKey(to: resolvedID, keyName: normalizedKey)
         }
+    }
+
+    /// Shared success reply for `pane-split` / `pane-create`: the new
+    /// pane's UUID is minted by the caller and threaded into the
+    /// workspace action so the reply can return it before the pane is
+    /// actually built. `reply == nil` is the legacy fire-and-forget path.
+    /// Success ack for `pane-split` / `pane-create`. The new pane's UUID
+    /// is minted inside the WorkspaceFeature effect (not here), so the
+    /// reply intentionally omits `pane_id` and reports the resolved
+    /// workspace + the requested label instead. Callers that need the id
+    /// can read it back via `nex pane list --json` (matching on the
+    /// label). `reply == nil` is the legacy fire-and-forget path.
+    /// Success ack for `pane-split` / `pane-create`. The new pane's UUID
+    /// is minted up front by the handler and threaded into the
+    /// WorkspaceFeature action (issue #117) so the reply can return it
+    /// before the pane is actually built. `reply == nil` is the legacy
+    /// fire-and-forget path.
+    private func replyPaneCreated(
+        _ reply: SocketServer.ReplyHandle?,
+        newPaneID: UUID,
+        workspace: WorkspaceFeature.State,
+        label: String?
+    ) {
+        guard let reply else { return }
+        var payload: [String: Any] = [
+            "ok": true,
+            "pane_id": newPaneID.uuidString,
+            "workspace_id": workspace.id.uuidString,
+            "workspace_name": workspace.name
+        ]
+        if let label, !label.isEmpty { payload["label"] = label }
+        reply.sendAndClose(payload)
+    }
+
+    /// Resolve + dispatch a `pane-split` request (issue #117). Works from
+    /// outside a Nex pane: `--target` (UUID = global, label = needs
+    /// scope) names the pane to split; `--workspace` scopes label lookup
+    /// or, on its own, splits the workspace's focused pane. Every exit
+    /// acks or errors through `reply` (a no-op when `reply == nil`, so
+    /// pre-#117 fire-and-forget clients keep working). Reuses the existing
+    /// `splitPane` / `splitPaneAtPath` actions (no new enum case) so the
+    /// type-check-sensitive ContentView body is unaffected.
+    func handlePaneSplit(
+        state: inout State,
+        paneID: UUID?,
+        direction: PaneLayout.SplitDirection?,
+        path: String?,
+        name: String?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let workspaceID: UUID
+        let sourcePaneID: UUID
+
+        // `--workspace` *without* `--target` selects the destination
+        // workspace outright — even when the caller forwarded its own
+        // NEX_PANE_ID — so a pane in workspace alpha can run
+        // `nex pane split --workspace beta` (issue #117). `--target` keeps
+        // precedence so `--target X --workspace Y` still scopes the label
+        // lookup of X to Y; the caller's pane is only the source when
+        // neither `--target` nor `--workspace` is given.
+        if target == nil, let workspaceFilter {
+            guard let ws = state.resolveWorkspace(workspaceFilter) else {
+                reply?.error("workspace not found: \(workspaceFilter)")
+                return .none
+            }
+            guard let source = ws.focusedPaneID ?? ws.panes.first?.id else {
+                reply?.error("workspace '\(ws.name)' has no pane to split — use `nex pane create --workspace \(workspaceFilter)`")
+                return .none
+            }
+            workspaceID = ws.id
+            sourcePaneID = source
+        } else if target != nil || paneID != nil {
+            switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+            case .found(let resolved, let ws):
+                workspaceID = ws.id
+                sourcePaneID = resolved
+            case .error(let error):
+                reply?.error(error)
+                return .none
+            }
+        } else {
+            reply?.error("pane split requires --target or --workspace when called from outside a Nex pane")
+            return .none
+        }
+
+        guard let workspace = state.workspaces[id: workspaceID] else {
+            reply?.error("workspace not found")
+            return .none
+        }
+
+        // Mint the new pane's id up front so the reply can return it
+        // (issue #117); thread it into the action via the defaulted
+        // `newPaneID` parameter. `splitPaneAtPath` splits the *focused*
+        // pane, so focus the resolved source first; `splitPane` takes the
+        // source explicitly.
+        let newID = uuid()
+        state.workspaces[id: workspaceID]?.setFocus(sourcePaneID)
+        replyPaneCreated(reply, newPaneID: newID, workspace: workspace, label: name)
+
+        if let path {
+            return .send(.workspaces(.element(
+                id: workspaceID,
+                action: .splitPaneAtPath(path, label: name, direction: direction ?? .horizontal, newPaneID: newID)
+            )))
+        }
+        return .send(.workspaces(.element(
+            id: workspaceID,
+            action: .splitPane(direction: direction ?? .horizontal, sourcePaneID: sourcePaneID, label: name, newPaneID: newID)
+        )))
+    }
+
+    /// Resolve + dispatch a `pane-create` request (issue #117). Resolves
+    /// a target *workspace* (via `--target`'s pane, `--workspace`, or the
+    /// caller pane) and adds a pane: split off the focused pane when the
+    /// workspace already has panes, or create the first pane when it is
+    /// empty (the path the old split-only handler had no route for). New
+    /// pane UUID minted up front and returned in the reply.
+    func handlePaneCreate(
+        state: inout State,
+        paneID: UUID?,
+        path: String?,
+        name: String?,
+        target: String?,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let workspaceID: UUID
+        var sourcePaneID: UUID?
+
+        // `--workspace` *without* `--target` selects the destination
+        // workspace outright — even when the caller forwarded its own
+        // NEX_PANE_ID — so a pane in workspace alpha can run
+        // `nex pane create --workspace beta` (finding 1). `--target` keeps
+        // precedence; the caller's pane is only the anchor when neither
+        // `--target` nor `--workspace` is given.
+        if target == nil, let workspaceFilter {
+            guard let ws = state.resolveWorkspace(workspaceFilter) else {
+                reply?.error("workspace not found: \(workspaceFilter)")
+                return .none
+            }
+            workspaceID = ws.id
+            sourcePaneID = ws.focusedPaneID ?? ws.panes.first?.id
+        } else if target != nil || paneID != nil {
+            switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+            case .found(let resolved, let ws):
+                workspaceID = ws.id
+                sourcePaneID = resolved
+            case .error(let error):
+                reply?.error(error)
+                return .none
+            }
+        } else {
+            reply?.error("pane create requires --target or --workspace when called from outside a Nex pane")
+            return .none
+        }
+
+        guard let workspace = state.workspaces[id: workspaceID] else {
+            reply?.error("workspace not found")
+            return .none
+        }
+
+        // Mint the new pane's id up front so the reply returns it (issue
+        // #117), then thread it into whichever action builds the pane so
+        // the acked id actually matches the created pane.
+        let newID = uuid()
+        replyPaneCreated(reply, newPaneID: newID, workspace: workspace, label: name)
+
+        let source = sourcePaneID ?? workspace.focusedPaneID ?? workspace.panes.first?.id
+
+        // Empty workspace: no pane to split off, so lay out the first pane
+        // via `createPane`, carrying `--name` (label) and `--path`
+        // (workingDirectory) so the pane the reply acked actually has them
+        // (finding 2). This is the route the old split-only handler lacked.
+        guard let source else {
+            return .send(.workspaces(.element(
+                id: workspaceID,
+                action: .createPane(newPaneID: newID, label: name, workingDirectory: path)
+            )))
+        }
+
+        // Populated workspace: split the resolved/focused pane, threading
+        // `newID` so the new pane gets the acked id. `splitPaneAtPath`
+        // splits the focused pane, so focus first.
+        state.workspaces[id: workspaceID]?.setFocus(source)
+        if let path {
+            return .send(.workspaces(.element(
+                id: workspaceID,
+                action: .splitPaneAtPath(path, label: name, newPaneID: newID)
+            )))
+        }
+        return .send(.workspaces(.element(
+            id: workspaceID,
+            action: .splitPane(direction: .horizontal, sourcePaneID: source, label: name, newPaneID: newID)
+        )))
+    }
+
+    /// Resolve + dispatch a `pane-name` request (issue #117). Without
+    /// `--target` it renames the caller pane (`NEX_PANE_ID`); with
+    /// `--target` it renames any pane (UUID global, label scoped). Replies
+    /// `{ok,pane_id,label,workspace_name}`.
+    func handlePaneName(
+        state: inout State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        name: String,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        let newLabel = name.isEmpty ? nil : name
+        state.workspaces[id: workspace.id]?.panes[id: resolvedID]?.label = newLabel
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedID.uuidString,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name
+            ]
+            if let newLabel { payload["label"] = newLabel }
+            reply.sendAndClose(payload)
+        }
+
+        return .send(.persistState)
     }
 
     // MARK: - Sync-input helpers (issue #121)
@@ -4703,37 +4939,28 @@ struct AppReducer {
 
                 // MARK: Pane commands
 
-                case .paneSplit(let paneID, let direction, let path, let name, let target):
-                    // Resolve which pane to split: target (by name/UUID) or pane_id
-                    let sourcePaneID = Self.resolveTarget(target, from: paneID, state: state) ?? paneID
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: sourcePaneID] != nil })
-                    else { return .none }
-                    state.workspaces[id: workspace.id]?.setFocus(sourcePaneID)
-                    if let path {
-                        return .send(.workspaces(.element(
-                            id: workspace.id,
-                            action: .splitPaneAtPath(path, label: name, direction: direction ?? .horizontal)
-                        )))
-                    }
-                    return .send(.workspaces(.element(
-                        id: workspace.id,
-                        action: .splitPane(direction: direction ?? .horizontal, sourcePaneID: sourcePaneID, label: name)
-                    )))
+                case let .paneSplit(paneID, direction, path, name, target, workspaceFilter):
+                    return handlePaneSplit(
+                        state: &state,
+                        paneID: paneID,
+                        direction: direction,
+                        path: path,
+                        name: name,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
 
-                case .paneCreate(let paneID, let path, let name, let target):
-                    let sourcePaneID = Self.resolveTarget(target, from: paneID, state: state) ?? paneID
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: sourcePaneID] != nil })
-                    else { return .none }
-                    state.workspaces[id: workspace.id]?.setFocus(sourcePaneID)
-                    if let path {
-                        return .send(.workspaces(.element(
-                            id: workspace.id, action: .splitPaneAtPath(path, label: name)
-                        )))
-                    }
-                    return .send(.workspaces(.element(
-                        id: workspace.id,
-                        action: .splitPane(direction: .horizontal, sourcePaneID: sourcePaneID, label: name)
-                    )))
+                case let .paneCreate(paneID, path, name, target, workspaceFilter):
+                    return handlePaneCreate(
+                        state: &state,
+                        paneID: paneID,
+                        path: path,
+                        name: name,
+                        target: target,
+                        workspaceFilter: workspaceFilter,
+                        reply: reply
+                    )
 
                 case .paneClose(let paneID, let target, let workspaceFilter):
                     return handlePaneClose(
@@ -4744,11 +4971,15 @@ struct AppReducer {
                         reply: reply
                     )
 
-                case .paneName(let paneID, let name):
-                    guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
-                    else { return .none }
-                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.label = name.isEmpty ? nil : name
-                    return .send(.persistState)
+                case let .paneName(paneID, target, workspace, name):
+                    return handlePaneName(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspace,
+                        name: name,
+                        reply: reply
+                    )
 
                 case .paneSend(let paneID, let target, let text, let workspaceFilter, let bare):
                     return handlePaneSend(

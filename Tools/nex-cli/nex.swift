@@ -259,6 +259,140 @@ func printPaneCloseUsage(stream: UnsafeMutablePointer<FILE>) {
     """, stream)
 }
 
+func printPaneSendUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane send [--bare] [--json] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
+
+    Writes text to a pane's PTY and (unless --bare) presses Enter so it runs.
+
+    Options:
+      --target <name-or-uuid>     Pane to write to. A UUID resolves globally; a
+                                  label needs a workspace scope (NEX_PANE_ID or
+                                  --workspace) so it can't route to the wrong pane.
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --bare                      Write the text without the trailing Enter (pair
+                                  with `nex pane send-key` to submit).
+      --json                      Print the structured reply instead of the ack.
+      -h, --help                  Show this help.
+
+    Works from outside a Nex pane (no NEX_PANE_ID needed) when --target is a UUID
+    or --workspace is given. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneSplitUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] \\
+                     [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--json]
+
+    Splits a pane, creating a new one beside it.
+
+    Options:
+      --target <name-or-uuid>     Pane to split (UUID = global, label needs scope).
+      --workspace <name-or-uuid>  Scope label resolution, or (alone) split that
+                                  workspace's focused pane.
+      --direction h|v             Split direction (default horizontal).
+      --path /dir                 Working directory for the new pane.
+      --name <label>              Label for the new pane.
+      --json                      Print the structured reply (incl. the new pane id).
+      -h, --help                  Show this help.
+
+    Works from outside a Nex pane when --target or --workspace is given. The reply
+    carries the new pane's id. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneCreateUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane create [--path /dir] [--name <label>] [--workspace <name-or-uuid>] \\
+                      [--target <name-or-uuid>] [--json]
+
+    Adds a pane to a workspace (splitting the focused pane, or creating the first
+    pane if the workspace is empty).
+
+    Options:
+      --workspace <name-or-uuid>  Workspace to create the pane in.
+      --target <name-or-uuid>     A pane whose workspace to create in (alternative
+                                  to --workspace).
+      --path /dir                 Working directory for the new pane.
+      --name <label>              Label for the new pane.
+      --json                      Print the structured reply (incl. the new pane id).
+      -h, --help                  Show this help.
+
+    Works from outside a Nex pane when --workspace or --target is given. The reply
+    carries the new pane's id. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane name <name>                              # rename the calling pane
+      nex pane name --target <name-or-uuid> <name>      # rename a specific pane
+
+    Options:
+      --target <name-or-uuid>     Pane to rename (UUID = global, label needs scope).
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --json                      Print the structured reply instead of the ack.
+      -h, --help                  Show this help.
+
+    Without --target the calling pane is renamed (requires NEX_PANE_ID). The new
+    label is the sole positional argument. Exit codes: 0 on success, non-zero on
+    failure.
+    \n
+    """, stream)
+}
+
+/// Send a pane-mutation command (`split` / `create` / `name`) and print
+/// the structured `{ok,...}` reply. Exits non-zero on transport failure,
+/// empty reply (Nex too old for request/response on this command),
+/// invalid JSON, or `ok:false`. With `asJSON`, prints the reply verbatim
+/// (minus the `ok` flag); otherwise prints a one-line ack
+/// "`<verb>: <pane_id> (<label>) in workspace <name>`".
+private func sendPaneMutationReply(
+    _ payload: [String: Any], command: String, asJSON: Bool, verb: String
+) {
+    guard let replyData = sendJSONAndReadReply(payload) else {
+        printTransportFailure(command: "nex pane \(command)")
+        exit(1)
+    }
+    guard !replyData.isEmpty else {
+        fputs("nex pane \(command): no response from Nex (upgrade required? need v0.24+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
+        exit(1)
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
+        fputs("nex pane \(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("nex pane \(command): \(msg)\n", stderr)
+        exit(1)
+    }
+    if asJSON {
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    let id = (json["pane_id"] as? String) ?? "?"
+    let label = json["label"] as? String
+    let ws = json["workspace_name"] as? String
+    var line = "\(verb): \(id)"
+    if let label { line += " (\(label))" }
+    if let ws { line += " in workspace \(ws)" }
+    print(line)
+}
+
 func parseFlag(_ name: String, from args: inout ArraySlice<String>) -> String? {
     guard let idx = args.firstIndex(of: name) else { return nil }
     let valueIdx = args.index(after: idx)
@@ -654,36 +788,59 @@ func handlePane(_ args: inout ArraySlice<String>) {
         print(paneID)
 
     case "split":
-        let paneID = requirePaneID()
+        // Issue #117: works from outside a Nex pane. `--target` names the
+        // pane to split (UUID = global, label needs scope), `--workspace`
+        // scopes label resolution or splits that workspace's focused pane.
+        // Request/response so the new pane's id comes back and failures
+        // exit non-zero.
+        if args.contains("--help") || args.contains("-h") {
+            printPaneSplitUsage(stream: stdout)
+            exit(0)
+        }
         let direction = parseFlag("--direction", from: &args)
         let path = parseFlag("--path", from: &args)
         let name = parseFlag("--name", from: &args)
         let target = parseFlag("--target", from: &args)
-
-        var payload: [String: String] = [
-            "command": "pane-split",
-            "pane_id": paneID
-        ]
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+        guard target != nil || workspace != nil || originPaneID != nil else {
+            fputs("nex pane split: requires --target <name-or-uuid> or --workspace <name-or-id> when called from outside a Nex pane\n", stderr)
+            printPaneSplitUsage(stream: stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = ["command": "pane-split"]
         if let direction { payload["direction"] = direction }
         if let path { payload["path"] = path }
         if let name { payload["name"] = name }
         if let target { payload["target"] = target }
-        sendJSON(payload)
+        if let workspace { payload["workspace"] = workspace }
+        if let originPaneID { payload["pane_id"] = originPaneID }
+        sendPaneMutationReply(payload, command: "split", asJSON: asJSON, verb: "split pane")
 
     case "create":
-        let paneID = requirePaneID()
+        if args.contains("--help") || args.contains("-h") {
+            printPaneCreateUsage(stream: stdout)
+            exit(0)
+        }
         let path = parseFlag("--path", from: &args)
         let name = parseFlag("--name", from: &args)
         let target = parseFlag("--target", from: &args)
-
-        var payload: [String: String] = [
-            "command": "pane-create",
-            "pane_id": paneID
-        ]
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+        guard target != nil || workspace != nil || originPaneID != nil else {
+            fputs("nex pane create: requires --workspace <name-or-id> or --target <name-or-uuid> when called from outside a Nex pane\n", stderr)
+            printPaneCreateUsage(stream: stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = ["command": "pane-create"]
         if let path { payload["path"] = path }
         if let name { payload["name"] = name }
         if let target { payload["target"] = target }
-        sendJSON(payload)
+        if let workspace { payload["workspace"] = workspace }
+        if let originPaneID { payload["pane_id"] = originPaneID }
+        sendPaneMutationReply(payload, command: "create", asJSON: asJSON, verb: "created pane")
 
     case "close":
         if args.contains("--help") || args.contains("-h") {
@@ -773,27 +930,59 @@ func handlePane(_ args: inout ArraySlice<String>) {
         print(line)
 
     case "name":
-        let paneID = requirePaneID()
-        guard let name = args.popFirst() else {
-            fputs("Usage: nex pane name <name>\n", stderr)
+        // Issue #117: `--target` renames any pane from outside Nex;
+        // without it, renames the caller pane (NEX_PANE_ID). The new
+        // label is the sole positional. Reject stray options/positionals
+        // (issue #108) so a typo can't misroute. Request/response.
+        if args.contains("--help") || args.contains("-h") {
+            printPaneNameUsage(stream: stdout)
+            exit(0)
+        }
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let unknownOpts = args.filter { $0.hasPrefix("-") }
+        if let first = unknownOpts.first {
+            fputs("nex pane name: unknown option \(first)\n", stderr)
+            printPaneNameUsage(stream: stderr)
             exit(1)
         }
-
-        let payload: [String: String] = [
+        let positionals = args.filter { !$0.hasPrefix("-") }
+        guard let name = positionals.first, positionals.count == 1, !name.isEmpty else {
+            fputs("nex pane name: exactly one <name> argument is required\n", stderr)
+            printPaneNameUsage(stream: stderr)
+            exit(1)
+        }
+        let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+        guard target != nil || originPaneID != nil else {
+            fputs("nex pane name: requires --target <name-or-uuid> when called from outside a Nex pane\n", stderr)
+            printPaneNameUsage(stream: stderr)
+            exit(1)
+        }
+        var payload: [String: Any] = [
             "command": "pane-name",
-            "pane_id": paneID,
             "name": name
         ]
-        sendJSON(payload)
+        if let target { payload["target"] = target }
+        if let workspace { payload["workspace"] = workspace }
+        if let originPaneID { payload["pane_id"] = originPaneID }
+        sendPaneMutationReply(payload, command: "name", asJSON: asJSON, verb: "renamed pane")
 
     case "send":
-        let paneID = requirePaneID()
+        // Issue #117: works from outside a Nex pane. `pane_id` (the
+        // caller, when set) only scopes label resolution; routing is by
+        // `--target` (UUID = global, label needs a scope via NEX_PANE_ID
+        // or `--workspace`).
+        if args.contains("--help") || args.contains("-h") {
+            printPaneSendUsage(stream: stdout)
+            exit(0)
+        }
         // `--target` matches the rest of the pane subcommands; `--to`
         // is the original flag and remains supported as a quiet alias
         // for any scripts that already use it.
         let target = parseFlag("--target", from: &args) ?? parseFlag("--to", from: &args)
         guard let target else {
-            fputs("Usage: nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
+            printPaneSendUsage(stream: stderr)
             exit(1)
         }
         // `--workspace <name-or-id>` scopes label resolution. Without
@@ -802,24 +991,27 @@ func handlePane(_ args: inout ArraySlice<String>) {
         // args into the payload text.
         let workspace = parseFlag("--workspace", from: &args)
         // `--bare` (issue #98) — write text without appending Enter.
-        // Pair with `pane send-key` for compositional input (e.g.
-        // type a partial command then `pane send-key tab` to trigger
-        // autocomplete). Default behaviour is unchanged.
         let bare = popSwitch("--bare", from: &args)
+        // `--json` (issue #117) — print the server's structured reply
+        // verbatim instead of the human ack. Parse before joining text.
+        let asJSON = popSwitch("--json", from: &args)
 
         let text = args.joined(separator: " ")
         guard !text.isEmpty else {
-            fputs("Usage: nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>\n", stderr)
+            printPaneSendUsage(stream: stderr)
             exit(1)
         }
 
         var payload: [String: Any] = [
             "command": "pane-send",
-            "pane_id": paneID,
             "target": target,
             "text": text,
             "bare": bare
         ]
+        if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+           !originPaneID.isEmpty {
+            payload["pane_id"] = originPaneID
+        }
         if let workspace {
             payload["workspace"] = workspace
         }
@@ -842,6 +1034,15 @@ func handlePane(_ args: inout ArraySlice<String>) {
             let msg = (json["error"] as? String) ?? "unknown error"
             fputs("nex pane send: \(msg)\n", stderr)
             exit(1)
+        }
+        if asJSON {
+            var clean = json
+            clean.removeValue(forKey: "ok")
+            if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+               let s = String(data: data, encoding: .utf8) {
+                print(s)
+            }
+            return
         }
         // Success ack — print the resolved pane id (and label/workspace
         // when known) so humans see clear confirmation and scripts can
