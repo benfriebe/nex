@@ -4150,6 +4150,13 @@ struct AppReducer {
                         resolvedPath = (cwd as NSString).appendingPathComponent(path)
                     }
                 }
+                // Only open files that actually exist (and aren't directories).
+                // libghostty's link detection can hand us a truncated path
+                // fragment when a path wraps across non-soft-wrapped rows
+                // (issue #107); opening it would spawn a broken markdown pane.
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: resolvedPath, isDirectory: &isDirectory),
+                      !isDirectory.boolValue else { return .none }
                 return .send(.workspaces(.element(
                     id: activeID,
                     action: .openMarkdownFile(filePath: resolvedPath)
