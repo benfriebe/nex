@@ -107,8 +107,8 @@ nex pane close
 nex pane name [--target <name-or-uuid>] [--workspace <name-or-uuid>] <label>
 
 # Send text to another pane (typed into its PTY + Enter)
-# Label resolution is scoped to the sender's own workspace by default
-# (issue #92). Pass --workspace <name-or-id> to target another workspace
+# Label resolution is scoped to the sender's own workspace by default.
+# Pass --workspace <name-or-id> to target another workspace
 # or to disambiguate a label collision; UUID targets are always global.
 # `--bare` writes the text without appending Enter — pair with
 # `pane send-key` for compositional flows (autocomplete with `tab`,
@@ -125,7 +125,7 @@ nex pane id
 ### `nex doctor` — when CLI commands stop working
 
 If `nex` commands suddenly start failing with `Error: nex …: cannot reach
-Nex …` or `no response from Nex` (issue #100), run `nex doctor` first.
+Nex …` or `no response from Nex`, run `nex doctor` first.
 It runs five named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
 plus a concrete repair line for any failure:
 
@@ -153,8 +153,8 @@ by default to avoid stderr spam when Nex is closed; set
 `pane list` is the only Nex command that returns data. Use it whenever a
 coordinator needs to know what panes actually exist right now — panes can
 be closed by the user, crash, or be moved between workspaces. `pane send`
-exits non-zero with a structured error on a missing/ambiguous target
-(issue #92), but checking `pane list` first lets a coordinator skip
+exits non-zero with a structured error on a missing/ambiguous target,
+but checking `pane list` first lets a coordinator skip
 sends to dead workers and surface a clearer message.
 
 ```bash
@@ -430,7 +430,7 @@ exec scripts with embedded `nex.wait(...)` calls don't get cut
 off; the JS-side `wait` timeout is independent.
 
 All `web` verbs follow the same `--target` / `--workspace`
-scoping as `pane send` (issue #92): label targets need an origin
+scoping as `pane send`: label targets need an origin
 pane or `--workspace`; UUID targets resolve globally. All are
 reply-allowlisted — they return JSON and the CLI exits non-zero on
 failure.
@@ -450,9 +450,9 @@ Smoke tests can still use `data:` URLs for navigation, `capture
   UUIDs are matched globally. Labels are scoped to the sender's own
   workspace (via `NEX_PANE_ID`) unless `--workspace <name-or-id>` is
   passed; a bare label without either explicit or implicit scope is
-  rejected (issue #92), so coordinators can't silently route into the
+  rejected, so coordinators can't silently route into the
   wrong workspace.
-- **Works from outside Nex (issue #117)**: `pane send` / `split` / `create` /
+- **Works from outside Nex**: `pane send` / `split` / `create` /
   `name` (like `send-key` / `close` / `capture`) no longer require
   `NEX_PANE_ID`. From a plain shell, address a pane with a UUID `--target`,
   or `--target <label> --workspace <name-or-id>`; `create`/`split` also accept
@@ -473,7 +473,7 @@ Smoke tests can still use `data:` URLs for navigation, `capture
   followed by an Enter keypress. If a shell is running, the text executes as a
   shell command. If Claude is running in interactive mode, the text becomes a
   prompt.
-- **TUI submit caveat (issue #98)**: when the target opts into bracketed-paste
+- **TUI submit caveat**: when the target opts into bracketed-paste
   mode (Claude Code, vim, ...), the trailing Enter from `pane send` is
   intermittently captured inside the paste envelope and the message lands as
   pasted text without submitting. For interactive Claude/TUI workers, prefer
