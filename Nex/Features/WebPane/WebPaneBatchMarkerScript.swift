@@ -20,7 +20,7 @@ import Foundation
 /// Bridge messages:
 /// - `{ id }`                              — user clicked a badge.
 /// - `{ commentChanged: { id, comment } }` — popover textarea edit.
-/// - `{ dismiss: { id } }`                 — Done button / Esc in popover.
+/// - `{ dismiss: { id } }`                 — Done button / Esc / Cmd-Enter in popover.
 /// - `{ remove:  { id } }`                 — Remove button in popover.
 enum WebPaneBatchMarkerScript {
     static let source: String = """
@@ -195,11 +195,16 @@ enum WebPaneBatchMarkerScript {
                     });
                 } catch (e) {}
             });
-            // Esc inside the popover = Done. Don't let it bubble to
-            // the inspector picker (which uses Esc to cancel arming
-            // entirely).
+            // Esc or Cmd-Enter inside the popover = Done. Esc must not
+            // bubble to the inspector picker (which uses Esc to cancel
+            // arming entirely), and Cmd-Enter must not insert a newline
+            // into the textarea.
             popoverTextarea.addEventListener('keydown', function(ev) {
-                if (ev.key === 'Escape') {
+                var isEsc = ev.key === 'Escape';
+                // Skip Cmd-Enter while an IME is composing so CJK input
+                // isn't committed (and truncated) mid-composition.
+                var isCmdEnter = !ev.isComposing && ev.metaKey && (ev.key === 'Enter' || ev.key === 'Return');
+                if (isEsc || isCmdEnter) {
                     ev.preventDefault();
                     ev.stopPropagation();
                     if (focusedID) sendDismiss(focusedID);
