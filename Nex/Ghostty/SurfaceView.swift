@@ -113,7 +113,44 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     deinit {
+        // Fallback only: the normal teardown path goes through
+        // SurfaceManager.destroySurface → detachForTeardown(), which nils
+        // ghosttySurface, so this is a no-op for managed surfaces. It still
+        // frees a surface for any view dropped without manager teardown
+        // (e.g. an orphaned/duplicate view that never registered).
+        //
+        // This fallback is intentionally synchronous: deinit cannot retain
+        // the dying view to keep its layer alive across an off-main free, so
+        // routing it through freeSurfaceAsync would risk a use-after-free of
+        // the NSView's layer during teardown. The cost is that an *unmanaged*
+        // view holding a SIGHUP-trapping surface would re-introduce the #136
+        // hang here — but no managed path hits this (all real teardowns go
+        // through destroySurface), so it stays the safe choice.
         ghosttySurface?.destroy()
+    }
+
+    /// Synchronously sever this view from its live libghostty surface
+    /// ahead of an off-main `ghostty_surface_free` (issue #136). Cancels
+    /// the pending resize, drops first-responder and view-hierarchy ties
+    /// so the view stops driving the dead surface, and hands the raw
+    /// surface pointer to the caller.
+    ///
+    /// Nil-ing `ghosttySurface` here is load-bearing beyond avoiding a
+    /// `deinit` double-free: every deferred main-thread block that touches
+    /// the surface — the `viewDidMoveToWindow` refresh/resize hop and the
+    /// `setFrameSize` debounce work item — guards on `ghosttySurface?`, so
+    /// clearing it on this same main-thread turn disarms any already-queued
+    /// block from poking a surface that is about to be freed off-main.
+    func detachForTeardown() -> ghostty_surface_t? {
+        resizeWorkItem?.cancel()
+        resizeWorkItem = nil
+        if window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
+        }
+        removeFromSuperview()
+        let raw = ghosttySurface?.surface
+        ghosttySurface = nil
+        return raw
     }
 
     // MARK: - Layer

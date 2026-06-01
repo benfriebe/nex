@@ -143,6 +143,72 @@ final class GhosttyApp {
         ghostty_app_tick(app)
     }
 
+    /// Serial queue for off-main surface teardown (issue #136).
+    ///
+    /// `ghostty_surface_free` calls `Surface.deinit`, which joins the
+    /// surface's IO thread (`ghostty/src/Surface.zig` `io_thr.join()`).
+    /// When the child process traps or ignores SIGHUP, libghostty's
+    /// `killPid` spins forever on `killpg(SIGHUP)` + `waitpid(WNOHANG)`
+    /// (`ghostty/src/termio/Exec.zig`) with no SIGKILL escalation, so the
+    /// join — and the main thread that called free synchronously — hangs
+    /// for tens of seconds. Running free here keeps the UI responsive;
+    /// worst case the surface struct lingers until the child finally dies.
+    ///
+    /// Only the *free* is offloaded. Surface creation (`ghostty_surface_new`)
+    /// makes the SurfaceView's NSView layer-hosting by assigning libghostty's
+    /// Metal layer to the view's `layer` property (`renderer/Metal.zig`
+    /// `surfaceInit` → `setProperty("layer", …)`; the `addSublayer:` branch is
+    /// iOS-only), a main-thread-only AppKit mutation, so creation cannot move
+    /// off-main. `ghostty_app_tick` iterates `App.surfaces` (via `hasSurface`
+    /// while draining the mailbox) and so must stay serialized with creation —
+    /// keeping it on main lets the run loop do that for free. The teardown
+    /// reads only cached surface state (`getContentScale`/`getSize`), and the
+    /// post-join `layer.release()` only drops libghostty's own retain — on
+    /// macOS the view *is* the layer host, so its `.layer` keeps the layer
+    /// alive until the NSView deallocs on main. Off-main free is therefore
+    /// safe as long as the view outlives the call (see `freeSurfaceAsync`).
+    ///
+    /// Residual race (accepted, not fully fixable in Swift): `ghostty_surface_free`
+    /// is a single C call, so free's own `App.deleteSurface` (a `swapRemove`
+    /// on the lock-free `App.surfaces` list) now runs on this queue and can
+    /// interleave with *any* main-thread libghostty call that touches that
+    /// list — not only `ghostty_surface_new` (append, may realloc) and `tick`'s
+    /// `hasSurface`, but also app-scoped / all-surfaces binding actions and
+    /// config reloads (`App.zig` `performAction` iterating `surfaces.items`).
+    /// Ordinary per-key input does *not* iterate the list, so in practice the
+    /// colliding window is small — `deleteSurface` runs at the very start of
+    /// free, before the long `io_thr.join()` — but the access is genuinely
+    /// unsynchronized, i.e. a rare latent crash. It is still vastly preferable
+    /// to the deterministic multi-second freeze it replaces. Closing this
+    /// fully needs a libghostty change (a split teardown API, an internal lock
+    /// on `App.surfaces`, or PID-export + SIGKILL-before-free — issue #136 plan
+    /// steps 3/4), none of which is possible against the prebuilt static lib.
+    ///
+    /// Head-of-line caveat: frees serialize on this queue, so a free whose
+    /// child never dies (SIGHUP-trapped) blocks every later free behind it —
+    /// those panes leave Nex's UI but their PTY children linger until the first
+    /// child finally exits. Bounding this needs the same SIGKILL escalation. A
+    /// concurrent queue would unblock them but let two `deleteSurface`s race
+    /// each other, so serial is the safer of the two imperfect choices here.
+    nonisolated let surfaceTeardownQueue = DispatchQueue(
+        label: "com.nex.ghostty.surface-teardown",
+        qos: .userInitiated
+    )
+
+    /// Free a libghostty surface off the main thread. `view` is retained
+    /// for the duration of the (potentially multi-second) free so its
+    /// NSView — whose CALayer libghostty renders into and releases during
+    /// teardown — stays alive throughout; the view's deallocation is then
+    /// forced back onto the main thread, where NSView dealloc belongs.
+    nonisolated func freeSurfaceAsync(_ rawSurface: ghostty_surface_t, retaining view: SurfaceView) {
+        let retainer = SurfaceViewRetainer(view)
+        surfaceTeardownQueue.async {
+            ghostty_surface_free(rawSurface)
+            // Release the retained view (and trigger NSView dealloc) on main.
+            DispatchQueue.main.async { _ = retainer }
+        }
+    }
+
     private nonisolated func handleAction(
         target: ghostty_target_s,
         action: ghostty_action_s
@@ -321,5 +387,17 @@ final class GhosttyApp {
         if let app {
             ghostty_app_free(app)
         }
+    }
+}
+
+/// Holds a `SurfaceView` alive across the off-main teardown hop in
+/// `GhosttyApp.freeSurfaceAsync` without tripping Swift 6 Sendable
+/// checks. The view is only retained (never accessed) off the main
+/// thread — ARC retain/release is atomic, and the final release is
+/// forced back onto main — so `@unchecked Sendable` is sound here.
+private final class SurfaceViewRetainer: @unchecked Sendable {
+    let view: SurfaceView
+    init(_ view: SurfaceView) {
+        self.view = view
     }
 }

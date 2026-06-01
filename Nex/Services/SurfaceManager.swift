@@ -52,8 +52,13 @@ final class SurfaceManager: Sendable {
         let surfaceView = lock.withLock {
             surfaces.removeValue(forKey: paneID)
         }
-        surfaceView?.ghosttySurface?.destroy()
-        surfaceView?.ghosttySurface = nil // Prevent double-free in SurfaceView.deinit
+        guard let surfaceView else { return }
+        // Detach the view synchronously on main, then free the surface off
+        // the main thread so a SIGHUP-trapping child can't hang the UI
+        // (issue #136). detachForTeardown() nils ghosttySurface, so the
+        // view's deinit won't double-free.
+        guard let rawSurface = surfaceView.detachForTeardown() else { return }
+        GhosttyApp.shared.freeSurfaceAsync(rawSurface, retaining: surfaceView)
     }
 
     @MainActor
@@ -64,8 +69,8 @@ final class SurfaceManager: Sendable {
             return copy
         }
         for (_, surfaceView) in all {
-            surfaceView.ghosttySurface?.destroy()
-            surfaceView.ghosttySurface = nil
+            guard let rawSurface = surfaceView.detachForTeardown() else { continue }
+            GhosttyApp.shared.freeSurfaceAsync(rawSurface, retaining: surfaceView)
         }
     }
 
