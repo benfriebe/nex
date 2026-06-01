@@ -436,52 +436,36 @@ struct WorkspaceListView: View {
     /// reorder instead of selecting text / moving the caret.
     @ViewBuilder
     private func groupHeaderEntry(groupID: UUID, group: WorkspaceGroup) -> some View {
-        let children = group.childOrder.compactMap { store.workspaces[id: $0] }
-        let count = children.count
-        let hasWaitingPanes = children.contains { ws in
-            ws.panes.contains { $0.status == .waitingForInput }
-        }
-        let hasRunningPanes = children.contains { ws in
-            ws.panes.contains { $0.status == .running }
-        }
         let isRenamingThis = store.renamingGroupID == groupID
         let isDraggingThisGroup = draggedGroupID == groupID
-        let row = GroupHeaderRow(
-            name: group.name,
-            color: group.color,
-            icon: group.icon,
-            isCollapsed: group.isCollapsed,
-            workspaceCount: count,
-            isRenaming: isRenamingThis,
-            hasWaitingPanes: hasWaitingPanes,
-            hasRunningPanes: hasRunningPanes,
-            onToggleCollapse: {
-                // If a different group is being renamed, clicking any row
-                // should commit its name via focus loss.
-                if let rid = store.renamingGroupID, rid != groupID {
-                    NSApp.keyWindow?.makeFirstResponder(nil)
+        // `GroupHeaderRowContainer` is a distinct `View`, so its reads of
+        // the child workspaces' pane statuses (for the agent-activity dot
+        // and count) form their own observation boundary. Previously those
+        // reads ran inline here, inside the sidebar's top-level body, so a
+        // pane-status change in ANY grouped workspace re-rendered the whole
+        // list — and on macOS that rebuilds this header's `.contextMenu`
+        // NSMenu and dismisses any open submenu. That is why the nested
+        // `Color` / `Change Icon` submenus flickered and could not be
+        // clicked (issue #124). A wrapping `WithPerceptionTracking` is NOT
+        // enough: in release builds it compiles to a transparent
+        // pass-through (its content is evaluated in the enclosing body), so
+        // only a separate `View` actually scopes the observation. Workspace
+        // rows never hit this because each is its own scoped-store view.
+        let row = GroupHeaderRowContainer(store: store, group: group)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: RowHeightsKey.self,
+                        value: [.group(groupID): geo.size.height]
+                    )
                 }
-                store.send(.toggleGroupCollapse(groupID))
-            },
-            onCommitRename: { newName in
-                store.send(.renameGroup(id: groupID, name: newName))
-            },
-            onCancelRename: { store.send(.setRenamingGroupID(nil)) }
-        )
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: RowHeightsKey.self,
-                    value: [.group(groupID): geo.size.height]
-                )
-            }
-        )
-        .offset(y: isDraggingThisGroup ? dragCurrentY - dragGrabOffset - groupStartY(groupID) : 0)
-        .zIndex(isDraggingThisGroup ? 1 : 0)
-        .opacity(isDraggingThisGroup ? 0.8 : 1)
-        .scaleEffect(isDraggingThisGroup ? 1.03 : 1.0)
-        .shadow(color: isDraggingThisGroup ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
-        .animation(isDraggingThisGroup ? .none : .spring(response: 0.35, dampingFraction: 0.8), value: store.topLevelOrder)
+            )
+            .offset(y: isDraggingThisGroup ? dragCurrentY - dragGrabOffset - groupStartY(groupID) : 0)
+            .zIndex(isDraggingThisGroup ? 1 : 0)
+            .opacity(isDraggingThisGroup ? 0.8 : 1)
+            .scaleEffect(isDraggingThisGroup ? 1.03 : 1.0)
+            .shadow(color: isDraggingThisGroup ? .black.opacity(0.3) : .clear, radius: 4, y: 2)
+            .animation(isDraggingThisGroup ? .none : .spring(response: 0.35, dampingFraction: 0.8), value: store.topLevelOrder)
 
         if isRenamingThis {
             row.contextMenu {
@@ -1953,6 +1937,50 @@ struct WorkspaceListView: View {
             return .clean
         }
         return .unknown
+    }
+}
+
+/// Isolated host for one group header. Because it is a distinct `View`,
+/// its reads of the child workspaces' pane statuses get their own SwiftUI
+/// observation boundary, so agent activity inside a group no longer
+/// re-renders the whole sidebar and dismisses an open context-menu
+/// submenu (issue #124). See `groupHeaderEntry` for the full rationale.
+private struct GroupHeaderRowContainer: View {
+    let store: StoreOf<AppReducer>
+    let group: WorkspaceGroup
+
+    var body: some View {
+        WithPerceptionTracking {
+            let children = group.childOrder.compactMap { store.workspaces[id: $0] }
+            let hasWaitingPanes = children.contains { ws in
+                ws.panes.contains { $0.status == .waitingForInput }
+            }
+            let hasRunningPanes = children.contains { ws in
+                ws.panes.contains { $0.status == .running }
+            }
+            GroupHeaderRow(
+                name: group.name,
+                color: group.color,
+                icon: group.icon,
+                isCollapsed: group.isCollapsed,
+                workspaceCount: children.count,
+                isRenaming: store.renamingGroupID == group.id,
+                hasWaitingPanes: hasWaitingPanes,
+                hasRunningPanes: hasRunningPanes,
+                onToggleCollapse: {
+                    // If a different group is being renamed, clicking any
+                    // row should commit its name via focus loss.
+                    if let rid = store.renamingGroupID, rid != group.id {
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                    }
+                    store.send(.toggleGroupCollapse(group.id))
+                },
+                onCommitRename: { newName in
+                    store.send(.renameGroup(id: group.id, name: newName))
+                },
+                onCancelRename: { store.send(.setRenamingGroupID(nil)) }
+            )
+        }
     }
 }
 
