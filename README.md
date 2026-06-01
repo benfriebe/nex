@@ -85,6 +85,7 @@ Open `.md` files via `Cmd+O` or drag-and-drop onto the window.
 - Styled preview via WKWebView with light/dark detection.
 - Live file watching: external edits (vim, VS Code) update the preview in place.
 - YAML front-matter renders as a styled two-column table at the top.
+- Fenced code blocks get a hover-revealed copy button: one click copies the block to the clipboard and flashes a checkmark.
 - Toggle to a plain-text editor with 500ms auto-save (`Cmd+E`).
 - `Cmd+F` find, `Cmd+=` / `Cmd+-` / `Cmd+0` font zoom, clickable URLs, task-list checkboxes.
 
@@ -186,10 +187,12 @@ nex pane capture [--target <name-or-uuid>] [--lines N] [--scrollback]
 nex pane list    [--workspace <name-or-id> | --current] [--json] [--no-header]
 nex pane move    [left|right|up|down]
 nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+nex pane sync    on|off|toggle|status [--workspace <name-or-uuid>] [--json]
+nex pane sync    exclude|include --target <name-or-uuid> [--workspace <name-or-uuid>]
 nex pane id
 ```
 
-`pane send` writes text then presses Enter; `pane send --bare` writes without Enter so you can compose multi-step input (`send --bare "ls /tm"` then `send-key tab`). `pane send-key` accepts `enter`, `tab`, `escape`, `space`, `backspace`, arrows, and `ctrl-c`. `pane capture` reads another pane's visible viewport (or full screen with `--scrollback`).
+`pane send` writes text then presses Enter; `pane send --bare` writes without Enter so you can compose multi-step input (`send --bare "ls /tm"` then `send-key tab`). `pane send-key` accepts `enter`, `tab`, `escape`, `space`, `backspace`, arrows, and `ctrl-c`. `pane capture` reads another pane's visible viewport (or full screen with `--scrollback`). `pane sync` is the tmux-style synchronise-input toggle: while on, a keystroke in any terminal pane is mirrored to every other terminal pane in the workspace; `sync exclude` opts a pane out of the group. New panes auto-join the active group; `Settings > Keybindings` exposes the `toggle_sync_input` action (default unbound) and there's a per-pane header button.
 
 ### Workspaces, groups, layouts
 
@@ -209,6 +212,16 @@ nex open  [--here] <path>     # markdown preview or terminal cd, --here reuses t
 nex diff  [<path>]            # opens a diff pane for the current repo
 nex graft start | stop | status [--json]
 ```
+
+### Diagnostics
+
+When `nex` commands stop reaching the app, run the doctor first:
+
+```bash
+nex doctor [--json]
+```
+
+It runs five named checks (`transport`, `socket`/`resolve`, `ping`, `process`, `version`) and prints a `[PASS|FAIL|WARN]` line plus a concrete repair tip for each failure: `ping` round-trips a real socket command, `process` distinguishes "Nex isn't running" from "Nex is wedged", and `version` flags CLI/app drift. Exits 0 when everything passes. Every other CLI error now prints a paired `Error: … / Repair: …` message; fire-and-forget event hooks stay exit-0 but emit a `Warning:` (silence with `NEX_SILENT=1`).
 
 ### Web pane automation
 
