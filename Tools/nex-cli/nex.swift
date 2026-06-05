@@ -358,23 +358,7 @@ func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
 private func sendPaneMutationReply(
     _ payload: [String: Any], command: String, asJSON: Bool, verb: String
 ) {
-    guard let replyData = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex pane \(command)")
-        exit(1)
-    }
-    guard !replyData.isEmpty else {
-        fputs("nex pane \(command): no response from Nex (upgrade required? need v0.24+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex pane \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex pane \(command): \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex pane \(command)")
     if asJSON {
         var clean = json
         clean.removeValue(forKey: "ok")
@@ -475,6 +459,61 @@ func sendJSONAndReadReply(
             readTimeoutOverride: readTimeoutOverride
         )
     }
+}
+
+// MARK: - Reply decoding
+
+// Almost every request/response command shares the same reply preamble:
+// send the payload, bail on transport failure, bail on an empty reply
+// (an older Nex that closed the connection without answering), reject
+// invalid JSON, and surface `ok:false` as a stderr error + non-zero
+// exit. The three helpers below centralise each branch so the wording
+// lives in exactly one place. `command` is always the full user-facing
+// label, e.g. "nex pane list".
+
+/// Send `payload` and return the guaranteed-non-empty reply bytes.
+/// Exits non-zero on transport failure or an empty reply.
+func readReplyOrExit(
+    _ payload: [String: Any], command: String, readTimeoutOverride: Int? = nil
+) -> Data {
+    guard let data = sendJSONAndReadReply(payload, readTimeoutOverride: readTimeoutOverride) else {
+        printTransportFailure(command: command)
+        exit(1)
+    }
+    guard !data.isEmpty else {
+        fputs("\(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
+        exit(1)
+    }
+    return data
+}
+
+/// Decode a non-empty reply and enforce the `{ok, error?}` envelope.
+/// Exits non-zero on invalid JSON or `ok:false`. Call this directly
+/// (after a bespoke empty-reply check) for the few commands that treat
+/// an empty reply specially — `pane send` succeeds on empty, while
+/// `pane send-key` / `pane sync` print a "may not support" message.
+func parseReplyOrExit(_ data: Data, command: String) -> [String: Any] {
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("\(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    if let ok = json["ok"] as? Bool, ok == false {
+        let msg = (json["error"] as? String) ?? "unknown error"
+        fputs("\(command): \(msg)\n", stderr)
+        exit(1)
+    }
+    return json
+}
+
+/// Full round-trip for a command returning the standard `{ok, ...}`
+/// envelope: send, then exit non-zero with a categorised stderr message
+/// on transport failure, empty reply, invalid JSON, or `ok:false`.
+/// Returns the parsed reply for verb-specific rendering on success.
+func decodeReply(
+    _ payload: [String: Any], command: String, readTimeoutOverride: Int? = nil
+) -> [String: Any] {
+    let data = readReplyOrExit(payload, command: command, readTimeoutOverride: readTimeoutOverride)
+    return parseReplyOrExit(data, command: command)
 }
 
 /// Default read timeout (seconds) for request/response commands.
@@ -901,23 +940,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
             payload["workspace"] = workspace
         }
 
-        guard let replyData = sendJSONAndReadReply(payload) else {
-            printTransportFailure(command: "nex pane close")
-            exit(1)
-        }
-        guard !replyData.isEmpty else {
-            fputs("nex pane close: no response from Nex (upgrade required? need v0.20+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-            exit(1)
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-            fputs("nex pane close: invalid JSON response\n", stderr)
-            exit(1)
-        }
-        if let ok = json["ok"] as? Bool, ok == false {
-            let msg = (json["error"] as? String) ?? "unknown error"
-            fputs("nex pane close: \(msg)\n", stderr)
-            exit(1)
-        }
+        let json = decodeReply(payload, command: "nex pane close")
         // Success — print the resolved pane id (and label/workspace
         // when known) so humans see clear confirmation and scripts can
         // chain on the id.
@@ -1026,15 +1049,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
         if replyData.isEmpty {
             return
         }
-        guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-            fputs("nex pane send: invalid JSON response\n", stderr)
-            exit(1)
-        }
-        if let ok = json["ok"] as? Bool, ok == false {
-            let msg = (json["error"] as? String) ?? "unknown error"
-            fputs("nex pane send: \(msg)\n", stderr)
-            exit(1)
-        }
+        let json = parseReplyOrExit(replyData, command: "nex pane send")
         if asJSON {
             var clean = json
             clean.removeValue(forKey: "ok")
@@ -1120,15 +1135,7 @@ func handlePane(_ args: inout ArraySlice<String>) {
             fputs("nex pane send-key: empty reply (Nex version may not support this command)\n", stderr)
             exit(1)
         }
-        guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-            fputs("nex pane send-key: invalid JSON response\n", stderr)
-            exit(1)
-        }
-        if let ok = json["ok"] as? Bool, ok == false {
-            let msg = (json["error"] as? String) ?? "unknown error"
-            fputs("nex pane send-key: \(msg)\n", stderr)
-            exit(1)
-        }
+        let json = parseReplyOrExit(replyData, command: "nex pane send-key")
         let resolvedID = (json["pane_id"] as? String) ?? "?"
         let resolvedLabel = json["label"] as? String
         let resolvedWS = json["workspace_name"] as? String
@@ -1299,15 +1306,7 @@ private func sendPaneSyncReply(
         fputs("nex pane \(command): empty reply (Nex version may not support this command)\n", stderr)
         exit(1)
     }
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex pane \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex pane \(command): \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = parseReplyOrExit(replyData, command: "nex pane \(command)")
 
     if asJSON {
         // Strip the `ok` field so JSON consumers see the same shape
@@ -2021,14 +2020,7 @@ private func decodeWebReply(
     _ payload: [String: Any], command: String, asJSON: Bool,
     readTimeoutOverride: Int? = nil
 ) -> [String: Any] {
-    guard let data = sendJSONAndReadReply(payload, readTimeoutOverride: readTimeoutOverride) else {
-        printTransportFailure(command: "nex web \(command)")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
+    let data = readReplyOrExit(payload, command: "nex web \(command)", readTimeoutOverride: readTimeoutOverride)
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         fputs("nex web \(command): invalid JSON response\n", stderr)
         exit(1)
@@ -2168,23 +2160,7 @@ private func sendWebReplyAndPrintExec(
 }
 
 private func sendWebReplyAndPrintTabs(_ payload: [String: Any], asJSON: Bool, noHeader: Bool) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web tabs")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web tabs: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web tabs: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web tabs: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web tabs")
     let tabs = (json["tabs"] as? [[String: Any]]) ?? []
     if asJSON {
         if let out = try? JSONSerialization.data(withJSONObject: tabs, options: [.sortedKeys]),
@@ -2208,46 +2184,14 @@ private func sendWebReplyAndPrintTabs(_ payload: [String: Any], asJSON: Bool, no
 }
 
 private func sendWebReplyAndPrintBasic(_ payload: [String: Any], command: String) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web \(command)")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web \(command): \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web \(command)")
     let paneID = (json["pane_id"] as? String) ?? "?"
     let extra = if let url = json["url"] as? String { " (\(url))" } else { "" }
     print("\(command) ok: \(paneID)\(extra)")
 }
 
 private func sendWebReplyAndPrintURL(_ payload: [String: Any]) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web url")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web url: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web url: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web url: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web url")
     let url = (json["url"] as? String) ?? ""
     let title = (json["title"] as? String) ?? ""
     if !title.isEmpty {
@@ -2258,23 +2202,7 @@ private func sendWebReplyAndPrintURL(_ payload: [String: Any]) {
 }
 
 private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web capture")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web capture: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web capture: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web capture: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web capture")
     let mode = (json["mode"] as? String) ?? "meta"
     switch mode {
     case "text":
@@ -2301,23 +2229,7 @@ private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
 }
 
 private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web console")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web console: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web console: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web console: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web console")
     let lines = (json["lines"] as? [[String: Any]]) ?? []
     if asJSON {
         if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
@@ -2341,23 +2253,7 @@ private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool)
 }
 
 private func sendWebReplyAndPrintInspect(_ payload: [String: Any]) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web inspect")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web inspect: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web inspect: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web inspect: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web inspect")
     let paneID = (json["pane_id"] as? String) ?? "?"
     let armed = (json["armed"] as? Bool) ?? false
     if !armed {
@@ -2374,23 +2270,7 @@ private func sendWebReplyAndPrintInspect(_ payload: [String: Any]) {
 }
 
 private func sendWebReplyAndPrintInspectResult(_ payload: [String: Any], asJSON: Bool) {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web inspect-result")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web inspect-result: no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web inspect-result: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web inspect-result: \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex web inspect-result")
     let results = (json["results"] as? [[String: Any]]) ?? []
     if asJSON {
         if let out = try? JSONSerialization.data(withJSONObject: results, options: [.sortedKeys]),
@@ -2484,29 +2364,13 @@ private func printWebCookiesUsage(stream: UnsafeMutablePointer<FILE>) {
     """, stream)
 }
 
-/// Send `payload` to Nex and decode the reply for a `nex web ...` command.
-/// Exits non-zero with a structured stderr message on transport failure,
-/// empty reply, invalid JSON, or `ok=false`. `command` is the label used in
-/// error messages (e.g. "private", "cookies list").
+/// Thin `nex web ...` wrapper over `decodeReply`: prefixes the command
+/// label with "nex web " so the verb callers only pass the bare verb
+/// (e.g. "private", "cookies list"). Exits non-zero with a structured
+/// stderr message on transport failure, empty reply, invalid JSON, or
+/// `ok:false`; returns the parsed reply on success.
 private func readWebReplyOrExit(_ payload: [String: Any], command: String) -> [String: Any] {
-    guard let data = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex web \(command)")
-        exit(1)
-    }
-    guard !data.isEmpty else {
-        fputs("nex web \(command): no response from Nex (upgrade required?)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        fputs("nex web \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex web \(command): \(msg)\n", stderr)
-        exit(1)
-    }
-    return json
+    decodeReply(payload, command: "nex web \(command)")
 }
 
 private func sendWebReplyAndPrintPrivate(_ payload: [String: Any]) {
@@ -2608,27 +2472,7 @@ func handlePaneList(_ args: inout ArraySlice<String>) {
         payload["scope"] = "current"
     }
 
-    guard let replyData = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex pane list")
-        exit(1)
-    }
-
-    guard !replyData.isEmpty else {
-        fputs("nex pane list: no response from Nex (upgrade required? need v0.20+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex pane list: invalid JSON response\n", stderr)
-        exit(1)
-    }
-
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex pane list: \(msg)\n", stderr)
-        exit(1)
-    }
-
+    let json = decodeReply(payload, command: "nex pane list")
     let panes = (json["panes"] as? [[String: Any]]) ?? []
 
     if asJSON {
@@ -2761,24 +2605,7 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
         payload["scrollback"] = true
     }
 
-    guard let replyData = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex pane capture")
-        exit(1)
-    }
-    guard !replyData.isEmpty else {
-        fputs("nex pane capture: no response from Nex (upgrade required? need v0.21+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex pane capture: invalid JSON response\n", stderr)
-        exit(1)
-    }
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex pane capture: \(msg)\n", stderr)
-        exit(1)
-    }
-
+    let json = decodeReply(payload, command: "nex pane capture")
     let text = (json["text"] as? String) ?? ""
     // Write raw text without an added trailing newline — the captured
     // output usually already ends in one. Use FileHandle so binary-safe.
@@ -3023,24 +2850,7 @@ private func handleGraftCommand(command: String, args: inout ArraySlice<String>)
         payload["pane_id"] = paneID
     }
 
-    guard let replyData = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex \(command)")
-        exit(1)
-    }
-    guard !replyData.isEmpty else {
-        fputs("nex \(command): no response from Nex (upgrade required? need v0.25+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex \(command): invalid JSON response\n", stderr)
-        exit(1)
-    }
-
-    if let ok = json["ok"] as? Bool, ok == false {
-        let msg = (json["error"] as? String) ?? "unknown error"
-        fputs("nex \(command): \(msg)\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex \(command)")
 
     if command == "graft-start" {
         let started = (json["started"] as? [[String: Any]]) ?? []
@@ -3080,18 +2890,7 @@ private func handleGraftCommand(command: String, args: inout ArraySlice<String>)
 private func handleGraftStatus(args: inout ArraySlice<String>) {
     let asJSON = popSwitch("--json", from: &args)
     let payload: [String: Any] = ["command": "graft-status"]
-    guard let replyData = sendJSONAndReadReply(payload) else {
-        printTransportFailure(command: "nex graft status")
-        exit(1)
-    }
-    guard !replyData.isEmpty else {
-        fputs("nex graft status: no response from Nex (upgrade required? need v0.25+)\nRepair: if the running Nex is recent, the app may be wedged — try `nex doctor` first, then restart Nex if needed.\n", stderr)
-        exit(1)
-    }
-    guard let json = try? JSONSerialization.jsonObject(with: replyData) as? [String: Any] else {
-        fputs("nex graft status: invalid JSON response\n", stderr)
-        exit(1)
-    }
+    let json = decodeReply(payload, command: "nex graft status")
     let sessions = (json["sessions"] as? [[String: Any]]) ?? []
 
     if asJSON {
