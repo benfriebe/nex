@@ -902,7 +902,7 @@ struct AppReducer {
                 if let label = pane.label { entry["label"] = label }
                 if let title = pane.title { entry["title"] = title }
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
-                if let sessionID = pane.claudeSessionID { entry["claude_session_id"] = sessionID }
+                if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
                 panes.append(entry)
             }
@@ -3877,12 +3877,12 @@ struct AppReducer {
                 }
 
                 // Collect panes eligible for auto-resume before clearing.
-                // Any pane with a claudeSessionID is resumable — the session
+                // Any pane with a agentSessionID is resumable — the session
                 // remains valid regardless of the pane's current status.
                 var resumablePanes: [(paneID: UUID, sessionID: String)] = []
                 for workspace in workspaces {
                     for pane in workspace.panes {
-                        if let sessionID = pane.claudeSessionID {
+                        if let sessionID = pane.agentSessionID {
                             resumablePanes.append((paneID: pane.id, sessionID: sessionID))
                         }
                     }
@@ -3896,8 +3896,8 @@ struct AppReducer {
                 // next Cmd+Q with no real agents in flight (issue #129).
                 for workspace in state.workspaces {
                     for pane in workspace.panes {
-                        if pane.claudeSessionID != nil {
-                            state.workspaces[id: workspace.id]?.panes[id: pane.id]?.claudeSessionID = nil
+                        if pane.agentSessionID != nil {
+                            state.workspaces[id: workspace.id]?.panes[id: pane.id]?.agentSessionID = nil
                         }
                         if pane.status != .idle {
                             state.workspaces[id: workspace.id]?.panes[id: pane.id]?.status = .idle
@@ -4935,6 +4935,21 @@ struct AppReducer {
                             action: .sessionStarted(paneID: paneID, sessionID: sessionID)
                         ))),
                         .send(.updateExternalIndicators)
+                    )
+
+                case .sessionEnded(let paneID, let sessionID):
+                    guard let workspace = state.workspaceContainingPane(paneID)
+                    else { return .none }
+
+                    // Persist so the cleared session id survives the next
+                    // launch — otherwise the resume loop on restart would
+                    // still see the stale id and reattach a dead session.
+                    return .merge(
+                        .send(.workspaces(.element(
+                            id: workspace.id,
+                            action: .sessionEnded(paneID: paneID, sessionID: sessionID)
+                        ))),
+                        .send(.persistState)
                     )
 
                 // MARK: Pane commands

@@ -116,7 +116,7 @@ struct WorkspaceFeatureTests {
                     workingDirectory: state.panes[id: secondPaneID]!.workingDirectory,
                     label: nil,
                     type: .shell,
-                    claudeSessionID: nil
+                    agentSessionID: nil
                 )
             ]
             state.panes.remove(id: secondPaneID)
@@ -559,8 +559,42 @@ struct WorkspaceFeatureTests {
         }
 
         await store.send(.sessionStarted(paneID: paneID, sessionID: "abc-123")) {
-            $0.panes[id: paneID]?.claudeSessionID = "abc-123"
+            $0.panes[id: paneID]?.agentSessionID = "abc-123"
         }
+    }
+
+    @Test func sessionEndedClearsMatchingSessionID() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.agentSessionID = "abc-123"
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.sessionEnded(paneID: paneID, sessionID: "abc-123")) {
+            $0.panes[id: paneID]?.agentSessionID = nil
+        }
+    }
+
+    @Test func sessionEndedKeepsMismatchedSessionID() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        // A live session id different from the one that just ended:
+        // `/clear` and compact fire SessionEnd(old) + SessionStart(new),
+        // so a stale end must not clobber the current session.
+        workspace.panes[id: paneID]?.agentSessionID = "new-session"
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        // No state change expected — the ending id no longer matches.
+        await store.send(.sessionEnded(paneID: paneID, sessionID: "old-session"))
     }
 
     // MARK: - Undo Close Pane
@@ -574,7 +608,7 @@ struct WorkspaceFeatureTests {
             id: secondPaneID,
             label: "my-label",
             workingDirectory: "/tmp/test",
-            claudeSessionID: "session-abc"
+            agentSessionID: "session-abc"
         )
         workspace.panes.append(secondPane)
         workspace.layout = .split(
@@ -597,7 +631,7 @@ struct WorkspaceFeatureTests {
                     workingDirectory: "/tmp/test",
                     label: "my-label",
                     type: .shell,
-                    claudeSessionID: "session-abc"
+                    agentSessionID: "session-abc"
                 )
             ]
             state.panes.remove(id: secondPaneID)
@@ -614,7 +648,7 @@ struct WorkspaceFeatureTests {
                 workingDirectory: "/tmp/restored",
                 label: "restored-label",
                 type: .shell,
-                claudeSessionID: nil
+                agentSessionID: nil
             )
         ]
 
@@ -741,7 +775,7 @@ struct WorkspaceFeatureTests {
                     workingDirectory: state.panes[id: firstID]!.workingDirectory,
                     label: nil,
                     type: .shell,
-                    claudeSessionID: nil
+                    agentSessionID: nil
                 )
             ]
             state.panes.remove(id: firstID)
@@ -2061,7 +2095,7 @@ struct WorkspaceFeatureTests {
                 label: "repo",
                 type: .diff,
                 filePath: nil,
-                claudeSessionID: nil
+                agentSessionID: nil
             )
         ]
 

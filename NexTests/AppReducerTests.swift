@@ -746,7 +746,7 @@ struct AppReducerTests {
 
     @Test func stateLoadedClearsSessionIDs() async {
         var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
-        ws.panes[id: Self.paneID1]?.claudeSessionID = "session-xyz"
+        ws.panes[id: Self.paneID1]?.agentSessionID = "session-xyz"
         ws.panes[id: Self.paneID1]?.status = .running
 
         let store = makeStore()
@@ -758,7 +758,7 @@ struct AppReducerTests {
             activeWorkspaceID: Self.wsID1,
             repoRegistry: []
         )) { state in
-            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.claudeSessionID == nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.agentSessionID == nil)
             #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.status == .idle)
         }
     }
@@ -780,7 +780,7 @@ struct AppReducerTests {
             activeWorkspaceID: Self.wsID1,
             repoRegistry: []
         )) { state in
-            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.claudeSessionID == nil)
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.agentSessionID == nil)
             #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.status == .idle)
         }
     }

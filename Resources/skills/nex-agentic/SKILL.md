@@ -174,7 +174,7 @@ nex pane list --workspace nex
 Each JSON entry includes: `id`, `label`, `type` (`shell` / `markdown` /
 `scratchpad` / `diff` / `web`), `title`, `workspace_id`, `workspace_name`,
 `working_directory`, `git_branch`, `status` (`idle`/`running`/
-`waitingForInput`), `claude_session_id`, `is_focused`,
+`waitingForInput`), `agent_session_id`, `is_focused`,
 `is_active_workspace`, `created_at`, `last_activity_at`.
 
 Exit codes: `0` on success (including empty list), `1` on usage error,
@@ -209,7 +209,15 @@ nex event start                    # Signal agent started
 nex event stop                     # Signal agent stopped
 nex event error --message "..."    # Signal error
 nex event notification --title "..." --body "..."  # Desktop notification
+nex event session-start            # Attach the pane to a Claude session id (SessionStart hook)
+nex event session-end              # Detach the session id so an exited session isn't resumed (SessionEnd hook)
 ```
+
+`session-start` / `session-end` read the `session_id` from the hook's
+stdin JSON and are wired to Claude Code's `SessionStart` / `SessionEnd`
+hooks by `install-hooks.sh`. `session-end` clears the pane's tracked
+session id (only when it still matches the ending session) so Nex does
+not `claude --resume` a session that has already exited.
 
 ### Workspace Commands
 

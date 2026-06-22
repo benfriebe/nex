@@ -65,6 +65,23 @@ struct SocketParsingTests {
         #expect(result == nil)
     }
 
+    @Test func parseSessionEndCommand() {
+        let data = jsonData("""
+        {"command":"session-end","pane_id":"\(Self.paneIDString)","session_id":"sess-abc"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .sessionEnded(paneID: Self.paneUUID, sessionID: "sess-abc"))
+    }
+
+    @Test func parseSessionEndMissingSessionID() {
+        let data = jsonData("""
+        {"command":"session-end","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result == nil)
+    }
+
     // MARK: - parseWireMessage — Pane commands
 
     @Test func parsePaneSplitCommand() {
@@ -610,6 +627,17 @@ struct SocketParsingTests {
         // session-start with session_id should NOT dual-fire
         #expect(results.count == 1)
         #expect(results[0] == .sessionStarted(paneID: Self.paneUUID, sessionID: "sess-xyz"))
+    }
+
+    @Test func parseSessionEndNoDualFire() {
+        let input = """
+        {"command":"session-end","pane_id":"\(Self.paneIDString)","session_id":"sess-xyz"}
+        """
+        let results = SocketServer.parseMessages(jsonData(input))
+        // session-end carries session_id but must NOT dual-fire
+        // .sessionStarted — that would re-attach the id it exists to drop.
+        #expect(results.count == 1)
+        #expect(results[0] == .sessionEnded(paneID: Self.paneUUID, sessionID: "sess-xyz"))
     }
 
     @Test func parseDataEmptyInput() {

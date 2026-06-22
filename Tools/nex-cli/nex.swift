@@ -4,7 +4,7 @@
 //
 // Usage:
 //   nex --version
-//   nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
+//   nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]
 //   nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -188,7 +188,7 @@ func printUsage() {
     fputs("""
     Usage:
       nex --version
-      nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]
+      nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]
       nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -748,14 +748,14 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     }
 
     guard let eventType = args.popFirst() else {
-        fputs("Usage: nex event stop|start|error|notification|session-start [--message ...] [--title ...] [--body ...]\n", stderr)
+        fputs("Usage: nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]\n", stderr)
         exit(1)
     }
 
-    let validEvents: Set = ["stop", "start", "error", "notification", "session-start"]
+    let validEvents: Set = ["stop", "start", "error", "notification", "session-start", "session-end"]
     guard validEvents.contains(eventType) else {
         fputs("Unknown event type: \(eventType)\n", stderr)
-        fputs("Valid events: stop, start, error, notification, session-start\n", stderr)
+        fputs("Valid events: stop, start, error, notification, session-start, session-end\n", stderr)
         exit(1)
     }
 
@@ -2489,11 +2489,12 @@ func handlePaneList(_ args: inout ArraySlice<String>) {
 }
 
 /// Render the `pane-list` response as a fixed-width table. Columns:
-/// ID (truncated UUID), LABEL, TYPE, WORKSPACE, STATUS, CWD.
+/// ID (truncated UUID), LABEL, TYPE, WORKSPACE, STATUS, SESSION, CWD.
 ///
-/// We truncate the UUID (first 8 + last 4) for readability; the
-/// `--json` output keeps the full UUID for scripts. Other fields
-/// print at their natural width with a 2-space gutter.
+/// We truncate the UUIDs (first 8 + last 4) for readability — both the
+/// pane id and the agent session id; the `--json` output keeps the full
+/// values for scripts. SESSION is `-` when no agent session is attached.
+/// Other fields print at their natural width with a 2-space gutter.
 func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     struct Row {
         let id: String
@@ -2501,39 +2502,39 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
         let type: String
         let workspace: String
         let status: String
+        let session: String
         let cwd: String
     }
 
     let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
 
+    func shortUUID(_ value: String) -> String {
+        guard value.count >= 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
+    }
+
     let rows: [Row] = panes.map { entry in
-        let fullID = (entry["id"] as? String) ?? ""
-        let shortID: String
-        if fullID.count >= 12 {
-            let prefix = fullID.prefix(8)
-            let suffix = fullID.suffix(4)
-            shortID = "\(prefix)…\(suffix)"
-        } else {
-            shortID = fullID
-        }
+        let shortID = shortUUID((entry["id"] as? String) ?? "")
         var cwd = (entry["working_directory"] as? String) ?? ""
         if !home.isEmpty, cwd.hasPrefix(home) {
             cwd = "~" + cwd.dropFirst(home.count)
         }
         let typeRaw = (entry["type"] as? String) ?? ""
+        let sessionRaw = (entry["agent_session_id"] as? String) ?? ""
         return Row(
             id: shortID,
             label: (entry["label"] as? String) ?? "-",
             type: typeRaw.isEmpty ? "-" : typeRaw,
             workspace: (entry["workspace_name"] as? String) ?? "",
             status: (entry["status"] as? String) ?? "",
+            session: sessionRaw.isEmpty ? "-" : shortUUID(sessionRaw),
             cwd: cwd
         )
     }
 
     // Compute column widths from data (and headers if shown).
-    var widths = [0, 0, 0, 0, 0, 0]
-    let headers = ["ID", "LABEL", "TYPE", "WORKSPACE", "STATUS", "CWD"]
+    var widths = [0, 0, 0, 0, 0, 0, 0]
+    let headers = ["ID", "LABEL", "TYPE", "WORKSPACE", "STATUS", "SESSION", "CWD"]
     if !noHeader {
         for (i, h) in headers.enumerated() {
             widths[i] = max(widths[i], h.count)
@@ -2545,7 +2546,8 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
         widths[2] = max(widths[2], r.type.count)
         widths[3] = max(widths[3], r.workspace.count)
         widths[4] = max(widths[4], r.status.count)
-        widths[5] = max(widths[5], r.cwd.count)
+        widths[5] = max(widths[5], r.session.count)
+        widths[6] = max(widths[6], r.cwd.count)
     }
 
     func pad(_ s: String, _ w: Int) -> String {
@@ -2555,10 +2557,10 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
 
     if !noHeader {
         // Last column is not padded so trailing whitespace is avoided.
-        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(pad(headers[4], widths[4]))  \(headers[5])")
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(pad(headers[4], widths[4]))  \(pad(headers[5], widths[5]))  \(headers[6])")
     }
     for r in rows {
-        print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.type, widths[2]))  \(pad(r.workspace, widths[3]))  \(pad(r.status, widths[4]))  \(r.cwd)")
+        print("\(pad(r.id, widths[0]))  \(pad(r.label, widths[1]))  \(pad(r.type, widths[2]))  \(pad(r.workspace, widths[3]))  \(pad(r.status, widths[4]))  \(pad(r.session, widths[5]))  \(r.cwd)")
     }
 }
 

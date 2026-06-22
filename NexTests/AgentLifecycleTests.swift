@@ -179,8 +179,38 @@ struct AgentLifecycleTests {
         await store.receive(
             .workspaces(.element(id: wsID, action: .sessionStarted(paneID: paneID, sessionID: "abc-123")))
         ) { state in
-            state.workspaces[id: wsID]?.panes[id: paneID]?.claudeSessionID = "abc-123"
+            state.workspaces[id: wsID]?.panes[id: paneID]?.agentSessionID = "abc-123"
         }
+    }
+
+    @Test func sessionEndedClearsSessionID() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+
+        var pane = Pane(id: paneID)
+        pane.agentSessionID = "abc-123"
+        let ws = WorkspaceFeature.State(
+            id: wsID, name: "WS", slug: "ws", color: .blue,
+            panes: [pane], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws],
+            activeWorkspaceID: wsID
+        )
+
+        await store.send(.socketMessage(.sessionEnded(paneID: paneID, sessionID: "abc-123"), reply: nil))
+
+        await store.receive(
+            .workspaces(.element(id: wsID, action: .sessionEnded(paneID: paneID, sessionID: "abc-123")))
+        ) { state in
+            state.workspaces[id: wsID]?.panes[id: paneID]?.agentSessionID = nil
+        }
+
+        // Persisting the cleared id is the whole point of #178 — otherwise
+        // the resume loop on next launch reads the stale id from the DB.
+        await store.receive(.persistState)
     }
 
     @Test func agentErrorAlwaysNotifies() async {
