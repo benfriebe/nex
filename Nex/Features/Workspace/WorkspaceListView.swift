@@ -419,11 +419,10 @@ struct WorkspaceListView: View {
                     value: sidebarLayoutKey
                 )
                 .contextMenu {
-                    Button("New Workspace") {
-                        store.send(.showNewWorkspaceSheet(groupID: groupID))
-                    }
+                    // `groupContextMenu` already leads with "New Workspace",
+                    // so the empty-group placeholder reuses it wholesale
+                    // rather than duplicating that button.
                     if let group = store.groups[id: groupID] {
-                        Divider()
                         groupContextMenu(groupID: groupID, group: group)
                     }
                 }
@@ -895,6 +894,10 @@ struct WorkspaceListView: View {
     /// and delete (which routes through the confirmation alert).
     @ViewBuilder
     private func groupContextMenu(groupID: UUID, group: WorkspaceGroup) -> some View {
+        Button("New Workspace") {
+            store.send(.showNewWorkspaceSheet(groupID: groupID))
+        }
+        Divider()
         Button("Rename...") {
             store.send(.beginRenameGroup(groupID))
         }
