@@ -351,6 +351,13 @@ struct WorkspaceListView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .padding(12)
+                // Opaque fill matching the sidebar root background
+                // (ContentView paints the same colour). `safeAreaInset`
+                // lets the scroll view's rows slide *under* this bar, so
+                // without a solid background the colour pill and pane
+                // count of the row above bleed through behind the button.
+                .frame(maxWidth: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor))
             }
         }
     }
