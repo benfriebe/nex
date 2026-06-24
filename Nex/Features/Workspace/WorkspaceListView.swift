@@ -654,9 +654,9 @@ struct WorkspaceListView: View {
     /// Label-string → preset color, built once from the configured
     /// presets and threaded into every row's chips. Last preset wins on a
     /// duplicate name (the reducer already prevents duplicates).
-    private var labelPresetColors: [String: WorkspaceColor] {
+    private var labelPresetColors: [String: Color] {
         Dictionary(
-            store.labelPresets.map { ($0.name, $0.color) },
+            store.labelPresets.map { ($0.name, $0.color.color) },
             uniquingKeysWith: { _, last in last }
         )
     }

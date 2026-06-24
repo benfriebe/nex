@@ -1,18 +1,22 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// Settings tab for defining workspace label presets (name + color).
+/// Settings tab for defining workspace label presets (name + colour).
 /// Picking a preset in the workspace inspector adds its name as a label;
-/// chips whose text matches a preset name render in the preset's color.
+/// chips whose text matches a preset name render in the preset's colour.
 struct LabelPresetsSettingsView: View {
     let store: StoreOf<AppReducer>
 
     @State private var newName = ""
-    @State private var newColor: WorkspaceColor = .blue
+    @State private var newColor: LabelColor = .named(.blue)
 
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
+                addRow
+
+                Divider()
+
                 if store.labelPresets.isEmpty {
                     emptyState
                 } else {
@@ -21,17 +25,13 @@ struct LabelPresetsSettingsView: View {
                             LabelPresetRow(
                                 preset: preset,
                                 isNameAvailable: { candidate in
-                                    // Mirror the reducer's guard so a doomed
-                                    // rename isn't dispatched and the field
-                                    // can restore instead of showing a value
-                                    // that was silently rejected.
                                     candidate == preset.name
                                         || !store.labelPresets.contains { $0.name == candidate }
                                 },
-                                onRename: { newName in
+                                onRename: { name in
                                     store.send(.updateLabelPreset(
                                         id: preset.id,
-                                        name: newName,
+                                        name: name,
                                         color: preset.color
                                     ))
                                 },
@@ -55,10 +55,6 @@ struct LabelPresetsSettingsView: View {
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
                 }
-
-                Divider()
-
-                addRow
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -71,7 +67,7 @@ struct LabelPresetsSettingsView: View {
                 .foregroundStyle(.tertiary)
             Text("No label presets yet")
                 .foregroundStyle(.secondary)
-            Text("Define reusable labels with colors, then pick them in a workspace's inspector.")
+            Text("Define reusable labels with colours, then pick them in a workspace's inspector.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -81,13 +77,17 @@ struct LabelPresetsSettingsView: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: 8) {
-            ColorSwatchMenu(selection: $newColor)
+        HStack(spacing: 10) {
+            LabelChip(text: trimmedNewName.isEmpty ? "label" : trimmedNewName, tint: newColor.color)
+                .opacity(trimmedNewName.isEmpty ? 0.5 : 1)
+                .frame(width: 96, alignment: .leading)
 
             TextField("New label name", text: $newName)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
                 .onSubmit(commitNew)
+
+            LabelColorField(color: $newColor)
 
             Button("Add", action: commitNew)
                 .disabled(trimmedNewName.isEmpty)
@@ -106,27 +106,27 @@ struct LabelPresetsSettingsView: View {
     }
 }
 
-/// One editable preset row: a color menu, an inline-renamable name, and a
-/// delete button. Rename commits on submit or focus loss (like the web
-/// favourites rows).
+/// One editable preset row: a live chip preview, an inline-renamable name,
+/// a colour dropdown, and a delete button. Rename commits on submit or
+/// focus loss (like the web favourites rows).
 private struct LabelPresetRow: View {
     let preset: LabelPreset
     /// True when `candidate` could be committed as this row's name (it
     /// equals the current name, or no other preset already uses it).
     let isNameAvailable: (String) -> Bool
     let onRename: (String) -> Void
-    let onRecolor: (WorkspaceColor) -> Void
+    let onRecolor: (LabelColor) -> Void
     let onRemove: () -> Void
 
     @State private var editingName: String
-    @State private var color: WorkspaceColor
+    @State private var color: LabelColor
     @FocusState private var isFocused: Bool
 
     init(
         preset: LabelPreset,
         isNameAvailable: @escaping (String) -> Bool,
         onRename: @escaping (String) -> Void,
-        onRecolor: @escaping (WorkspaceColor) -> Void,
+        onRecolor: @escaping (LabelColor) -> Void,
         onRemove: @escaping () -> Void
     ) {
         self.preset = preset
@@ -138,15 +138,15 @@ private struct LabelPresetRow: View {
         _color = State(initialValue: preset.color)
     }
 
+    private var previewText: String {
+        let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? preset.name : trimmed
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            ColorSwatchMenu(selection: Binding(
-                get: { color },
-                set: { newColor in
-                    color = newColor
-                    onRecolor(newColor)
-                }
-            ))
+        HStack(spacing: 10) {
+            LabelChip(text: previewText, tint: color.color)
+                .frame(width: 96, alignment: .leading)
 
             TextField("Label name", text: $editingName)
                 .textFieldStyle(.roundedBorder)
@@ -157,7 +157,15 @@ private struct LabelPresetRow: View {
                     if !focused { commitRename() }
                 }
 
-            Spacer()
+            LabelColorField(color: Binding(
+                get: { color },
+                set: { newColor in
+                    color = newColor
+                    onRecolor(newColor)
+                }
+            ))
+
+            Spacer(minLength: 4)
 
             Button(action: onRemove) {
                 Image(systemName: "trash")
@@ -166,7 +174,7 @@ private struct LabelPresetRow: View {
             .buttonStyle(.plain)
             .help("Remove preset")
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         // Keep the local editors in sync if the store rewrites this row
         // (e.g. a rejected rename collision leaves the stored name intact).
         .onChange(of: preset.name) { _, newValue in
@@ -195,35 +203,70 @@ private struct LabelPresetRow: View {
     }
 }
 
-/// A small color picker shown as a swatch that opens a menu of the eight
-/// workspace colors. Reused by the add row and each preset row.
-private struct ColorSwatchMenu: View {
-    @Binding var selection: WorkspaceColor
+/// Colour selector for a label preset: a dropdown of the eight named
+/// workspace colours plus a "Custom…" entry. When the colour is custom, a
+/// system colour well appears next to the dropdown for fine-tuning.
+private struct LabelColorField: View {
+    @Binding var color: LabelColor
 
     var body: some View {
-        Menu {
-            ForEach(WorkspaceColor.allCases) { c in
-                Button {
-                    selection = c
-                } label: {
-                    Label {
-                        Text(c.displayName)
-                    } icon: {
-                        Image(systemName: selection == c ? "checkmark.circle.fill" : "circle.fill")
-                            .foregroundStyle(c.color)
+        HStack(spacing: 6) {
+            Menu {
+                ForEach(WorkspaceColor.allCases) { workspaceColor in
+                    Button {
+                        color = .named(workspaceColor)
+                    } label: {
+                        Label {
+                            Text(workspaceColor.displayName)
+                        } icon: {
+                            Image(systemName: color.namedColor == workspaceColor
+                                ? "checkmark.circle.fill" : "circle.fill")
+                                .foregroundStyle(workspaceColor.color)
+                        }
                     }
                 }
+                Divider()
+                Button {
+                    // Switch to custom, seeded from the current colour so
+                    // the well opens on something sensible.
+                    color = .custom(color.hex)
+                } label: {
+                    Label(
+                        "Custom\u{2026}",
+                        systemImage: color.namedColor == nil ? "checkmark.circle.fill" : "eyedropper"
+                    )
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(color.color)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+                    Text(color.namedColor?.displayName ?? "Custom")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
             }
-        } label: {
-            Circle()
-                .fill(selection.color)
-                .frame(width: 16, height: 16)
-                .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Colour: \(color.namedColor?.displayName ?? "Custom")")
+
+            if color.namedColor == nil {
+                ColorPicker("", selection: customBinding, supportsOpacity: false)
+                    .labelsHidden()
+                    .help("Pick a custom colour")
+            }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Choose a color")
-        .accessibilityLabel("Color: \(selection.displayName)")
+    }
+
+    private var customBinding: Binding<Color> {
+        Binding(
+            get: { color.color },
+            set: { color = .custom($0.hexString) }
+        )
     }
 }

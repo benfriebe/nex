@@ -164,7 +164,7 @@ struct WorkspaceInspectorView: View {
             if !workspace.labels.isEmpty {
                 LabelFlowLayout(spacing: 4) {
                     ForEach(workspace.labels, id: \.self) { label in
-                        LabelChip(text: label, color: presetColor(label)) {
+                        LabelChip(text: label, tint: presetColor(label)) {
                             store.send(.workspaces(.element(
                                 id: activeID,
                                 action: .removeLabel(label)
@@ -200,10 +200,10 @@ struct WorkspaceInspectorView: View {
         }
     }
 
-    /// Preset color for a label string (exact, case-sensitive match), or
-    /// nil for the neutral free-form style.
-    private func presetColor(_ label: String) -> WorkspaceColor? {
-        store.labelPresets.color(for: label)
+    /// Resolved preset tint for a label string (exact, case-sensitive
+    /// match), or nil for the neutral free-form style.
+    private func presetColor(_ label: String) -> Color? {
+        store.labelPresets.color(for: label)?.color
     }
 
     /// Menu of configured label presets. Picking one adds it as a label

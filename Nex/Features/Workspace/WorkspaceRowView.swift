@@ -33,9 +33,9 @@ struct WorkspaceRowView: View {
     var isSelected: Bool = false
     var leadingInset: CGFloat = 0
     var labels: [String] = []
-    /// Preset color per label string. Built once at the list level from
-    /// the configured presets; a missing key renders the neutral chip.
-    var labelColors: [String: WorkspaceColor] = [:]
+    /// Resolved preset tint per label string. Built once at the list
+    /// level from the configured presets; a missing key renders neutral.
+    var labelColors: [String: Color] = [:]
 
     /// Maximum chips rendered inline before collapsing into a `+N` more
     /// indicator. Three keeps rows visually compact in the narrow
@@ -76,7 +76,7 @@ struct WorkspaceRowView: View {
                 if !labels.isEmpty {
                     HStack(spacing: 3) {
                         ForEach(Array(labels.prefix(Self.maxInlineLabels)), id: \.self) { label in
-                            RowLabelChip(text: label, color: labelColors[label])
+                            RowLabelChip(text: label, tint: labelColors[label])
                         }
                         if labels.count > Self.maxInlineLabels {
                             Text("+\(labels.count - Self.maxInlineLabels)")

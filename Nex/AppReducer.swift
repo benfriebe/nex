@@ -61,7 +61,7 @@ struct AppReducer {
         /// matches (chip renders in the neutral free-form style). Match is
         /// exact and case-sensitive, mirroring how `addLabel` stores
         /// labels (trim/clamp only, no lowercasing).
-        func colorForLabel(_ label: String) -> WorkspaceColor? {
+        func colorForLabel(_ label: String) -> LabelColor? {
             labelPresets.color(for: label)
         }
 
@@ -528,10 +528,10 @@ struct AppReducer {
         case labelPresetsLoaded([LabelPreset])
         /// Add a preset. Name is normalized (trim/clamp); empty or a
         /// case-sensitive duplicate name is ignored.
-        case addLabelPreset(name: String, color: WorkspaceColor)
+        case addLabelPreset(name: String, color: LabelColor)
         /// Edit a preset addressed by its current name. Renaming to
         /// collide with another preset's name is ignored.
-        case updateLabelPreset(id: String, name: String, color: WorkspaceColor)
+        case updateLabelPreset(id: String, name: String, color: LabelColor)
         case removeLabelPreset(id: String)
         case moveLabelPreset(fromIndex: Int, toIndex: Int)
 
@@ -650,11 +650,18 @@ struct AppReducer {
         }
     }
 
+    private enum LabelPresetPersistID: Hashable { case debounce }
+
     private func persistLabelPresets(_ presets: [LabelPreset]) -> Effect<Action> {
         let json = LabelPresetsStorage.encode(presets)
-        return .run { [userDefaults] _ in
+        // Debounced: dragging the custom-colour picker fires recolor on
+        // every intermediate colour, so coalesce the rapid writes into a
+        // single UserDefaults write once the value settles.
+        return .run { [userDefaults, clock] _ in
+            try await clock.sleep(for: .milliseconds(300))
             userDefaults.setString(json, LabelPresetsStorage.defaultsKey)
         }
+        .cancellable(id: LabelPresetPersistID.debounce, cancelInFlight: true)
     }
 
     /// Coalesce rapid `cd`s before scanning the directory for a repo root.
