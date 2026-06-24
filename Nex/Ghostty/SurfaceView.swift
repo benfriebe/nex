@@ -19,6 +19,10 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     /// drag resize) into a single set_size so the shell only gets one SIGWINCH.
     private var resizeWorkItem: DispatchWorkItem?
 
+    /// Mouse-down location (ghostty top-left-origin points), used to tell a
+    /// Cmd+click apart from a Cmd+drag selection in `mouseUp` (issue #107).
+    private var mouseDownPoint: NSPoint?
+
     private static let dropTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
         .URL,
@@ -393,6 +397,7 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         let point = mousePoint(from: event)
+        mouseDownPoint = point
         ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
         _ = ghosttySurface?.sendMouseButton(
             state: GHOSTTY_MOUSE_PRESS,
@@ -403,12 +408,102 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     override func mouseUp(with event: NSEvent) {
         let point = mousePoint(from: event)
-        ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
+        let mods = Self.mods(from: event)
+
+        // Issue #107: a Cmd+click on a markdown path that a TUI (e.g. Claude
+        // Code) wrapped across rows. libghostty only recovers the fragment on
+        // the clicked row, so reconstruct the full path ourselves and open it.
+        var handledByReconstruction = false
+        if mods.rawValue & GHOSTTY_MODS_SUPER.rawValue != 0, !wasDrag(to: point) {
+            handledByReconstruction = tryOpenWrappedMarkdownLink(at: point)
+        }
+        mouseDownPoint = nil
+
+        // When we opened the file ourselves, mask SUPER on the forwarded
+        // release so libghostty does NOT also run its own link opener. Without
+        // this, a genuinely soft-wrapped path would open twice (libghostty +
+        // us) and a hard-wrapped path would also fire libghostty's broken
+        // fragment open. cursorPosCallback always recomputes `over_link`, so
+        // the masked position drops the hover-link state before the release.
+        let forwardMods = handledByReconstruction ? Self.modsRemovingSuper(mods) : mods
+        ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: forwardMods)
         _ = ghosttySurface?.sendMouseButton(
             state: GHOSTTY_MOUSE_RELEASE,
             button: GHOSTTY_MOUSE_LEFT,
-            mods: Self.mods(from: event)
+            mods: forwardMods
         )
+    }
+
+    /// Clear the SUPER (Command) bits from a modifier set.
+    private static func modsRemovingSuper(_ mods: ghostty_input_mods_e) -> ghostty_input_mods_e {
+        let cleared = mods.rawValue & ~(GHOSTTY_MODS_SUPER.rawValue | GHOSTTY_MODS_SUPER_RIGHT.rawValue)
+        return ghostty_input_mods_e(rawValue: cleared)
+    }
+
+    /// Whether the pointer moved enough since mouse-down to count as a drag
+    /// (selection) rather than a click.
+    private func wasDrag(to point: NSPoint) -> Bool {
+        guard let down = mouseDownPoint else { return false }
+        return abs(point.x - down.x) > 3 || abs(point.y - down.y) > 3
+    }
+
+    /// Map a click (ghostty top-left-origin points) to a terminal cell.
+    /// The grid origin (padding) comes from libghostty itself rather than a
+    /// guess: a centered estimate is correct only at the initial size and
+    /// drifts as the window is resized (issue #107). `cellOrigin` and
+    /// `mousePoint` are both in unscaled points, so the cell size is too.
+    private func cellPosition(at point: NSPoint) -> (column: Int, row: Int)? {
+        guard let surface = ghosttySurface else { return nil }
+        let size = surface.size
+        guard size.columns > 0, size.rows > 0,
+              size.cell_width_px > 0, size.cell_height_px > 0,
+              let origin = surface.cellOrigin() else { return nil }
+        let scale = window?.backingScaleFactor ?? (NSScreen.main?.backingScaleFactor ?? 2.0)
+        guard scale > 0 else { return nil }
+        let cellWidth = Double(size.cell_width_px) / scale
+        let cellHeight = Double(size.cell_height_px) / scale
+        guard cellWidth > 0, cellHeight > 0 else { return nil }
+        let column = Int((point.x - origin.x) / cellWidth)
+        let row = Int((point.y - origin.y) / cellHeight)
+        guard column >= 0, column < Int(size.columns), row >= 0, row < Int(size.rows) else { return nil }
+        return (column, row)
+    }
+
+    /// Reconstruct a wrapped markdown path under the click and, if it resolves
+    /// to a `.md` file, post `openFileNotification`. Returns whether it posted.
+    private func tryOpenWrappedMarkdownLink(at point: NSPoint) -> Bool {
+        guard let surface = ghosttySurface,
+              let (column, row) = cellPosition(at: point) else { return false }
+        let size = surface.size
+        let columns = Int(size.columns)
+        let totalRows = Int(size.rows)
+
+        // Read a bounded window of visual rows around the click (one read per
+        // row to avoid soft-wrap unwrapping). 15 rows each way covers very
+        // long paths in narrow panes.
+        let window = 15
+        let top = max(0, row - window)
+        let bottom = min(totalRows - 1, row + window)
+        var rows: [String] = []
+        rows.reserveCapacity(bottom - top + 1)
+        for r in top ... bottom {
+            guard let line = surface.readViewportRow(r, columns: columns) else { return false }
+            rows.append(line)
+        }
+
+        guard let path = WrappedPathReconstructor.reconstruct(
+            rows: rows,
+            columns: columns,
+            clickRowIndex: row - top,
+            clickColumn: column
+        ), path.hasSuffix(".md") else { return false }
+
+        NotificationCenter.default.post(
+            name: GhosttyApp.openFileNotification,
+            object: nil,
+            userInfo: ["path": path, "surface": surface.surface]
+        )
+        return true
     }
 
     override func mouseDragged(with event: NSEvent) {

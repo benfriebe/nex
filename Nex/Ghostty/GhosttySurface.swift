@@ -256,4 +256,46 @@ final class GhosttySurface {
         guard let ptr = text.text else { return "" }
         return String(cString: ptr)
     }
+
+    /// Read a single visual row from the viewport as plain text, with trailing
+    /// blanks omitted (matching how libghostty's read returns selections).
+    /// Reading one row at a time avoids the soft-wrap unwrapping a multi-row
+    /// read would apply, so each returned string is exactly one visual row.
+    /// Used by the wrapped-path Cmd+click reconstruction (issue #107).
+    /// Returns nil if the read fails, "" for a blank row.
+    func readViewportRow(_ row: Int, columns: Int) -> String? {
+        guard row >= 0, columns > 0 else { return nil }
+        let y = UInt32(row)
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: 0, y: y),
+            bottom_right: ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT,
+                coord: GHOSTTY_POINT_COORD_EXACT,
+                x: UInt32(columns - 1),
+                y: y
+            ),
+            rectangle: false
+        )
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let ptr = text.text else { return "" }
+        return String(cString: ptr)
+    }
+
+    /// The on-screen origin (top-left, in points) of viewport cell (0,0).
+    /// libghostty returns this as `cell_coord * cell_size + padding`, unscaled,
+    /// so for cell (0,0) it is exactly the surface's left/top padding at the
+    /// current size and padding config. Used to map a click to a cell without
+    /// assuming how libghostty distributes leftover space (issue #107: a
+    /// centered estimate is correct only at the initial size and drifts on
+    /// resize). Returns nil if libghostty can't report it.
+    func cellOrigin() -> (x: Double, y: Double)? {
+        let zero = ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: 0, y: 0)
+        let selection = ghostty_selection_s(top_left: zero, bottom_right: zero, rectangle: false)
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return (text.tl_px_x, text.tl_px_y)
+    }
 }
