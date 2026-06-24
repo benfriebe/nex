@@ -5,7 +5,18 @@ import SwiftUI
 /// (read-only, onRemove == nil).
 struct LabelChip: View {
     let text: String
+    /// Preset color for this label, or nil for the neutral free-form
+    /// style (the label string matched no configured preset).
+    var color: WorkspaceColor?
     var onRemove: (() -> Void)?
+
+    private var fill: Color {
+        color.map { $0.color.opacity(0.22) } ?? Color.secondary.opacity(0.18)
+    }
+
+    private var stroke: Color {
+        color.map { $0.color.opacity(0.5) } ?? Color.secondary.opacity(0.25)
+    }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -28,11 +39,11 @@ struct LabelChip: View {
         .padding(.vertical, 2)
         .background(
             Capsule()
-                .fill(Color.secondary.opacity(0.18))
+                .fill(fill)
         )
         .overlay(
             Capsule()
-                .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+                .stroke(stroke, lineWidth: 0.5)
         )
         .foregroundStyle(.primary)
         .accessibilityElement(children: .combine)
@@ -45,6 +56,9 @@ struct LabelChip: View {
 /// metadata without crowding the agent status dot.
 struct RowLabelChip: View {
     let text: String
+    /// Preset color for this label, or nil for the neutral free-form
+    /// style (no configured preset matched the label string).
+    var color: WorkspaceColor?
 
     var body: some View {
         Text(text)
@@ -54,9 +68,9 @@ struct RowLabelChip: View {
             .padding(.vertical, 1)
             .background(
                 Capsule()
-                    .fill(Color.secondary.opacity(0.18))
+                    .fill(color.map { $0.color.opacity(0.22) } ?? Color.secondary.opacity(0.18))
             )
-            .foregroundStyle(.secondary)
+            .foregroundStyle(color != nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 }
 

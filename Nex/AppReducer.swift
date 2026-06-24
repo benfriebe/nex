@@ -51,6 +51,20 @@ struct AppReducer {
 
         var favourites: [Favourite] = []
 
+        /// User-defined workspace label presets (name + color). A flat
+        /// global list, persisted in UserDefaults like `favourites`. Used
+        /// to offer canned labels in the inspector and to tint chips whose
+        /// text matches a preset name.
+        var labelPresets: [LabelPreset] = []
+
+        /// Color for a workspace label string, or nil when no preset
+        /// matches (chip renders in the neutral free-form style). Match is
+        /// exact and case-sensitive, mirroring how `addLabel` stores
+        /// labels (trim/clamp only, no lowercasing).
+        func colorForLabel(_ label: String) -> WorkspaceColor? {
+            labelPresets.color(for: label)
+        }
+
         /// Collision between the current global hotkey and an in-app
         /// keybinding. Computed so it always reflects the latest state —
         /// `keybindings` and `globalHotkey` can land in state in either
@@ -509,6 +523,18 @@ struct AppReducer {
         /// URL match is case-insensitive with trailing-slash stripped.
         case toggleFavourite(url: String, title: String)
 
+        // MARK: - Label presets
+
+        case labelPresetsLoaded([LabelPreset])
+        /// Add a preset. Name is normalized (trim/clamp); empty or a
+        /// case-sensitive duplicate name is ignored.
+        case addLabelPreset(name: String, color: WorkspaceColor)
+        /// Edit a preset addressed by its current name. Renaming to
+        /// collide with another preset's name is ignored.
+        case updateLabelPreset(id: String, name: String, color: WorkspaceColor)
+        case removeLabelPreset(id: String)
+        case moveLabelPreset(fromIndex: Int, toIndex: Int)
+
         // Inspector + Git Status
         case toggleInspector
         case refreshGitStatus
@@ -621,6 +647,13 @@ struct AppReducer {
         let json = FavouritesStorage.encode(favourites)
         return .run { [userDefaults] _ in
             userDefaults.setString(json, FavouritesStorage.defaultsKey)
+        }
+    }
+
+    private func persistLabelPresets(_ presets: [LabelPreset]) -> Effect<Action> {
+        let json = LabelPresetsStorage.encode(presets)
+        return .run { [userDefaults] _ in
+            userDefaults.setString(json, LabelPresetsStorage.defaultsKey)
         }
     }
 
@@ -3042,6 +3075,10 @@ struct AppReducer {
                     .run { [userDefaults] send in
                         let json = userDefaults.stringForKey(FavouritesStorage.defaultsKey)
                         await send(.favouritesLoaded(FavouritesStorage.decode(json)))
+                    },
+                    .run { [userDefaults] send in
+                        let json = userDefaults.stringForKey(LabelPresetsStorage.defaultsKey)
+                        await send(.labelPresetsLoaded(LabelPresetsStorage.decode(json)))
                     }
                 )
 
@@ -4175,6 +4212,49 @@ struct AppReducer {
                     state.favourites.append(Favourite(id: uuid(), url: trimmed, title: title))
                 }
                 return persistFavourites(state.favourites)
+
+            // MARK: - Label presets
+
+            case .labelPresetsLoaded(let list):
+                state.labelPresets = list
+                return .none
+
+            case .addLabelPreset(let name, let color):
+                let normalized = WorkspaceFeature.normalizeLabel(name)
+                guard !normalized.isEmpty,
+                      !state.labelPresets.contains(where: { $0.name == normalized })
+                else { return .none }
+                state.labelPresets.append(LabelPreset(name: normalized, color: color))
+                return persistLabelPresets(state.labelPresets)
+
+            case .updateLabelPreset(let id, let name, let color):
+                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
+                else { return .none }
+                let normalized = WorkspaceFeature.normalizeLabel(name)
+                guard !normalized.isEmpty else { return .none }
+                // Reject a rename that collides with a *different* preset.
+                // Excluding the edited row by id means a recolor or a
+                // whitespace-only edit of the same row is never a
+                // self-collision.
+                if state.labelPresets.contains(where: { $0.id != id && $0.name == normalized }) {
+                    return .none
+                }
+                state.labelPresets[idx].name = normalized
+                state.labelPresets[idx].color = color
+                return persistLabelPresets(state.labelPresets)
+
+            case .removeLabelPreset(let id):
+                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
+                else { return .none }
+                state.labelPresets.remove(at: idx)
+                return persistLabelPresets(state.labelPresets)
+
+            case .moveLabelPreset(let from, let to):
+                guard from >= 0, from < state.labelPresets.count,
+                      to >= 0, to <= state.labelPresets.count, from != to
+                else { return .none }
+                state.labelPresets.move(fromOffsets: IndexSet(integer: from), toOffset: to)
+                return persistLabelPresets(state.labelPresets)
 
             // MARK: - Keybindings
 

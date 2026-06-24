@@ -164,7 +164,7 @@ struct WorkspaceInspectorView: View {
             if !workspace.labels.isEmpty {
                 LabelFlowLayout(spacing: 4) {
                     ForEach(workspace.labels, id: \.self) { label in
-                        LabelChip(text: label) {
+                        LabelChip(text: label, color: presetColor(label)) {
                             store.send(.workspaces(.element(
                                 id: activeID,
                                 action: .removeLabel(label)
@@ -175,6 +175,10 @@ struct WorkspaceInspectorView: View {
             }
 
             HStack(spacing: 6) {
+                if !store.labelPresets.isEmpty {
+                    presetMenu(workspace, activeID: activeID)
+                }
+
                 TextField("Add label", text: $newLabelText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12))
@@ -194,6 +198,47 @@ struct WorkspaceInspectorView: View {
                 .disabled(isEmpty)
             }
         }
+    }
+
+    /// Preset color for a label string (exact, case-sensitive match), or
+    /// nil for the neutral free-form style.
+    private func presetColor(_ label: String) -> WorkspaceColor? {
+        store.labelPresets.color(for: label)
+    }
+
+    /// Menu of configured label presets. Picking one adds it as a label
+    /// (already-applied presets are disabled); "Custom…" hands focus back
+    /// to the free-form text field. Presets are managed in Settings →
+    /// Labels.
+    private func presetMenu(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
+        Menu {
+            ForEach(store.labelPresets) { preset in
+                Button {
+                    store.send(.workspaces(.element(
+                        id: activeID,
+                        action: .addLabel(preset.name)
+                    )))
+                } label: {
+                    Label {
+                        Text(preset.name)
+                    } icon: {
+                        Image(systemName: "circle.fill")
+                            .foregroundStyle(preset.color.color)
+                    }
+                }
+                .disabled(workspace.labels.contains(preset.name))
+            }
+            Divider()
+            Button("Custom…") { isLabelFieldFocused = true }
+        } label: {
+            Image(systemName: "tag")
+                .foregroundStyle(Color.accentColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityIdentifier("inspector.labels.presetMenu")
+        .help("Add a label preset")
     }
 
     private func commitNewLabel(activeID: UUID) {
