@@ -9,6 +9,14 @@ enum SocketMessage: Equatable {
     case agentError(paneID: UUID, message: String)
     case notification(paneID: UUID, title: String, body: String)
     case sessionStarted(paneID: UUID, sessionID: String)
+    /// A Claude Code session ended (SessionEnd hook: the agent process
+    /// exited, the user logged out, or `/clear` retired the old id).
+    /// Carries the ending `sessionID` so the reducer only clears the
+    /// pane's tracked id when it still matches — see `sessionEnded`
+    /// in `WorkspaceFeature`. Excluded from the session_id dual-fire
+    /// in `parseMessagesWithCommands` so it can't re-attach the id it
+    /// is meant to drop.
+    case sessionEnded(paneID: UUID, sessionID: String)
     // Pane commands
     case paneSplit(paneID: UUID?, direction: PaneLayout.SplitDirection?, path: String?, name: String?, target: String?, workspace: String?)
     case paneCreate(paneID: UUID?, path: String?, name: String?, target: String?, workspace: String?)
@@ -1416,6 +1424,9 @@ final class SocketServer: Sendable {
         case "session-start":
             guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
             socketMessage = .sessionStarted(paneID: paneID, sessionID: sessionID)
+        case "session-end":
+            guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
+            socketMessage = .sessionEnded(paneID: paneID, sessionID: sessionID)
         // pane-split / pane-create / pane-name / pane-send are parsed
         // before the mandatory-paneID guard above (issue #117).
         case "pane-move":
@@ -1464,8 +1475,10 @@ final class SocketServer: Sendable {
 
             // session_id is a common field on all Claude Code hook stdin JSON.
             // Fire .sessionStarted whenever it's present (unless the command
-            // itself is already session-start, to avoid a duplicate).
-            if wire.command != "session-start",
+            // itself is already session-start, to avoid a duplicate, or
+            // session-end, whose whole purpose is to *drop* the id — a
+            // dual-fire would immediately re-attach it).
+            if wire.command != "session-start", wire.command != "session-end",
                let paneIDString = wire.paneID,
                let paneID = UUID(uuidString: paneIDString),
                let sessionID = wire.sessionID, !sessionID.isEmpty {

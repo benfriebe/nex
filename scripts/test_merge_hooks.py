@@ -20,6 +20,9 @@ NEX_HOOKS = {
             "hooks": [{"type": "command", "command": "nex event session-start"}],
         }
     ],
+    "SessionEnd": [
+        {"hooks": [{"type": "command", "command": "nex event session-end"}]}
+    ],
     "UserPromptSubmit": [
         {"hooks": [{"type": "command", "command": "nex event start"}]}
     ],
@@ -32,6 +35,7 @@ class MergeHooksTests(unittest.TestCase):
         merge_hooks(settings, copy.deepcopy(NEX_HOOKS))
         self.assertEqual(settings["hooks"]["Stop"], NEX_HOOKS["Stop"])
         self.assertEqual(settings["hooks"]["SessionStart"], NEX_HOOKS["SessionStart"])
+        self.assertEqual(settings["hooks"]["SessionEnd"], NEX_HOOKS["SessionEnd"])
 
     def test_idempotent_no_duplicates(self):
         settings = {}

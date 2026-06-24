@@ -29,7 +29,7 @@ Nex gives you named, persistent workspaces with free-form pane splits, multi-rep
    /Applications/Nex.app/Contents/Resources/scripts/install-hooks.sh
    ```
 
-   This symlinks `nex` into `/usr/local/bin` and adds Stop / Notification / SessionStart / UserPromptSubmit hooks to `~/.claude/settings.json`. Restart any running Claude Code sessions afterwards.
+   This symlinks `nex` into `/usr/local/bin` and adds Stop / Notification / SessionStart / SessionEnd / UserPromptSubmit hooks to `~/.claude/settings.json`. Restart any running Claude Code sessions afterwards.
 
 Auto-updates are delivered via Sparkle. The CLI symlink heals itself on every launch so it always points at the running app bundle.
 
@@ -111,7 +111,7 @@ A full WebKit browser pane with multi-tab support and an actuator surface for ag
 
 ## AI agent integration
 
-When Claude Code is running in a pane, Nex tracks its lifecycle via the four hooks installed in `~/.claude/settings.json`:
+When Claude Code is running in a pane, Nex tracks its lifecycle via the five hooks installed in `~/.claude/settings.json`:
 
 | Hook | What Nex does |
 | --- | --- |
@@ -119,6 +119,7 @@ When Claude Code is running in a pane, Nex tracks its lifecycle via the four hoo
 | `Stop` (`nex event stop`) | Pane returns to idle; desktop notification if the user is not focused on the pane |
 | `Notification` (`nex event notification`) | Pane shows blue "waiting for input"; dock badge increments; notification fires |
 | `SessionStart` (`nex event session-start`) | Pane attaches to the new session ID |
+| `SessionEnd` (`nex event session-end`) | Pane detaches from the session ID so an exited session is not resumed on the next launch |
 
 Where the signal surfaces:
 
@@ -136,6 +137,7 @@ Manual setup (skip if `install-hooks.sh` did it):
     "Stop": [{ "hooks": [{ "type": "command", "command": "nex event stop" }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "nex event notification" }] }],
     "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "nex event session-start" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "nex event session-end" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex event start" }] }]
   }
 }

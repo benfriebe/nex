@@ -218,6 +218,22 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Rename the v4 `claudeSessionID` column to the agent-generic
+        // `agentSessionID` so the schema isn't pinned to one agent (the
+        // value is still whatever `nex event session-start` reports).
+        // Guarded + idempotent like v4–v14: only rename when the old
+        // column exists and the new one doesn't, so a pre-release DB
+        // that already has `agentSessionID` (or a fresh DB) is left
+        // alone instead of throwing on startup.
+        migrator.registerMigration("v15_rename_agent_session") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if columns.contains("claudeSessionID"), !columns.contains("agentSessionID") {
+                try db.alter(table: "pane") { t in
+                    t.rename(column: "claudeSessionID", to: "agentSessionID")
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -249,7 +265,7 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var workingDirectory: String
     var filePath: String?
     var content: String?
-    var claudeSessionID: String?
+    var agentSessionID: String?
     var status: String
     var createdAt: Double
     var lastActivityAt: Double

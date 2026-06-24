@@ -7,7 +7,7 @@ struct ClosedPaneSnapshot: Equatable {
     var type: PaneType
     var filePath: String?
     var scratchpadContent: String?
-    var claudeSessionID: String?
+    var agentSessionID: String?
     var markdownFontSize: Double = 14
     /// Captured web-pane sidecar at the moment of close, so
     /// `reopenClosedPane` can restore the same URL/tab set. Nil for
@@ -251,6 +251,7 @@ struct WorkspaceFeature {
         case agentStopped(paneID: UUID)
         case agentError(paneID: UUID)
         case sessionStarted(paneID: UUID, sessionID: String)
+        case sessionEnded(paneID: UUID, sessionID: String)
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
         case openMarkdownFile(filePath: String, reusePaneID: UUID? = nil)
@@ -1105,7 +1106,7 @@ struct WorkspaceFeature {
                             type: pane.type,
                             filePath: pane.filePath,
                             scratchpadContent: pane.scratchpadContent,
-                            claudeSessionID: pane.claudeSessionID,
+                            agentSessionID: pane.agentSessionID,
                             markdownFontSize: pane.markdownFontSize,
                             webState: snapshotWebState
                         )
@@ -1266,7 +1267,20 @@ struct WorkspaceFeature {
                 return .none
 
             case .sessionStarted(let paneID, let sessionID):
-                state.mutatePane(id: paneID) { $0.claudeSessionID = sessionID }
+                state.mutatePane(id: paneID) { $0.agentSessionID = sessionID }
+                return .none
+
+            case .sessionEnded(let paneID, let sessionID):
+                // The agent session exited (SessionEnd hook). Drop the
+                // tracked id so it isn't resumed on next launch or via
+                // reopen-closed-pane (issue #178). Only clear when the
+                // ending id still matches what we hold: `/clear` and
+                // compact fire SessionEnd(old) alongside SessionStart(new),
+                // and the messages can arrive in either order — the match
+                // guard keeps the live session tracked regardless.
+                state.mutatePane(id: paneID) {
+                    if $0.agentSessionID == sessionID { $0.agentSessionID = nil }
+                }
                 return .none
 
             case .clearPaneStatus(let paneID):
@@ -1637,7 +1651,7 @@ struct WorkspaceFeature {
                 }
 
                 let opacity = ghosttyConfig.backgroundOpacity
-                let sessionID = snapshot.claudeSessionID
+                let sessionID = snapshot.agentSessionID
                 return .run { _ in
                     await surfaceManager.createSurface(
                         paneID: newPaneID,

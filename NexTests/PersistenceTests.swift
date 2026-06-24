@@ -57,7 +57,7 @@ struct PersistenceTests {
         #expect(loadedWS.focusedPaneID == paneID)
     }
 
-    @Test func claudeSessionIDRoundTrip() async throws {
+    @Test func agentSessionIDRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
 
@@ -67,7 +67,7 @@ struct PersistenceTests {
             type: .shell,
             workingDirectory: "/tmp",
             status: .running,
-            claudeSessionID: "75a91227-c977-4c75-8921-ba01e070dd21",
+            agentSessionID: "75a91227-c977-4c75-8921-ba01e070dd21",
             createdAt: Date(timeIntervalSince1970: 1000),
             lastActivityAt: Date(timeIntervalSince1970: 2000)
         )
@@ -94,7 +94,7 @@ struct PersistenceTests {
 
         let result = await persistence.load()
         let loadedPane = result.workspaces.first!.panes.first!
-        #expect(loadedPane.claudeSessionID == "75a91227-c977-4c75-8921-ba01e070dd21")
+        #expect(loadedPane.agentSessionID == "75a91227-c977-4c75-8921-ba01e070dd21")
         #expect(loadedPane.status == .running)
     }
 

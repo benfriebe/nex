@@ -134,7 +134,7 @@ actor PersistenceService {
                             isEditing: paneType == .scratchpad,
                             scratchpadContent: pr.content,
                             status: PaneStatus(rawValue: pr.status) ?? .idle,
-                            claudeSessionID: pr.claudeSessionID,
+                            agentSessionID: pr.agentSessionID,
                             createdAt: Date(timeIntervalSince1970: pr.createdAt),
                             lastActivityAt: Date(timeIntervalSince1970: pr.lastActivityAt)
                         )
@@ -359,7 +359,7 @@ struct PersistenceSnapshot {
                     workingDirectory: pane.workingDirectory,
                     filePath: pane.filePath,
                     content: pane.scratchpadContent,
-                    claudeSessionID: pane.claudeSessionID,
+                    agentSessionID: pane.agentSessionID,
                     status: pane.status.rawValue,
                     createdAt: pane.createdAt.timeIntervalSince1970,
                     lastActivityAt: pane.lastActivityAt.timeIntervalSince1970,
