@@ -71,6 +71,7 @@
 		62BC1CC522515C8E6A99F508 /* GitHeadWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */; };
 		630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B04ED477C0C51A44953A8C /* WebPaneState.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
+		654B31F33D5872341839A91E /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8908AF59D359222CBC0EF21D /* GameController.framework */; };
 		692A08796F7DF555CFAF0653 /* MarkdownFindScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */; };
 		696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */; };
 		6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */; };
@@ -284,6 +285,7 @@
 		852AC6AE9B24B4528577F454 /* LineNumberRulerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineNumberRulerView.swift; sourceTree = "<group>"; };
 		86B88C15DF87E94A115F9FD7 /* GitHeadWatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHeadWatcherTests.swift; sourceTree = "<group>"; };
 		876AB562CDB247E67A7485CA /* GraftServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftServiceTests.swift; sourceTree = "<group>"; };
+		8908AF59D359222CBC0EF21D /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
 		8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsClient.swift; sourceTree = "<group>"; };
 		92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffHTMLRenderer.swift; sourceTree = "<group>"; };
@@ -387,6 +389,7 @@
 				A0749EBDDCE764238315879A /* IOKit.framework in Frameworks */,
 				D9A2EC37D7FABEAFE48E109A /* Foundation.framework in Frameworks */,
 				EBFB92013428FF7CDE660CB1 /* Carbon.framework in Frameworks */,
+				654B31F33D5872341839A91E /* GameController.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -682,6 +685,7 @@
 				7F561A2375008B0EC39BF86D /* Carbon.framework */,
 				1F71D541343DA67CDCADA821 /* CoreText.framework */,
 				DB65E3CCBB3A287C413A6015 /* Foundation.framework */,
+				8908AF59D359222CBC0EF21D /* GameController.framework */,
 				F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */,
 				281D0362CA8542610B8329F6 /* Metal.framework */,
 				DE56BB11F5C7C34821411297 /* QuartzCore.framework */,
