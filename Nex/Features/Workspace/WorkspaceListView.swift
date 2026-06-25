@@ -4,6 +4,7 @@ import SwiftUI
 /// Sidebar list of all workspaces with selection and context menus.
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
+    @Environment(\.openSettings) private var openSettings
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -23,11 +24,6 @@ struct WorkspaceListView: View {
     /// emission arrives). Prevents layout jumps when dragging into or
     /// past an empty group.
     @State private var measuredEmptyRowHeight: CGFloat?
-
-    /// Workspace currently targeted by the "Custom Label…" prompt (from a
-    /// row's Labels context submenu), and the in-progress label text.
-    @State private var customLabelTarget: UUID?
-    @State private var customLabelText = ""
 
     /// The collapsed group the spring-load timer is currently scheduled
     /// for (or has fired for). Reset when the cursor leaves the group
@@ -242,35 +238,7 @@ struct WorkspaceListView: View {
                     )
                 }
             }
-            .alert(
-                "Add Label",
-                isPresented: Binding(
-                    get: { customLabelTarget != nil },
-                    set: { if !$0 { customLabelTarget = nil } }
-                )
-            ) {
-                TextField("Label", text: $customLabelText)
-                    .onSubmit(commitCustomLabel)
-                Button("Add", action: commitCustomLabel)
-                Button("Cancel", role: .cancel) {
-                    customLabelText = ""
-                    customLabelTarget = nil
-                }
-            } message: {
-                Text("Add a custom label to this workspace.")
-            }
         }
-    }
-
-    private func commitCustomLabel() {
-        defer {
-            customLabelText = ""
-            customLabelTarget = nil
-        }
-        guard let workspaceID = customLabelTarget else { return }
-        let normalized = WorkspaceFeature.normalizeLabel(customLabelText)
-        guard !normalized.isEmpty else { return }
-        store.send(.workspaces(.element(id: workspaceID, action: .addLabel(normalized))))
     }
 
     private var graftSwapTitle: String {
@@ -893,13 +861,26 @@ struct WorkspaceListView: View {
     }
 
     /// "Labels ▸" submenu attached to a workspace row's context menu.
-    /// Toggling a configured preset (or an applied free-form label) adds
-    /// or removes it directly; "Custom Label…" prompts for a free-form
-    /// one. Presets are managed in Settings → Labels.
+    /// Each configured preset shows a colour dot and a checkmark when
+    /// applied; clicking toggles it. Applied free-form labels can be
+    /// toggled off too. "Manage Labels…" opens Settings → Labels.
     private func labelsMenu(workspaceID: UUID, workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
         Menu("Labels") {
             ForEach(store.labelPresets) { preset in
-                Toggle(preset.name, isOn: labelBinding(workspaceID: workspaceID, label: preset.name))
+                let applied = workspaceStore.labels.contains(preset.name)
+                Button {
+                    store.send(.workspaces(.element(
+                        id: workspaceID,
+                        action: applied ? .removeLabel(preset.name) : .addLabel(preset.name)
+                    )))
+                } label: {
+                    Label {
+                        Text(preset.name)
+                    } icon: {
+                        Image(systemName: applied ? "checkmark.circle.fill" : "circle.fill")
+                            .foregroundStyle(preset.color.color)
+                    }
+                }
             }
             // Applied labels that aren't presets — surfaced so they can
             // be toggled off even though they're not in the preset list.
@@ -909,32 +890,25 @@ struct WorkspaceListView: View {
             if !freeform.isEmpty {
                 Divider()
                 ForEach(freeform, id: \.self) { label in
-                    Toggle(label, isOn: labelBinding(workspaceID: workspaceID, label: label))
+                    Button {
+                        store.send(.workspaces(.element(
+                            id: workspaceID, action: .removeLabel(label)
+                        )))
+                    } label: {
+                        Label(label, systemImage: "checkmark")
+                    }
                 }
             }
-            if !store.labelPresets.isEmpty || !freeform.isEmpty {
-                Divider()
-            }
-            Button("Custom Label…") {
-                customLabelText = ""
-                customLabelTarget = workspaceID
+            Divider()
+            Button("Manage Labels\u{2026}") {
+                WebPaneChrome.pendingSettingsTab = .labels
+                openSettings()
+                NotificationCenter.default.post(
+                    name: WebPaneChrome.openSettingsTabNotification,
+                    object: SettingsTab.labels
+                )
             }
         }
-    }
-
-    /// Two-way binding for "is this label applied to the workspace",
-    /// reading live from the store so the checkmark reflects current
-    /// state and toggling dispatches add/remove.
-    private func labelBinding(workspaceID: UUID, label: String) -> Binding<Bool> {
-        Binding(
-            get: { store.workspaces[id: workspaceID]?.labels.contains(label) ?? false },
-            set: { isOn in
-                store.send(.workspaces(.element(
-                    id: workspaceID,
-                    action: isOn ? .addLabel(label) : .removeLabel(label)
-                )))
-            }
-        )
     }
 
     /// "Move to Group ▸" submenu attached to a workspace row's context menu.

@@ -1,6 +1,16 @@
 import ComposableArchitecture
 import SwiftUI
 
+/// Fixed column widths so the preview, colour dropdown, and action button
+/// line up vertically across the add row and every preset row regardless
+/// of name length or selected colour. The name field flexes to fill the
+/// gap, keeping the trailing columns at a constant offset.
+private enum LabelCol {
+    static let preview: CGFloat = 96
+    static let color: CGFloat = 150
+    static let action: CGFloat = 56
+}
+
 /// Settings tab for defining workspace label presets (name + colour).
 /// Picking a preset in the workspace inspector adds its name as a label;
 /// chips whose text matches a preset name render in the preset's colour.
@@ -80,16 +90,18 @@ struct LabelPresetsSettingsView: View {
         HStack(spacing: 10) {
             LabelChip(text: trimmedNewName.isEmpty ? "label" : trimmedNewName, tint: newColor.color)
                 .opacity(trimmedNewName.isEmpty ? 0.5 : 1)
-                .frame(width: 96, alignment: .leading)
+                .frame(width: LabelCol.preview, alignment: .leading)
 
             TextField("New label name", text: $newName)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
+                .frame(maxWidth: .infinity)
                 .onSubmit(commitNew)
 
             LabelColorField(color: $newColor)
 
             Button("Add", action: commitNew)
+                .frame(width: LabelCol.action, alignment: .trailing)
                 .disabled(trimmedNewName.isEmpty)
         }
         .padding(12)
@@ -146,11 +158,12 @@ private struct LabelPresetRow: View {
     var body: some View {
         HStack(spacing: 10) {
             LabelChip(text: previewText, tint: color.color)
-                .frame(width: 96, alignment: .leading)
+                .frame(width: LabelCol.preview, alignment: .leading)
 
             TextField("Label name", text: $editingName)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity)
                 .focused($isFocused)
                 .onSubmit(commitRename)
                 .onChange(of: isFocused) { _, focused in
@@ -165,13 +178,12 @@ private struct LabelPresetRow: View {
                 }
             ))
 
-            Spacer(minLength: 4)
-
             Button(action: onRemove) {
                 Image(systemName: "trash")
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .frame(width: LabelCol.action, alignment: .trailing)
             .help("Remove preset")
         }
         .padding(.vertical, 3)
@@ -260,7 +272,10 @@ private struct LabelColorField: View {
                     .labelsHidden()
                     .help("Pick a custom colour")
             }
+
+            Spacer(minLength: 0)
         }
+        .frame(width: LabelCol.color, alignment: .leading)
     }
 
     private var customBinding: Binding<Color> {
