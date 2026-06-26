@@ -205,11 +205,26 @@ private struct GeneralSettingsView: View {
                 }
 
                 Section("Status bar") {
-                    Toggle("Show system stats (CPU / memory / load)", isOn: Binding(
+                    Toggle("Show system stats", isOn: Binding(
                         get: { settingsStore.showSystemStats },
                         set: { settingsStore.send(.setShowSystemStats($0)) }
                     ))
-                    Text("Show live system-wide CPU usage, memory used, and the 1-minute load average on the right of the bottom status bar.")
+                    if settingsStore.showSystemStats {
+                        ForEach(SystemStatKind.allCases) { kind in
+                            Toggle(isOn: Binding(
+                                get: { settingsStore.enabledSystemStats.contains(kind.rawValue) },
+                                set: { settingsStore.send(.setSystemStatEnabled(kind, $0)) }
+                            )) {
+                                Label(kind.displayName, systemImage: kind.systemImage)
+                            }
+                            .padding(.leading, 16)
+                        }
+                        Toggle("Show mini graphs", isOn: Binding(
+                            get: { settingsStore.showSystemStatGraphs },
+                            set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
+                        ))
+                    }
+                    Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

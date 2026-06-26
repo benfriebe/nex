@@ -167,6 +167,7 @@
 		ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */; };
 		ECB2D027885F6AAC05BFBA22 /* GraftInspectorButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110ABCD54BF803110E5F5060 /* GraftInspectorButton.swift */; };
 		ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */; };
+		ECD2ACA49EA1B7F669422FD2 /* SystemStatGauge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D96732EDE4F0D4A4511372D /* SystemStatGauge.swift */; };
 		ED79F70009D8C2A4A1A742F8 /* ResizeDimensionsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6F950849E47A0BCC6DEAB5 /* ResizeDimensionsOverlay.swift */; };
 		EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */; };
 		EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */; };
@@ -226,6 +227,7 @@
 		1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryTests.swift; sourceTree = "<group>"; };
 		1CB2BCC7EBF45A4E50F314F2 /* DiffPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPaneView.swift; sourceTree = "<group>"; };
 		1D792DEC74448D403CE1A96D /* RingBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingBuffer.swift; sourceTree = "<group>"; };
+		1D96732EDE4F0D4A4511372D /* SystemStatGauge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatGauge.swift; sourceTree = "<group>"; };
 		1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLRenderer.swift; sourceTree = "<group>"; };
 		1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceViewKeyboardTests.swift; sourceTree = "<group>"; };
 		1F71D541343DA67CDCADA821 /* CoreText.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreText.framework; path = System/Library/Frameworks/CoreText.framework; sourceTree = SDKROOT; };
@@ -746,6 +748,7 @@
 				09102B6ADEAB463454E7F15E /* StatusBarController.swift */,
 				110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */,
 				E730EF15502C9C30B7ACCAF7 /* StatusBarView.swift */,
+				1D96732EDE4F0D4A4511372D /* SystemStatGauge.swift */,
 			);
 			path = StatusBar;
 			sourceTree = "<group>";
@@ -1049,6 +1052,7 @@
 				8F5D3C9118D51569A13CB473 /* SurfaceContainerView.swift in Sources */,
 				64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */,
 				75BECE7D63EF981C344D4902 /* SurfaceView.swift in Sources */,
+				ECD2ACA49EA1B7F669422FD2 /* SystemStatGauge.swift in Sources */,
 				33B0CCD680CE4BAC31407678 /* SystemStatsService.swift in Sources */,
 				B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */,
 				A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */,

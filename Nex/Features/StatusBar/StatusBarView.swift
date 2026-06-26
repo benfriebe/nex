@@ -25,6 +25,18 @@ struct StatusBarView: View {
     /// View-layer system-stats poller; never dispatches into TCA.
     @State private var statsSampler = SystemStatsSampler()
     @State private var systemStats = SystemStats.zero
+    /// Rolling per-metric history for the sparklines + hover graphs.
+    @State private var history: [SystemStatKind: [Double]] = [:]
+
+    /// ~2 minutes of history at the 2s sample cadence.
+    private static let historyLength = 60
+
+    /// Metrics to show: the user's enabled set, in canonical order, gated by
+    /// the master toggle.
+    private var enabledStatKinds: [SystemStatKind] {
+        guard store.settings.showSystemStats else { return [] }
+        return SystemStatKind.allCases.filter { store.settings.enabledSystemStats.contains($0.rawValue) }
+    }
 
     var body: some View {
         WithPerceptionTracking {
@@ -41,14 +53,25 @@ struct StatusBarView: View {
             .frame(height: 24)
             .background(theme.footerBackground)
             .overlay(alignment: .top) { theme.divider.frame(height: 1) }
-            .onAppear {
-                if store.settings.showSystemStats { systemStats = statsSampler.sample() }
-            }
+            .onAppear { if store.settings.showSystemStats { recordSample() } }
             // 2s cadence: cheap host_statistics calls, smoother than 1s. The
             // gate skips work entirely when the footer stats are disabled.
             .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-                if store.settings.showSystemStats { systemStats = statsSampler.sample() }
+                if store.settings.showSystemStats { recordSample() }
             }
+        }
+    }
+
+    /// Sample all metrics and append each scalar to its capped history ring, so
+    /// a metric's sparkline is already populated when the user enables it.
+    private func recordSample() {
+        let snapshot = statsSampler.sample()
+        systemStats = snapshot
+        for kind in SystemStatKind.allCases {
+            var series = history[kind] ?? []
+            series.append(kind.scalar(snapshot))
+            if series.count > Self.historyLength { series.removeFirst(series.count - Self.historyLength) }
+            history[kind] = series
         }
     }
 
@@ -105,8 +128,16 @@ struct StatusBarView: View {
 
     private func rightSection(_ summary: ChromeStatusSummary) -> some View {
         HStack(spacing: 8) {
-            if store.settings.showSystemStats {
-                statsSection(systemStats)
+            let kinds = enabledStatKinds
+            if !kinds.isEmpty {
+                ForEach(kinds) { kind in
+                    SystemStatGauge(
+                        kind: kind,
+                        stats: systemStats,
+                        history: history[kind] ?? [],
+                        showGraph: store.settings.showSystemStatGraphs
+                    )
+                }
                 separator
             }
             countItem(color: theme.statusRunning, value: summary.running, label: "running")
@@ -122,36 +153,6 @@ struct StatusBarView: View {
         }
         .lineLimit(1)
         .fixedSize()
-    }
-
-    /// CPU / memory / load triad. Each value is monospaced so it doesn't
-    /// jitter the layout as it ticks; the tooltip carries the precise numbers.
-    private func statsSection(_ stats: SystemStats) -> some View {
-        HStack(spacing: 8) {
-            statItem("cpu", "\(Int(stats.cpuPercent.rounded()))%")
-            statItem("memorychip", "\(Int(stats.memPercent.rounded()))%")
-            statItem("gauge.with.dots.needle.33percent", String(format: "%.2f", stats.loadAverage1m))
-        }
-        .help("CPU \(Int(stats.cpuPercent.rounded()))% · "
-            + "Memory \(memoryLabel(stats)) · "
-            + "Load \(String(format: "%.2f", stats.loadAverage1m))")
-    }
-
-    private func statItem(_ systemImage: String, _ text: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: systemImage).font(.system(size: 9))
-            Text(text).monospacedDigit()
-        }
-        .foregroundStyle(theme.textTertiary)
-    }
-
-    private func memoryLabel(_ stats: SystemStats) -> String {
-        let gib = 1_073_741_824.0
-        return String(
-            format: "%.1f / %.0f GB",
-            Double(stats.memUsedBytes) / gib,
-            Double(stats.memTotalBytes) / gib
-        )
     }
 
     private func countItem(color: Color, value: Int, label: String) -> some View {

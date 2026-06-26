@@ -42,8 +42,12 @@ struct SettingsFeature {
         var newGroupPlacement: SidebarPlacement = .endOfList
         var newWorkspacePlacement: SidebarPlacement = .endOfList
         var confirmQuitWhenActive: Bool = true
-        /// Show CPU / memory / load in the bottom status bar.
+        /// Master toggle for the status-bar system stats.
         var showSystemStats: Bool = true
+        /// Which metrics are shown (rawValues of `SystemStatKind`).
+        var enabledSystemStats: Set<String> = ["cpu", "memory", "load"]
+        /// Render an inline sparkline next to each enabled metric.
+        var showSystemStatGraphs: Bool = false
         /// Warm app-chrome palette preference. Drives the sidebar / title bar /
         /// status bar appearance independently of the Ghostty terminal theme.
         var chromeAppearance: ChromeAppearance = .system
@@ -89,6 +93,8 @@ struct SettingsFeature {
         case setNewWorkspacePlacement(SidebarPlacement)
         case setConfirmQuitWhenActive(Bool)
         case setShowSystemStats(Bool)
+        case setSystemStatEnabled(SystemStatKind, Bool)
+        case setShowSystemStatGraphs(Bool)
         case setChromeAppearance(ChromeAppearance)
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
@@ -115,6 +121,8 @@ struct SettingsFeature {
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
     static let defaultsKeyShowSystemStats = "settings.showSystemStats"
+    static let defaultsKeyEnabledSystemStats = "settings.enabledSystemStats"
+    static let defaultsKeyShowSystemStatGraphs = "settings.showSystemStatGraphs"
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
     static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
@@ -158,6 +166,12 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyShowSystemStats) {
                     state.showSystemStats = userDefaults.boolForKey(Self.defaultsKeyShowSystemStats)
+                }
+                if let raw = userDefaults.stringForKey(Self.defaultsKeyEnabledSystemStats) {
+                    state.enabledSystemStats = Set(raw.split(separator: ",").map(String.init))
+                }
+                if userDefaults.hasKey(Self.defaultsKeyShowSystemStatGraphs) {
+                    state.showSystemStatGraphs = userDefaults.boolForKey(Self.defaultsKeyShowSystemStatGraphs)
                 }
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
                    let appearance = ChromeAppearance(rawValue: raw) {
@@ -270,6 +284,23 @@ struct SettingsFeature {
             case .setShowSystemStats(let enabled):
                 state.showSystemStats = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyShowSystemStats)
+                return .none
+
+            case .setSystemStatEnabled(let kind, let enabled):
+                if enabled {
+                    state.enabledSystemStats.insert(kind.rawValue)
+                } else {
+                    state.enabledSystemStats.remove(kind.rawValue)
+                }
+                userDefaults.setString(
+                    state.enabledSystemStats.sorted().joined(separator: ","),
+                    Self.defaultsKeyEnabledSystemStats
+                )
+                return .none
+
+            case .setShowSystemStatGraphs(let enabled):
+                state.showSystemStatGraphs = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyShowSystemStatGraphs)
                 return .none
 
             case .setChromeAppearance(let appearance):
