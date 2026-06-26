@@ -48,6 +48,10 @@ struct SettingsFeature {
         var enabledSystemStats: Set<String> = ["cpu", "memory", "load"]
         /// Render an inline sparkline next to each enabled metric.
         var showSystemStatGraphs: Bool = false
+        /// Sparkline colour as `"RRGGBB"`; empty = adaptive chrome default.
+        var sparklineColorHex: String = ""
+        /// Inline sparkline width in points.
+        var sparklineWidth: Double = 28
         /// Warm app-chrome palette preference. Drives the sidebar / title bar /
         /// status bar appearance independently of the Ghostty terminal theme.
         var chromeAppearance: ChromeAppearance = .system
@@ -95,6 +99,8 @@ struct SettingsFeature {
         case setShowSystemStats(Bool)
         case setSystemStatEnabled(SystemStatKind, Bool)
         case setShowSystemStatGraphs(Bool)
+        case setSparklineColor(String)
+        case setSparklineWidth(Double)
         case setChromeAppearance(ChromeAppearance)
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
@@ -123,6 +129,8 @@ struct SettingsFeature {
     static let defaultsKeyShowSystemStats = "settings.showSystemStats"
     static let defaultsKeyEnabledSystemStats = "settings.enabledSystemStats"
     static let defaultsKeyShowSystemStatGraphs = "settings.showSystemStatGraphs"
+    static let defaultsKeySparklineColor = "settings.sparklineColor"
+    static let defaultsKeySparklineWidth = "settings.sparklineWidth"
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
     static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
@@ -172,6 +180,12 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyShowSystemStatGraphs) {
                     state.showSystemStatGraphs = userDefaults.boolForKey(Self.defaultsKeyShowSystemStatGraphs)
+                }
+                if let hex = userDefaults.stringForKey(Self.defaultsKeySparklineColor) {
+                    state.sparklineColorHex = hex
+                }
+                if userDefaults.hasKey(Self.defaultsKeySparklineWidth) {
+                    state.sparklineWidth = userDefaults.doubleForKey(Self.defaultsKeySparklineWidth)
                 }
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
                    let appearance = ChromeAppearance(rawValue: raw) {
@@ -301,6 +315,16 @@ struct SettingsFeature {
             case .setShowSystemStatGraphs(let enabled):
                 state.showSystemStatGraphs = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyShowSystemStatGraphs)
+                return .none
+
+            case .setSparklineColor(let hex):
+                state.sparklineColorHex = hex
+                userDefaults.setString(hex, Self.defaultsKeySparklineColor)
+                return .none
+
+            case .setSparklineWidth(let width):
+                state.sparklineWidth = width
+                userDefaults.setDouble(width, Self.defaultsKeySparklineWidth)
                 return .none
 
             case .setChromeAppearance(let appearance):

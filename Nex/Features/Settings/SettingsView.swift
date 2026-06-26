@@ -219,10 +219,27 @@ private struct GeneralSettingsView: View {
                             }
                             .padding(.leading, 16)
                         }
-                        Toggle("Show mini graphs", isOn: Binding(
-                            get: { settingsStore.showSystemStatGraphs },
-                            set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
-                        ))
+                        DisclosureGroup("Mini graphs") {
+                            Toggle("Show mini graphs", isOn: Binding(
+                                get: { settingsStore.showSystemStatGraphs },
+                                set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
+                            ))
+                            ColorPicker("Graph colour", selection: Binding(
+                                get: { Color(chromeHex: settingsStore.sparklineColorHex) ?? chromeTheme.textSecondary },
+                                set: { if let hex = $0.chromeHexString { settingsStore.send(.setSparklineColor(hex)) } }
+                            ), supportsOpacity: false)
+                            HStack {
+                                Text("Graph width")
+                                Slider(value: Binding(
+                                    get: { settingsStore.sparklineWidth },
+                                    set: { settingsStore.send(.setSparklineWidth($0)) }
+                                ), in: 16 ... 80, step: 2)
+                                Text("\(Int(settingsStore.sparklineWidth))")
+                                    .monospacedDigit()
+                                    .frame(width: 32, alignment: .trailing)
+                            }
+                            Button("Reset graph colour") { settingsStore.send(.setSparklineColor("")) }
+                        }
                     }
                     Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
                         .font(.caption)

@@ -44,6 +44,8 @@ struct SystemStatGauge: View {
     let stats: SystemStats
     let history: [Double]
     let showGraph: Bool
+    var graphColor: Color
+    var graphWidth: CGFloat
     @Environment(\.chromeTheme) private var theme
     @State private var hovering = false
 
@@ -52,15 +54,15 @@ struct SystemStatGauge: View {
             Image(systemName: kind.systemImage).font(.system(size: 9))
             Text(kind.compactLabel(stats)).monospacedDigit()
             if showGraph, history.count >= 2 {
-                Sparkline(values: history, isPercentage: kind.isPercentage, color: theme.textSecondary)
-                    .frame(width: 28, height: 11)
+                Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor)
+                    .frame(width: graphWidth, height: 11)
             }
         }
         .foregroundStyle(theme.textTertiary)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .popover(isPresented: $hovering, arrowEdge: .top) {
-            StatDetailPopover(kind: kind, stats: stats, history: history)
+            StatDetailPopover(kind: kind, stats: stats, history: history, graphColor: graphColor)
                 .environment(\.chromeTheme, theme)
         }
     }
@@ -72,6 +74,7 @@ struct StatDetailPopover: View {
     let kind: SystemStatKind
     let stats: SystemStats
     let history: [Double]
+    var graphColor: Color
     @Environment(\.chromeTheme) private var theme
 
     var body: some View {
@@ -87,7 +90,7 @@ struct StatDetailPopover: View {
                 .monospacedDigit()
                 .foregroundStyle(theme.textSecondary)
 
-            Sparkline(values: history, isPercentage: kind.isPercentage, color: theme.accent, filled: true)
+            Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor, filled: true)
                 .frame(width: 196, height: 52)
                 .background(RoundedRectangle(cornerRadius: 6).fill(theme.textPrimary.opacity(0.04)))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.divider, lineWidth: 1))

@@ -31,6 +31,16 @@ struct StatusBarView: View {
     /// ~2 minutes of history at the 2s sample cadence.
     private static let historyLength = 60
 
+    /// Resolved sparkline colour: the user's custom hex, else the adaptive
+    /// chrome default.
+    private var sparklineColor: Color {
+        if !store.settings.sparklineColorHex.isEmpty,
+           let custom = Color(chromeHex: store.settings.sparklineColorHex) {
+            return custom
+        }
+        return theme.textSecondary
+    }
+
     /// Metrics to show: the user's enabled set, in canonical order, gated by
     /// the master toggle.
     private var enabledStatKinds: [SystemStatKind] {
@@ -135,7 +145,9 @@ struct StatusBarView: View {
                         kind: kind,
                         stats: systemStats,
                         history: history[kind] ?? [],
-                        showGraph: store.settings.showSystemStatGraphs
+                        showGraph: store.settings.showSystemStatGraphs,
+                        graphColor: sparklineColor,
+                        graphWidth: CGFloat(store.settings.sparklineWidth)
                     )
                 }
                 separator
