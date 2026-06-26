@@ -532,6 +532,8 @@ struct AppReducer {
         /// Edit a preset addressed by its current name. Renaming to
         /// collide with another preset's name is ignored.
         case updateLabelPreset(id: String, name: String, color: LabelColor)
+        /// Set (or clear, with nil = auto black/white) a preset's text colour.
+        case setLabelPresetTextColor(id: String, textColor: LabelColor?)
         case removeLabelPreset(id: String)
         case moveLabelPreset(fromIndex: Int, toIndex: Int)
 
@@ -4248,6 +4250,12 @@ struct AppReducer {
                 }
                 state.labelPresets[idx].name = normalized
                 state.labelPresets[idx].color = color
+                return persistLabelPresets(state.labelPresets)
+
+            case .setLabelPresetTextColor(let id, let textColor):
+                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
+                else { return .none }
+                state.labelPresets[idx].textColor = textColor
                 return persistLabelPresets(state.labelPresets)
 
             case .removeLabelPreset(let id):

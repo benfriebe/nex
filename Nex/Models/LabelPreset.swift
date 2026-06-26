@@ -70,17 +70,49 @@ extension LabelColor: Codable {
 struct LabelPreset: Equatable, Identifiable, Codable {
     var name: String
     var color: LabelColor
+    /// Explicit text colour for the chip, or nil to auto-pick black/white
+    /// by the background's luminance. Lets a user fix a colour where the
+    /// auto choice is still hard to read.
+    var textColor: LabelColor?
 
     var id: String { name }
+
+    init(name: String, color: LabelColor, textColor: LabelColor? = nil) {
+        self.name = name
+        self.color = color
+        self.textColor = textColor
+    }
+}
+
+/// A label's resolved on-screen colours: the solid chip background and the
+/// text colour (an explicit override, or auto black/white by contrast).
+struct ResolvedLabelStyle: Equatable {
+    var background: Color
+    var text: Color
+}
+
+extension LabelPreset {
+    var resolvedStyle: ResolvedLabelStyle {
+        let background = color.color
+        return ResolvedLabelStyle(
+            background: background,
+            text: textColor?.color ?? background.contrastingText
+        )
+    }
 }
 
 extension [LabelPreset] {
     /// Colour for a label string via exact, case-sensitive name match, or
-    /// nil when no preset matches (the chip renders neutral). This is the
-    /// single source of the lookup semantics — `AppReducer.State` and the
-    /// inspector both route through it.
+    /// nil when no preset matches (the chip renders neutral).
     func color(for label: String) -> LabelColor? {
         first { $0.name == label }?.color
+    }
+
+    /// Resolved background + text colours for a label string, or nil when
+    /// no preset matches (the chip renders neutral). Single source of the
+    /// chip-colour lookup semantics.
+    func style(for label: String) -> ResolvedLabelStyle? {
+        first { $0.name == label }?.resolvedStyle
     }
 }
 

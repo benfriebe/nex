@@ -652,12 +652,12 @@ struct WorkspaceListView: View {
         }
     }
 
-    /// Label-string → preset color, built once from the configured
+    /// Label-string → resolved preset style, built once from the configured
     /// presets and threaded into every row's chips. Last preset wins on a
     /// duplicate name (the reducer already prevents duplicates).
-    private var labelPresetColors: [String: Color] {
+    private var labelPresetStyles: [String: ResolvedLabelStyle] {
         Dictionary(
-            store.labelPresets.map { ($0.name, $0.color.color) },
+            store.labelPresets.map { ($0.name, $0.resolvedStyle) },
             uniquingKeysWith: { _, last in last }
         )
     }
@@ -691,7 +691,7 @@ struct WorkspaceListView: View {
                     isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
                     leadingInset: 0,
                     labels: workspaceStore.labels,
-                    labelColors: labelPresetColors
+                    labelStyles: labelPresetStyles
                 )
 
                 if let parentGroupName {
@@ -1082,7 +1082,7 @@ struct WorkspaceListView: View {
                 // 16pt Spacer + 8pt HStack spacing.
                 leadingInset: effectiveDepth > 0 ? 24 : 0,
                 labels: workspaceStore.labels,
-                labelColors: labelPresetColors
+                labelStyles: labelPresetStyles
             )
             .padding(.horizontal, 8)
             .background(

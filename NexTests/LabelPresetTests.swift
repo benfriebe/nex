@@ -154,6 +154,32 @@ struct LabelPresetTests {
 
     // MARK: - remove
 
+    // MARK: - text colour
+
+    @Test func setTextColorUpdatesAndClears() async {
+        let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff"))) {
+            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: .custom("#ffffff"))]
+        }
+        await store.send(.setLabelPresetTextColor(id: "backend", textColor: nil)) {
+            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: nil)]
+        }
+    }
+
+    @Test func setTextColorUnknownIDIsNoOp() async {
+        let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.setLabelPresetTextColor(id: "ghost", textColor: .custom("#ffffff")))
+        #expect(store.state.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
+    }
+
+    @Test func resolvedStyleUsesAutoOrExplicitText() {
+        // Auto: a dark background resolves to white text.
+        #expect(LabelPreset(name: "a", color: .named(.blue)).resolvedStyle.text == .white)
+        // An explicit text colour overrides the auto choice.
+        let explicit = LabelPreset(name: "b", color: .named(.blue), textColor: .custom("#000000"))
+        #expect(explicit.resolvedStyle.text == Color(hex: "#000000"))
+    }
+
     @Test func removeDropsPreset() async {
         let store = makeStore(labelPresets: [
             LabelPreset(name: "backend", color: .named(.blue)),
@@ -254,9 +280,16 @@ struct LabelPresetTests {
     }
 
     @Test func storageDecodesLegacyNamedColorString() {
-        // Pre-custom data stored color as a bare WorkspaceColor raw value.
+        // Pre-custom data stored color as a bare WorkspaceColor raw value,
+        // and pre-textColor data has no textColor key (decodes to nil).
         let json = #"[{"name":"old","color":"green"}]"#
         #expect(LabelPresetsStorage.decode(json) == [LabelPreset(name: "old", color: .named(.green))])
+    }
+
+    @Test func storageRoundTripsTextColor() {
+        let presets = [LabelPreset(name: "x", color: .named(.blue), textColor: .custom("#ffffff"))]
+        let json = LabelPresetsStorage.encode(presets)
+        #expect(LabelPresetsStorage.decode(json) == presets)
     }
 
     @Test func labelColorNamedResolvesToWorkspaceColor() {
