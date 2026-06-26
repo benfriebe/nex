@@ -4,6 +4,7 @@ import SwiftUI
 /// Sidebar list of all workspaces with selection and context menus.
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
+    @Environment(\.openSettings) private var openSettings
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -651,6 +652,16 @@ struct WorkspaceListView: View {
         }
     }
 
+    /// Label-string → resolved preset style, built once from the configured
+    /// presets and threaded into every row's chips. Last preset wins on a
+    /// duplicate name (the reducer already prevents duplicates).
+    private var labelPresetStyles: [String: ResolvedLabelStyle] {
+        Dictionary(
+            store.labelPresets.map { ($0.name, $0.resolvedStyle) },
+            uniquingKeysWith: { _, last in last }
+        )
+    }
+
     @ViewBuilder
     private func filteredWorkspaceRow(workspaceID: UUID) -> some View {
         if let workspaceStore = store.scope(state: \.workspaces[id: workspaceID], action: \.workspaces[id: workspaceID]) {
@@ -679,7 +690,8 @@ struct WorkspaceListView: View {
                     hasRunningPanes: running,
                     isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
                     leadingInset: 0,
-                    labels: workspaceStore.labels
+                    labels: workspaceStore.labels,
+                    labelStyles: labelPresetStyles
                 )
 
                 if let parentGroupName {
@@ -798,17 +810,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
-            // Edit labels — opens the inspector so the user can find
-            // the label editor. Without this entry, the labels feature
-            // is buried behind: open inspector → scroll past
-            // Workspace + Repos → find "Labels". One click here
-            // bypasses the hunt.
-            Button("Edit Labels...") {
-                store.send(.setActiveWorkspace(workspaceID))
-                if !store.isInspectorVisible {
-                    store.send(.toggleInspector)
-                }
-            }
+            labelsMenu(workspaceID: workspaceID, workspaceStore: workspaceStore)
             moveToGroupMenu(workspaceID: workspaceID)
             Divider()
             Button("Select All Workspaces") { store.send(.selectAllWorkspaces) }
@@ -854,6 +856,56 @@ struct WorkspaceListView: View {
                         .disabled(allInThisGroup)
                     }
                 }
+            }
+        }
+    }
+
+    /// "Labels ▸" submenu attached to a workspace row's context menu.
+    /// Each configured preset shows a colour dot and a checkmark when
+    /// applied; clicking toggles it. Applied free-form labels can be
+    /// toggled off too. "Manage Labels…" opens Settings → Labels.
+    private func labelsMenu(workspaceID: UUID, workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
+        Menu("Labels") {
+            ForEach(store.labelPresets) { preset in
+                let applied = workspaceStore.labels.contains(preset.name)
+                Button {
+                    store.send(.workspaces(.element(
+                        id: workspaceID,
+                        action: applied ? .removeLabel(preset.name) : .addLabel(preset.name)
+                    )))
+                } label: {
+                    Label {
+                        Text(preset.name)
+                    } icon: {
+                        preset.color.color.menuSwatch(checked: applied)
+                    }
+                }
+            }
+            // Applied labels that aren't presets — surfaced so they can
+            // be toggled off even though they're not in the preset list.
+            let freeform = workspaceStore.labels.filter { label in
+                !store.labelPresets.contains { $0.name == label }
+            }
+            if !freeform.isEmpty {
+                Divider()
+                ForEach(freeform, id: \.self) { label in
+                    Button {
+                        store.send(.workspaces(.element(
+                            id: workspaceID, action: .removeLabel(label)
+                        )))
+                    } label: {
+                        Label(label, systemImage: "checkmark")
+                    }
+                }
+            }
+            Divider()
+            Button("Manage Labels\u{2026}") {
+                WebPaneChrome.pendingSettingsTab = .labels
+                openSettings()
+                NotificationCenter.default.post(
+                    name: WebPaneChrome.openSettingsTabNotification,
+                    object: SettingsTab.labels
+                )
             }
         }
     }
@@ -1029,7 +1081,8 @@ struct WorkspaceListView: View {
                 // slides smoothly. 24pt matches the old layout's
                 // 16pt Spacer + 8pt HStack spacing.
                 leadingInset: effectiveDepth > 0 ? 24 : 0,
-                labels: workspaceStore.labels
+                labels: workspaceStore.labels,
+                labelStyles: labelPresetStyles
             )
             .padding(.horizontal, 8)
             .background(

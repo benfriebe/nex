@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Identifier for the Settings TabView's tabs, used for deep-linking
 /// from the web pane's "Manage favourites…" menu.
-enum SettingsTab: Hashable { case general, appearance, repos, keybindings, web }
+enum SettingsTab: Hashable { case general, appearance, repos, labels, keybindings, web }
 
 struct SettingsView: View {
     let store: StoreOf<AppReducer>
@@ -31,6 +31,12 @@ struct SettingsView: View {
                         Label("Repositories", systemImage: "externaldrive")
                     }
                     .tag(SettingsTab.repos)
+
+                LabelPresetsSettingsView(store: store)
+                    .tabItem {
+                        Label("Labels", systemImage: "tag")
+                    }
+                    .tag(SettingsTab.labels)
 
                 KeybindingsSettingsView(store: store)
                     .tabItem {

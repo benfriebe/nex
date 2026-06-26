@@ -98,6 +98,12 @@ targets:
       - sdk: IOKit.framework
       - sdk: Foundation.framework
       - sdk: Carbon.framework
+      # libghostty.a bundles Dear ImGui's imgui_impl_osx.o, which
+      # references GCController. Nex never uses ImGui, so older linkers
+      # (Xcode 26.3) never load that archive member. Xcode 26.4's linker
+      # force-loads the ObjC member and then needs GameController; link it
+      # explicitly so the build resolves under both toolchains.
+      - sdk: GameController.framework
     postCompileScripts:
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Helpers"
