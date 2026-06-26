@@ -16,6 +16,14 @@ enum SidebarPlacement: String, CaseIterable, Codable, Equatable {
     case endOfList = "end-of-list"
 }
 
+/// Which sidebar fill/stroke opacity a `setSidebarStyle` action targets.
+enum SidebarStyleParam: String, Equatable {
+    case avatarFill
+    case avatarStroke
+    case groupFill
+    case groupStroke
+}
+
 @Reducer
 struct SettingsFeature {
     static let defaultWorktreeBasePath = "~/nex/worktrees/<repo>"
@@ -43,6 +51,12 @@ struct SettingsFeature {
         /// Multiplier on the opacity of the sidebar's WorkspaceColour-tinted
         /// elements (group bands + workspace avatars). 1 = preset intensity.
         var sidebarColorIntensity: Double = 1.0
+        /// Per-element fill/stroke opacities for sidebar groups + icons.
+        /// `groupFill < 0` means "use the per-appearance preset".
+        var sidebarAvatarFillOpacity: Double = 0.20
+        var sidebarAvatarStrokeOpacity: Double = 0.45
+        var sidebarGroupFillOpacity: Double = -1
+        var sidebarGroupStrokeOpacity: Double = 0.0
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -76,6 +90,7 @@ struct SettingsFeature {
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
         case setSidebarColorIntensity(Double)
+        case setSidebarStyle(SidebarStyleParam, Double)
         case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
@@ -99,6 +114,10 @@ struct SettingsFeature {
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
     static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
+    static let defaultsKeySidebarAvatarFill = "settings.sidebarAvatarFill"
+    static let defaultsKeySidebarAvatarStroke = "settings.sidebarAvatarStroke"
+    static let defaultsKeySidebarGroupFill = "settings.sidebarGroupFill"
+    static let defaultsKeySidebarGroupStroke = "settings.sidebarGroupStroke"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -144,6 +163,18 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeySidebarColorIntensity) {
                     state.sidebarColorIntensity = userDefaults.doubleForKey(Self.defaultsKeySidebarColorIntensity)
+                }
+                if userDefaults.hasKey(Self.defaultsKeySidebarAvatarFill) {
+                    state.sidebarAvatarFillOpacity = userDefaults.doubleForKey(Self.defaultsKeySidebarAvatarFill)
+                }
+                if userDefaults.hasKey(Self.defaultsKeySidebarAvatarStroke) {
+                    state.sidebarAvatarStrokeOpacity = userDefaults.doubleForKey(Self.defaultsKeySidebarAvatarStroke)
+                }
+                if userDefaults.hasKey(Self.defaultsKeySidebarGroupFill) {
+                    state.sidebarGroupFillOpacity = userDefaults.doubleForKey(Self.defaultsKeySidebarGroupFill)
+                }
+                if userDefaults.hasKey(Self.defaultsKeySidebarGroupStroke) {
+                    state.sidebarGroupStrokeOpacity = userDefaults.doubleForKey(Self.defaultsKeySidebarGroupStroke)
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -259,6 +290,23 @@ struct SettingsFeature {
             case .setSidebarColorIntensity(let intensity):
                 state.sidebarColorIntensity = intensity
                 userDefaults.setDouble(intensity, Self.defaultsKeySidebarColorIntensity)
+                return .none
+
+            case .setSidebarStyle(let param, let value):
+                switch param {
+                case .avatarFill:
+                    state.sidebarAvatarFillOpacity = value
+                    userDefaults.setDouble(value, Self.defaultsKeySidebarAvatarFill)
+                case .avatarStroke:
+                    state.sidebarAvatarStrokeOpacity = value
+                    userDefaults.setDouble(value, Self.defaultsKeySidebarAvatarStroke)
+                case .groupFill:
+                    state.sidebarGroupFillOpacity = value
+                    userDefaults.setDouble(value, Self.defaultsKeySidebarGroupFill)
+                case .groupStroke:
+                    state.sidebarGroupStrokeOpacity = value
+                    userDefaults.setDouble(value, Self.defaultsKeySidebarGroupStroke)
+                }
                 return .none
 
             case .refreshConfirmQuitWhenActive:

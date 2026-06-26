@@ -322,6 +322,22 @@ private struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Sidebar fill & stroke") {
+                opacityRow("Avatar fill", .avatarFill, store.sidebarAvatarFillOpacity)
+                opacityRow("Avatar border", .avatarStroke, store.sidebarAvatarStrokeOpacity)
+                opacityRow(
+                    "Group band fill",
+                    .groupFill,
+                    store.sidebarGroupFillOpacity < 0
+                        ? chromeTheme.groupBandOpacity
+                        : store.sidebarGroupFillOpacity
+                )
+                opacityRow("Group band border", .groupStroke, store.sidebarGroupStrokeOpacity)
+                Text("Fill = colour wash, border = outline. The intensity above multiplies these.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Terminal") {
                 Picker("Theme", selection: themeBinding) {
                     Text("None (Custom)").tag(NexTheme?.none)
@@ -361,6 +377,20 @@ private struct AppearanceSettingsView: View {
             get: { store.selectedTheme },
             set: { store.send(.selectTheme($0)) }
         )
+    }
+
+    private func opacityRow(_ label: String, _ param: SidebarStyleParam, _ value: Double) -> some View {
+        HStack {
+            Text(label)
+            Slider(
+                value: Binding(get: { value }, set: { store.send(.setSidebarStyle(param, $0)) }),
+                in: 0.0 ... 1.0,
+                step: 0.05
+            )
+            Text("\(Int(value * 100))%")
+                .monospacedDigit()
+                .frame(width: 44, alignment: .trailing)
+        }
     }
 
     /// Two-way binding for one customisable chrome colour. Reads the resolved

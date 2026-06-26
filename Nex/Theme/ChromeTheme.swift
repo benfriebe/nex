@@ -268,4 +268,23 @@ extension EnvironmentValues {
     /// Multiplier on the opacity of the sidebar's WorkspaceColour-tinted
     /// elements (group bands + workspace avatars). 1 = preset intensity.
     @Entry var sidebarColorIntensity: Double = 1.0
+
+    /// Per-element fill/stroke opacities for the sidebar's groups and icons.
+    /// `sidebarColorIntensity` multiplies these.
+    @Entry var sidebarFillStroke = SidebarFillStroke()
+}
+
+/// Customisable fill and stroke (border) opacities for the sidebar's group
+/// bands and workspace/icon avatars. A negative `groupFill` means "use the
+/// preset `ChromeTheme.groupBandOpacity`" (which differs by appearance).
+struct SidebarFillStroke: Equatable {
+    var avatarFill: Double = 0.20
+    var avatarStroke: Double = 0.45
+    var groupFill: Double = -1
+    var groupStroke: Double = 0.0
+
+    /// Resolved group-band fill, falling back to the per-appearance preset.
+    func resolvedGroupFill(preset: Double) -> Double {
+        groupFill < 0 ? preset : groupFill
+    }
 }

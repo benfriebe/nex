@@ -19,12 +19,19 @@ struct GroupHeaderRow: View {
     @FocusState private var renameFieldFocused: Bool
     @Environment(\.chromeTheme) private var theme
     @Environment(\.sidebarColorIntensity) private var colorIntensity
+    @Environment(\.sidebarFillStroke) private var fillStroke
 
     /// Group-colour wash behind the header. Rendered as a rounded, inset
     /// band (a pill) per the mockup. Falls back to a neutral tint when the
     /// group has no colour.
     private var headerTint: Color {
-        (color?.color ?? theme.textTertiary).opacity(min(1, theme.groupBandOpacity * colorIntensity))
+        let fill = fillStroke.resolvedGroupFill(preset: theme.groupBandOpacity)
+        return (color?.color ?? theme.textTertiary).opacity(min(1, fill * colorIntensity))
+    }
+
+    /// Optional band border (opt-in; default off).
+    private var headerStroke: Color {
+        (color?.color ?? theme.textTertiary).opacity(min(1, fillStroke.groupStroke * colorIntensity))
     }
 
     var body: some View {
@@ -90,7 +97,12 @@ struct GroupHeaderRow: View {
         // inset keeps it clear of the sidebar edges; the list's trailing-8
         // scroller padding then balances the right margin.
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(headerTint)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(headerTint)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(headerStroke, lineWidth: 1)
+                )
         )
         .padding(.leading, 8)
         // Vertical breathing room between adjacent group bands.

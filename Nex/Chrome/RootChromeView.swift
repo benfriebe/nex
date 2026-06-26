@@ -66,6 +66,12 @@ struct ChromeThemed<Content: View>: View {
             content
                 .environment(\.chromeTheme, theme)
                 .environment(\.sidebarColorIntensity, store.settings.sidebarColorIntensity)
+                .environment(\.sidebarFillStroke, SidebarFillStroke(
+                    avatarFill: store.settings.sidebarAvatarFillOpacity,
+                    avatarStroke: store.settings.sidebarAvatarStrokeOpacity,
+                    groupFill: store.settings.sidebarGroupFillOpacity,
+                    groupStroke: store.settings.sidebarGroupStrokeOpacity
+                ))
                 .preferredColorScheme(appearance.explicitScheme)
                 .tint(theme.accent)
         }
