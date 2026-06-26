@@ -597,14 +597,15 @@ struct WorkspaceListView: View {
     }
 
     private var filterField: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+                .font(.system(size: 13))
                 .foregroundStyle(chromeTheme.textTertiary)
 
             TextField("Filter workspaces or labels", text: $filterText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 11))
+                .font(.system(size: 13))
+                .foregroundStyle(chromeTheme.textPrimary)
                 .focused($isFilterFieldFocused)
                 .accessibilityIdentifier("sidebar.filter.field")
                 .onSubmit {
@@ -631,7 +632,7 @@ struct WorkspaceListView: View {
                     isFilterFieldFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(.system(size: 13))
                         .foregroundStyle(chromeTheme.textTertiary)
                 }
                 .buttonStyle(.plain)
@@ -646,15 +647,27 @@ struct WorkspaceListView: View {
                 store.send(.settings(.setChromeAppearance(isChromeDark ? .light : .dark)))
             } label: {
                 Image(systemName: isChromeDark ? "moon.fill" : "sun.max.fill")
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(chromeTheme.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Toggle light / dark chrome")
             .accessibilityIdentifier("sidebar.appearance.toggle")
         }
+        // Inner padding → the rounded "pill" fill; outer padding → the margin
+        // between the pill and the sidebar edges (matches the mockup).
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(chromeTheme.textPrimary.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(chromeTheme.textPrimary.opacity(0.08), lineWidth: 1)
+                )
+        )
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .background(chromeTheme.sidebarBackground)
     }
 
