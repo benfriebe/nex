@@ -107,13 +107,6 @@ extension [LabelPreset] {
     func color(for label: String) -> LabelColor? {
         first { $0.name == label }?.color
     }
-
-    /// Resolved background + text colours for a label string, or nil when
-    /// no preset matches (the chip renders neutral). Single source of the
-    /// chip-colour lookup semantics.
-    func style(for label: String) -> ResolvedLabelStyle? {
-        first { $0.name == label }?.resolvedStyle
-    }
 }
 
 /// JSON-in-UserDefaults persistence for the label preset list, mirroring

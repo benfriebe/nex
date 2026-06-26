@@ -292,6 +292,43 @@ struct LabelPresetTests {
         #expect(LabelPresetsStorage.decode(json) == presets)
     }
 
+    // MARK: - reducer -> UserDefaults persistence (full effect path)
+
+    @Test func mutationsPersistThroughTheEffect() async {
+        // Exercises the real persistLabelPresets effect end to end: a
+        // mutation must land in UserDefaults under the storage key.
+        let lock = NSLock()
+        nonisolated(unsafe) var dict: [String: Any] = [:]
+        let defaults = UserDefaultsClient(
+            boolForKey: { key in lock.withLock { dict[key] as? Bool ?? false } },
+            doubleForKey: { key in lock.withLock { dict[key] as? Double ?? 0 } },
+            stringForKey: { key in lock.withLock { dict[key] as? String } },
+            hasKey: { key in lock.withLock { dict[key] != nil } },
+            setBool: { val, key in lock.withLock { dict[key] = val } },
+            setDouble: { val, key in lock.withLock { dict[key] = val } },
+            setString: { val, key in lock.withLock { dict[key] = val } }
+        )
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+            $0.continuousClock = ImmediateClock()
+            $0.userDefaults = defaults
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.addLabelPreset(name: "backend", color: .named(.blue)))
+        await store.send(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff")))
+        await store.finish()
+
+        let json = lock.withLock { dict[LabelPresetsStorage.defaultsKey] as? String }
+        #expect(LabelPresetsStorage.decode(json) == [
+            LabelPreset(name: "backend", color: .named(.blue), textColor: .custom("#ffffff"))
+        ])
+    }
+
     @Test func labelColorNamedResolvesToWorkspaceColor() {
         #expect(LabelColor.named(.blue).color == WorkspaceColor.blue.color)
         #expect(LabelColor.named(.red).namedColor == .red)

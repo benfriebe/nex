@@ -129,12 +129,15 @@ struct LabelPresetsSettingsView: View {
 
     private func commitNew() {
         guard !trimmedNewName.isEmpty else { return }
+        let normalized = WorkspaceFeature.normalizeLabel(trimmedNewName)
+        // Only set the text colour when the add will actually create a new
+        // preset — otherwise the addLabelPreset no-ops on a duplicate name
+        // but setLabelPresetTextColor would still recolour the *existing*
+        // preset with this id.
+        let isNew = !store.labelPresets.contains { $0.name == normalized }
         store.send(.addLabelPreset(name: trimmedNewName, color: newColor))
-        if let textColor = newTextColor {
-            store.send(.setLabelPresetTextColor(
-                id: WorkspaceFeature.normalizeLabel(trimmedNewName),
-                textColor: textColor
-            ))
+        if isNew, let textColor = newTextColor {
+            store.send(.setLabelPresetTextColor(id: normalized, textColor: textColor))
         }
         newName = ""
         newTextColor = nil

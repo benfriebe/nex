@@ -652,18 +652,16 @@ struct AppReducer {
         }
     }
 
-    private enum LabelPresetPersistID: Hashable { case debounce }
-
     private func persistLabelPresets(_ presets: [LabelPreset]) -> Effect<Action> {
+        // Write immediately (like favourites) rather than debouncing: a
+        // debounce would drop a preset add/remove/rename made within the
+        // window of a Cmd-Q (the effect is cancelled on terminate). The
+        // colour-picker drag that motivated a debounce only produces cheap,
+        // off-main, cfprefsd-coalesced UserDefaults writes anyway.
         let json = LabelPresetsStorage.encode(presets)
-        // Debounced: dragging the custom-colour picker fires recolor on
-        // every intermediate colour, so coalesce the rapid writes into a
-        // single UserDefaults write once the value settles.
-        return .run { [userDefaults, clock] _ in
-            try await clock.sleep(for: .milliseconds(300))
+        return .run { [userDefaults] _ in
             userDefaults.setString(json, LabelPresetsStorage.defaultsKey)
         }
-        .cancellable(id: LabelPresetPersistID.debounce, cancelInFlight: true)
     }
 
     /// Coalesce rapid `cd`s before scanning the directory for a repo root.

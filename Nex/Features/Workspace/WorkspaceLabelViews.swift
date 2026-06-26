@@ -1,47 +1,33 @@
 import SwiftUI
 
-/// Pill-style label chip with an optional remove (✕) button. When a preset
-/// style is set the capsule is filled with the exact colour (GitHub-style)
-/// with the resolved text colour; with no style it falls back to the
-/// neutral free-form style. Used by the Settings preview.
+/// Pill-style label chip. When a preset style is set the capsule is filled
+/// with the exact colour (GitHub-style) with the resolved text colour; with
+/// no style it falls back to the neutral free-form style. Used by the
+/// Settings → Labels preview.
 struct LabelChip: View {
     let text: String
     /// Resolved preset colours for this label, or nil for the neutral
     /// free-form style (the label string matched no configured preset).
     var style: ResolvedLabelStyle?
-    var onRemove: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 3) {
-            Text(text)
-                .font(.system(size: 10, weight: .medium))
-                .lineLimit(1)
-
-            if let onRemove {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(style?.background ?? Color.secondary.opacity(0.18))
+            )
+            .overlay {
+                if style == nil {
+                    Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove label \(text)")
             }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(
-            Capsule()
-                .fill(style?.background ?? Color.secondary.opacity(0.18))
-        )
-        .overlay {
-            if style == nil {
-                Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
-            }
-        }
-        .foregroundStyle(style.map { AnyShapeStyle($0.text) } ?? AnyShapeStyle(.primary))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Label: \(text)")
+            .foregroundStyle(style.map { AnyShapeStyle($0.text) } ?? AnyShapeStyle(.primary))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Label: \(text)")
     }
 }
 
