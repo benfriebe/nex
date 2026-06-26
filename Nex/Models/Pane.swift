@@ -37,6 +37,12 @@ struct Pane: Identifiable, Equatable {
     /// Closing this pane restores the source instead of taking the
     /// normal close path. In-memory only; not persisted.
     var parkedSourcePaneID: UUID?
+    /// Wall-clock time the current agent run started, used by the chrome
+    /// to show "claude · mm:ss" elapsed. Set when status transitions into
+    /// `.running` (guarded so repeated start pings within a run don't reset
+    /// it). Transient — not persisted, so a pane restored as `.running`
+    /// has this nil until the resumed agent re-emits a start.
+    var agentStartedAt: Date?
 
     /// Convenience accessor for rendering logic.
     var isUsingExternalEditor: Bool { externalEditorCommand != nil }
@@ -58,6 +64,7 @@ struct Pane: Identifiable, Equatable {
         agentSessionID: String? = nil,
         markdownFontSize: Double = Pane.defaultMarkdownFontSize,
         parkedSourcePaneID: UUID? = nil,
+        agentStartedAt: Date? = nil,
         createdAt: Date = Date(),
         lastActivityAt: Date = Date()
     ) {
@@ -75,6 +82,7 @@ struct Pane: Identifiable, Equatable {
         self.agentSessionID = agentSessionID
         self.markdownFontSize = markdownFontSize
         self.parkedSourcePaneID = parkedSourcePaneID
+        self.agentStartedAt = agentStartedAt
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt
     }

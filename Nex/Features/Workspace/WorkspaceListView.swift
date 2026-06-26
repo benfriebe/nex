@@ -5,6 +5,8 @@ import SwiftUI
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -199,11 +201,25 @@ struct WorkspaceListView: View {
             )) {
                 if let prompt = store.groupCustomEmojiPrompt {
                     GroupCustomEmojiSheet(
-                        groupName: prompt.groupName,
+                        subjectName: prompt.groupName,
                         onConfirm: { emoji in
                             store.send(.confirmGroupCustomEmoji(emoji))
                         },
                         onCancel: { store.send(.cancelGroupCustomEmoji) }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.workspaceCustomEmojiPrompt != nil },
+                set: { if !$0 { store.send(.cancelWorkspaceCustomEmoji) } }
+            )) {
+                if let prompt = store.workspaceCustomEmojiPrompt {
+                    GroupCustomEmojiSheet(
+                        subjectName: prompt.workspaceName,
+                        onConfirm: { emoji in
+                            store.send(.confirmWorkspaceCustomEmoji(emoji))
+                        },
+                        onCancel: { store.send(.cancelWorkspaceCustomEmoji) }
                     )
                 }
             }
@@ -338,27 +354,57 @@ struct WorkspaceListView: View {
                 selectionHeader
             }
             .safeAreaInset(edge: .bottom) {
-                Menu {
-                    Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
-                    Button("New Group") {
-                        let placeholder = defaultGroupName(existing: store.groups)
-                        store.send(.createGroup(name: placeholder, autoRename: true))
+                // Left: "+ New Workspace" (primary action) + a chevron menu
+                // for New Workspace / New Group. Right: the ⌘N shortcut hint.
+                // `.menuStyle(.borderlessButton)` flattens a complex custom
+                // label, so the row is composed from a plain Button + a small
+                // single-glyph chevron Menu rather than one Menu label.
+                HStack(spacing: 6) {
+                    Button {
+                        store.send(.showNewWorkspaceSheet())
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus")
+                            Text("New Workspace")
+                        }
+                        .contentShape(Rectangle())
                     }
-                } label: {
-                    Label("New Workspace", systemImage: "plus")
-                        .frame(maxWidth: .infinity)
-                } primaryAction: {
-                    store.send(.showNewWorkspaceSheet())
+                    .buttonStyle(.plain)
+
+                    Menu {
+                        Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
+                        Button("New Group") {
+                            let placeholder = defaultGroupName(existing: store.groups)
+                            store.send(.createGroup(name: placeholder, autoRename: true))
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    // The borderlessButton style tints its label with the
+                    // accent; force it to the text colour to match the label.
+                    .tint(chromeTheme.textSecondary)
+                    .foregroundStyle(chromeTheme.textSecondary)
+
+                    Spacer()
+
+                    Text("\u{2318}N")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(chromeTheme.textTertiary)
                 }
-                .menuStyle(.borderlessButton)
                 .padding(12)
-                // Opaque fill matching the sidebar root background
-                // (ContentView paints the same colour). `safeAreaInset`
-                // lets the scroll view's rows slide *under* this bar, so
-                // without a solid background the colour pill and pane
-                // count of the row above bleed through behind the button.
+                // Opaque fill matching the sidebar root background. The top
+                // divider separates the footer from the scrolling list.
                 .frame(maxWidth: .infinity)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(chromeTheme.sidebarBackground)
+                .foregroundStyle(chromeTheme.textSecondary)
+                .overlay(alignment: .top) {
+                    chromeTheme.divider.frame(height: 1)
+                }
             }
         }
     }
@@ -387,10 +433,10 @@ struct WorkspaceListView: View {
                   let group = store.groups[id: gid],
                   !group.isCollapsed
             else { return nil }
-            return group.color?.color ?? Color.secondary
+            return group.color?.color ?? chromeTheme.divider
         case .groupEmpty(let groupID):
             guard let group = store.groups[id: groupID] else { return nil }
-            return group.color?.color ?? Color.secondary
+            return group.color?.color ?? chromeTheme.divider
         }
     }
 
@@ -540,11 +586,21 @@ struct WorkspaceListView: View {
         return ids
     }
 
+    /// True when the resolved chrome appearance is currently dark — drives the
+    /// sun/moon glyph and which scheme the quick-toggle flips to.
+    private var isChromeDark: Bool {
+        switch store.settings.chromeAppearance {
+        case .dark: true
+        case .light: false
+        case .system: systemScheme == .dark
+        }
+    }
+
     private var filterField: some View {
         HStack(spacing: 6) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
+            Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(chromeTheme.textTertiary)
 
             TextField("Filter workspaces or labels", text: $filterText)
                 .textFieldStyle(.plain)
@@ -576,15 +632,30 @@ struct WorkspaceListView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(chromeTheme.textTertiary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar.filter.clear")
             }
+
+            // Quick light/dark toggle for the warm chrome palette. Flips to the
+            // opposite explicit scheme; the tri-state (incl. System) lives in
+            // Settings → Appearance. Button only — no keybinding, so no
+            // KeyBindingMap collision.
+            Button {
+                store.send(.settings(.setChromeAppearance(isChromeDark ? .light : .dark)))
+            } label: {
+                Image(systemName: isChromeDark ? "moon.fill" : "sun.max.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(chromeTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle light / dark chrome")
+            .accessibilityIdentifier("sidebar.appearance.toggle")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+        .background(chromeTheme.sidebarBackground)
     }
 
     /// Workspaces whose name OR any label contains `filterText`
@@ -665,7 +736,6 @@ struct WorkspaceListView: View {
     @ViewBuilder
     private func filteredWorkspaceRow(workspaceID: UUID) -> some View {
         if let workspaceStore = store.scope(state: \.workspaces[id: workspaceID], action: \.workspaces[id: workspaceID]) {
-            let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
             let waiting = workspaceStore.panes.count(where: { $0.status == .waitingForInput })
             let running = workspaceStore.panes.contains { $0.status == .running }
             let parentGroupName = store.state.groupID(forWorkspace: workspaceID)
@@ -675,9 +745,6 @@ struct WorkspaceListView: View {
                 WorkspaceRowView(
                     name: workspaceStore.name,
                     color: workspaceStore.color,
-                    paneCount: workspaceStore.panes.count,
-                    repoCount: workspaceStore.repoAssociations.count,
-                    gitStatus: aggregateStatus,
                     isActive: workspaceID == store.activeWorkspaceID,
                     // Negative index suppresses the `⌘N` badge in
                     // `WorkspaceRowView` (the badge is gated on `index <
@@ -686,6 +753,7 @@ struct WorkspaceListView: View {
                     // either be wrong or meaningless, so we hide it
                     // wholesale in filtered rows.
                     index: -1,
+                    icon: workspaceStore.icon,
                     waitingPaneCount: waiting,
                     hasRunningPanes: running,
                     isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
@@ -810,6 +878,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
+            workspaceChangeIconMenu(workspaceID: workspaceID)
             labelsMenu(workspaceID: workspaceID, workspaceStore: workspaceStore)
             moveToGroupMenu(workspaceID: workspaceID)
             Divider()
@@ -1037,6 +1106,36 @@ struct WorkspaceListView: View {
         }
     }
 
+    /// Workspace counterpart of `changeIconMenu`, reusing the same symbol /
+    /// emoji palettes. "Reset" returns to the first-letter avatar.
+    private func workspaceChangeIconMenu(workspaceID: UUID) -> some View {
+        Menu("Change Icon") {
+            Menu("Symbol") {
+                ForEach(Self.groupIconSymbolPalette, id: \.systemName) { entry in
+                    Button {
+                        store.send(.setWorkspaceIcon(id: workspaceID, icon: .systemName(entry.systemName)))
+                    } label: {
+                        Label(entry.label, systemImage: entry.systemName)
+                    }
+                }
+            }
+            Menu("Emoji") {
+                ForEach(Self.groupIconEmojiPalette, id: \.self) { emoji in
+                    Button(emoji) {
+                        store.send(.setWorkspaceIcon(id: workspaceID, icon: .emoji(emoji)))
+                    }
+                }
+            }
+            Button("Custom Emoji...") {
+                store.send(.requestWorkspaceCustomEmoji(workspaceID))
+            }
+            Divider()
+            Button("Reset to Letter") {
+                store.send(.setWorkspaceIcon(id: workspaceID, icon: nil))
+            }
+        }
+    }
+
     private func workspaceRow(
         workspaceStore: StoreOf<WorkspaceFeature>,
         depth: Int
@@ -1056,7 +1155,6 @@ struct WorkspaceListView: View {
             // as being consumed by the group rather than flying away.
             let isLanding = landingPreview?.workspaceID == workspaceID
 
-            let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
             // Show the dragged row nested when the current target is a
             // preview-only group drop (empty group `.intoGroup` or any
             // `.ontoGroupHeader`) so the visual matches where the
@@ -1069,11 +1167,9 @@ struct WorkspaceListView: View {
             WorkspaceRowView(
                 name: workspaceStore.name,
                 color: workspaceStore.color,
-                paneCount: workspaceStore.panes.count,
-                repoCount: workspaceStore.repoAssociations.count,
-                gitStatus: aggregateStatus,
                 isActive: workspaceID == store.activeWorkspaceID,
                 index: flatIndex,
+                icon: workspaceStore.icon,
                 waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
                 hasRunningPanes: workspaceStore.panes.contains { $0.status == .running },
                 isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
@@ -1975,31 +2071,6 @@ struct WorkspaceListView: View {
                 workspaceID: workspaceID, groupID: groupID, index: nil
             ))
         }
-    }
-
-    /// Aggregate git status: dirty if any association is dirty, clean if all clean, unknown otherwise.
-    private func aggregateGitStatus(for workspace: WorkspaceFeature.State) -> RepoGitStatus {
-        let statuses = workspace.repoAssociations.map { assoc in
-            store.gitStatuses[assoc.id] ?? .unknown
-        }
-        if statuses.isEmpty { return .unknown }
-        if statuses.contains(where: { if case .dirty = $0 { true } else { false } }) {
-            var totalChanged = 0
-            var totalAdds = 0
-            var totalDels = 0
-            for status in statuses {
-                if case .dirty(let count, let adds, let dels) = status {
-                    totalChanged += count
-                    totalAdds += adds
-                    totalDels += dels
-                }
-            }
-            return .dirty(changedFiles: totalChanged, additions: totalAdds, deletions: totalDels)
-        }
-        if statuses.allSatisfy({ $0 == .clean }) {
-            return .clean
-        }
-        return .unknown
     }
 }
 

@@ -5,6 +5,8 @@ import SwiftUI
 struct ResizeDimensionsOverlay: View {
     let text: String
 
+    @Environment(\.chromeTheme) private var chromeTheme
+
     var body: some View {
         Text(text)
             .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -12,8 +14,7 @@ struct ResizeDimensionsOverlay: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.ultraThinMaterial)
-            .background(Color(nsColor: .windowBackgroundColor).opacity(0.7))
+            .background(chromeTheme.headerBackground)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
             .allowsHitTesting(false)

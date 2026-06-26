@@ -29,9 +29,13 @@ struct ScratchpadEditorView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.usesFindBar = true
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textColor = NSColor.textColor
+        // Text colour tracks the (terminal) background's luminance, not the
+        // chrome appearance — otherwise a light chrome over a dark terminal
+        // background renders unreadable black-on-dark text.
+        let fg = Self.foreground(for: backgroundColor)
+        textView.textColor = fg
         textView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
-        textView.insertionPointColor = NSColor.textColor
+        textView.insertionPointColor = fg
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -79,6 +83,15 @@ struct ScratchpadEditorView: NSViewRepresentable {
 
     func updateNSView(_: PaneFocusView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
+        // Keep colours in sync if the (terminal) background changes.
+        let fg = Self.foreground(for: backgroundColor)
+        let bg = backgroundColor.withAlphaComponent(backgroundOpacity)
+        if textView.backgroundColor != bg { textView.backgroundColor = bg }
+        if textView.textColor != fg {
+            textView.textColor = fg
+            textView.insertionPointColor = fg
+        }
+        context.coordinator.scrollView?.backgroundColor = bg
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
         // palette's TextField) don't yank first responder back.
@@ -104,6 +117,17 @@ struct ScratchpadEditorView: NSViewRepresentable {
     private func releaseFirstResponderIfHeld(_ textView: NSTextView) {
         guard let window = textView.window, window.firstResponder === textView else { return }
         window.makeFirstResponder(nil)
+    }
+
+    /// Readable foreground for a given background: light text on a dark
+    /// background, dark text on a light one (luminance-based, mirroring the
+    /// markdown/diff HTML renderers).
+    private static func foreground(for background: NSColor) -> NSColor {
+        let rgb = background.usingColorSpace(.deviceRGB) ?? background
+        let luminance = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luminance < 0.5
+            ? NSColor(white: 0.90, alpha: 1)
+            : NSColor(white: 0.12, alpha: 1)
     }
 
     // MARK: - Coordinator

@@ -2,25 +2,27 @@ import AppKit
 import SwiftUI
 
 /// Small sheet the user drops an arbitrary emoji into for a group's
-/// header icon. Input is truncated to the first grapheme cluster so a
-/// compound glyph (e.g. flag emoji, skin-toned emoji) survives
-/// intact while anything wider than one visual character is dropped.
+/// header icon or a workspace's avatar. Input is truncated to the first
+/// grapheme cluster so a compound glyph (e.g. flag emoji, skin-toned
+/// emoji) survives intact while anything wider than one visual character
+/// is dropped.
 ///
 /// The macOS character picker (searchable, covers every emoji) is
 /// one click away via the `Browse All Emoji…` button — it calls
 /// `NSApp.orderFrontCharacterPalette(_:)`, which routes the
 /// user's selection into the focused `TextField` below.
 struct GroupCustomEmojiSheet: View {
-    let groupName: String
+    let subjectName: String
     let onConfirm: (String) -> Void
     let onCancel: () -> Void
 
     @State private var emoji: String = ""
     @FocusState private var fieldFocused: Bool
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Custom Emoji for \"\(groupName)\"")
+            Text("Custom Emoji for \"\(subjectName)\"")
                 .font(.headline)
 
             Text("Type or paste a single emoji. Use \u{2303}\u{2318}Space, or the button below, to search every emoji. Non-emoji input is rejected.")
@@ -72,6 +74,7 @@ struct GroupCustomEmojiSheet: View {
         }
         .padding(20)
         .frame(width: 340)
+        .background(chromeTheme.surfaceBackground)
     }
 
     private var isValidEmoji: Bool {

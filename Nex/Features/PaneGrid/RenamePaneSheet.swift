@@ -8,6 +8,7 @@ struct RenamePaneSheet: View {
     let onDismiss: () -> Void
 
     @State private var text: String = ""
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(spacing: 16) {
@@ -28,6 +29,7 @@ struct RenamePaneSheet: View {
         }
         .padding()
         .frame(width: 320)
+        .background(chromeTheme.surfaceBackground)
         .onAppear { text = currentName }
     }
 

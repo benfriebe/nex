@@ -1,16 +1,19 @@
 import SwiftUI
 
-/// Pulsing status dot used by workspace rows and group headers to signal
-/// agent activity in the sidebar.
-struct AgentStatusDot: View {
+/// Pulsing agent-activity dot overlaid on a workspace avatar or group icon
+/// corner. The `borderColor` ring separates it from the glyph underneath.
+struct PulsingStatusDot: View {
     let color: Color
+    let borderColor: Color
+    var size: CGFloat = 9
     @State private var isPulsing = false
 
     var body: some View {
         Circle()
             .fill(color)
-            .frame(width: 10, height: 10)
-            .opacity(isPulsing ? 0.3 : 1.0)
+            .frame(width: size, height: size)
+            .overlay(Circle().stroke(borderColor, lineWidth: 1.5))
+            .opacity(isPulsing ? 0.35 : 1.0)
             .animation(
                 .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
                 value: isPulsing
@@ -23,11 +26,9 @@ struct AgentStatusDot: View {
 struct WorkspaceRowView: View {
     let name: String
     let color: WorkspaceColor
-    let paneCount: Int
-    let repoCount: Int
-    let gitStatus: RepoGitStatus
     let isActive: Bool
     let index: Int
+    var icon: GroupIcon?
     var waitingPaneCount: Int = 0
     var hasRunningPanes: Bool = false
     var isSelected: Bool = false
@@ -37,18 +38,18 @@ struct WorkspaceRowView: View {
     /// level from the configured presets; a missing key renders neutral.
     var labelStyles: [String: ResolvedLabelStyle] = [:]
 
+    @Environment(\.chromeTheme) private var theme
+
     /// Maximum chips rendered inline before collapsing into a `+N` more
     /// indicator. Three keeps rows visually compact in the narrow
     /// sidebar; the inspector shows the full set.
     private static let maxInlineLabels = 3
 
     var body: some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(color.color)
-                .frame(width: 4, height: rowAccentHeight)
+        HStack(spacing: 9) {
+            avatar
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 3) {
                 // Always semibold so a long name doesn't re-wrap when
                 // `isActive` toggles (regular and semibold measure
                 // differently per character). Active/inactive is still
@@ -56,45 +57,24 @@ struct WorkspaceRowView: View {
                 // highlight.
                 Text(name)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isActive ? .primary : .secondary)
-
-                HStack(spacing: 6) {
-                    Text("\(paneCount) pane\(paneCount == 1 ? "" : "s")")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-
-                    if repoCount > 0 {
-                        HStack(spacing: 2) {
-                            gitStatusDot
-                            Text("\(repoCount)")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
+                    .foregroundStyle(isActive ? theme.textPrimary : theme.textSecondary)
+                    .lineLimit(1)
 
                 if !labels.isEmpty {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 4) {
                         ForEach(Array(labels.prefix(Self.maxInlineLabels)), id: \.self) { label in
                             RowLabelChip(text: label, style: labelStyles[label])
                         }
                         if labels.count > Self.maxInlineLabels {
                             Text("+\(labels.count - Self.maxInlineLabels)")
                                 .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(theme.textTertiary)
                         }
                     }
-                    .padding(.top, 1)
                 }
             }
 
-            Spacer()
-
-            if waitingPaneCount > 0 {
-                AgentStatusDot(color: .blue)
-            } else if hasRunningPanes {
-                AgentStatusDot(color: .green)
-            }
+            Spacer(minLength: 4)
 
             // Negative indices opt out of the badge entirely. Used by
             // the filtered sidebar where workspace indices into
@@ -102,29 +82,17 @@ struct WorkspaceRowView: View {
             if index >= 0, index < 9 {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textTertiary)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background(
-            ZStack {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.accentColor.opacity(0.18))
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.accentColor.opacity(0.6), lineWidth: 1)
-                }
-                if isActive {
-                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.1))
-                    // Accent outline makes the active workspace more
-                    // prominent than the bare white fill could on its
-                    // own, especially against a busy sidebar.
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.accentColor, lineWidth: 1.5)
-                }
-            }
-        )
+        .background(rowBackground)
+        // Outer gap (outside the selection ring) matching the group bands'
+        // 2pt, so the spacing between a row and an adjacent group/row is the
+        // same everywhere — incl. the gap between a selected row's ring and
+        // the group header above/below it.
+        .padding(.vertical, 2)
         // Nesting inset is applied AFTER the background so the fill +
         // outline stay within the row's content area. A nested row
         // gets its outline indented from the sidebar edge instead of
@@ -133,21 +101,70 @@ struct WorkspaceRowView: View {
         .contentShape(Rectangle())
     }
 
-    /// The color bar grows when label chips are visible so it stays
-    /// roughly aligned with the row's full content height.
-    private var rowAccentHeight: CGFloat {
-        labels.isEmpty ? 24 : 36
+    /// Rounded-square colour avatar carrying the workspace's initial, with
+    /// the agent-activity dot overlaid on its top-right corner (green =
+    /// running, blue = waiting) — matching the group header.
+    private var avatar: some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(color.color.opacity(0.20))
+            .frame(width: 22, height: 22)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(color.color.opacity(0.45), lineWidth: 1)
+            )
+            .overlay(avatarContent)
+            .overlay(alignment: .topTrailing) {
+                if waitingPaneCount > 0 {
+                    statusDot(theme.statusWaiting)
+                } else if hasRunningPanes {
+                    statusDot(theme.statusRunning)
+                }
+            }
     }
 
+    private func statusDot(_ color: Color) -> some View {
+        PulsingStatusDot(color: color, borderColor: theme.sidebarBackground)
+            .offset(x: 3, y: -3)
+    }
+
+    /// Avatar contents: a custom emoji or SF Symbol when set, otherwise the
+    /// first letter of the workspace name.
     @ViewBuilder
-    private var gitStatusDot: some View {
-        let dotColor: Color = switch gitStatus {
-        case .unknown: .secondary
-        case .clean: .green
-        case .dirty: .orange
+    private var avatarContent: some View {
+        switch icon {
+        case .emoji(let grapheme):
+            Text(grapheme).font(.system(size: 12))
+        case .systemName(let symbolName):
+            Image(systemName: symbolName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color.color)
+        case .none:
+            Text(avatarGlyph)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(color.color)
         }
-        Image(systemName: "arrow.triangle.branch")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(dotColor)
+    }
+
+    /// First grapheme of the name, upper-cased. Falls back to "?" for an
+    /// empty/whitespace name. Non-Latin scripts (e.g. kanji) render as-is.
+    private var avatarGlyph: String {
+        guard let first = name.trimmingCharacters(in: .whitespaces).first else { return "?" }
+        return String(first).uppercased()
+    }
+
+    private var rowBackground: some View {
+        ZStack {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7).fill(theme.selectionFill)
+                RoundedRectangle(cornerRadius: 7).stroke(theme.selectionStroke.opacity(0.7), lineWidth: 1)
+            }
+            if isActive {
+                RoundedRectangle(cornerRadius: 7).fill(theme.selectionFill.opacity(0.7))
+                // Accent outline makes the active workspace more prominent
+                // than the bare fill could on its own, especially against a
+                // busy sidebar.
+                RoundedRectangle(cornerRadius: 7).stroke(theme.selectionStroke, lineWidth: 1.5)
+            }
+        }
     }
 }

@@ -56,6 +56,7 @@ struct WebPaneChrome: View {
     /// doesn't always reach the Settings scene through the responder
     /// chain; `openSettings()` is the supported entry point.
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,7 +65,7 @@ struct WebPaneChrome: View {
                 tabStrip
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(chromeTheme.headerBackground)
         .overlay(alignment: .bottom) {
             ZStack(alignment: .leading) {
                 Divider()
@@ -395,6 +396,8 @@ struct WebURLBar: View {
     var canStar: Bool = false
     var onToggleStar: (() -> Void)?
 
+    @Environment(\.chromeTheme) private var chromeTheme
+
     var body: some View {
         HStack(spacing: 4) {
             WebURLField(
@@ -422,7 +425,7 @@ struct WebURLBar: View {
         .frame(height: 21)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(nsColor: .textBackgroundColor))
+                .fill(chromeTheme.surfaceBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 4)

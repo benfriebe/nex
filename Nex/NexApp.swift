@@ -26,7 +26,7 @@ struct NexApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(store: store)
+            RootChromeView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
                 .environment(\.ghosttyConfig, .liveValue)
@@ -93,6 +93,14 @@ struct NexApp: App {
                             window.isOpaque = false
                             window.backgroundColor = .white.withAlphaComponent(0.001)
                         }
+                        // NB: do NOT set `isMovableByWindowBackground` — it turns
+                        // the whole window (incl. the sidebar) into a drag handle,
+                        // which hijacks sidebar row/group reordering. With
+                        // `.hiddenTitleBar` the titlebar region the custom title
+                        // bar overlaps is already window-draggable (its
+                        // non-interactive SwiftUI content reports
+                        // mouseDownCanMoveWindow), so the bar still moves the
+                        // window without breaking sidebar drags.
                     }
 
                     // Global hotkey callback — registration happens from the
@@ -142,7 +150,7 @@ struct NexApp: App {
                     shortcutMonitor = monitor
                 }
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updaterViewModel: updaterViewModel)
@@ -152,7 +160,9 @@ struct NexApp: App {
         }
 
         Settings {
-            SettingsView(store: store)
+            ChromeThemed(store: store) {
+                SettingsView(store: store)
+            }
         }
 
         Window("Nex Help", id: "help") {

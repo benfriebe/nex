@@ -7,6 +7,7 @@ struct KeybindingsSettingsView: View {
     let store: StoreOf<AppReducer>
     @State private var recordingAction: NexAction?
     @State private var recordingGlobal: Bool = false
+    @Environment(\.chromeTheme) private var chromeTheme
 
     private static let categoryOrder = [
         "Pane Management", "Navigation", "Workspaces", "View", "Files", "Search"
@@ -55,6 +56,7 @@ struct KeybindingsSettingsView: View {
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
+                .scrollContentBackground(.hidden)
 
                 Divider()
 
@@ -69,6 +71,7 @@ struct KeybindingsSettingsView: View {
                 }
                 .padding(12)
             }
+            .background(chromeTheme.surfaceBackground)
             .sheet(item: recordingActionBinding) { action in
                 KeyRecorderSheet(
                     action: action,
@@ -221,6 +224,7 @@ private struct GlobalKeyRecorderSheet: View {
     let onComplete: (KeyTrigger?) -> Void
 
     @State private var conflictMessage: String?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(spacing: 16) {
@@ -267,6 +271,7 @@ private struct GlobalKeyRecorderSheet: View {
         }
         .padding(24)
         .frame(width: 380)
+        .background(chromeTheme.surfaceBackground)
     }
 }
 
@@ -282,6 +287,7 @@ private struct KeyRecorderSheet: View {
     let onComplete: (KeyTrigger?) -> Void
 
     @State private var conflictMessage: String?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(spacing: 16) {
@@ -327,6 +333,7 @@ private struct KeyRecorderSheet: View {
         }
         .padding(24)
         .frame(width: 340)
+        .background(chromeTheme.surfaceBackground)
     }
 }
 

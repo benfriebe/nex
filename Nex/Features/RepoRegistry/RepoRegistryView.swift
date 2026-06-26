@@ -5,6 +5,7 @@ import SwiftUI
 struct RepoRegistryView: View {
     let store: StoreOf<AppReducer>
     @State private var searchText = ""
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         WithPerceptionTracking {
@@ -50,8 +51,10 @@ struct RepoRegistryView: View {
                         }
                     }
                     .listStyle(.inset)
+                    .scrollContentBackground(.hidden)
                 }
             }
+            .background(chromeTheme.surfaceBackground)
         }
     }
 

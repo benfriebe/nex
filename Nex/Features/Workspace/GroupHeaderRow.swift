@@ -17,31 +17,24 @@ struct GroupHeaderRow: View {
 
     @State private var renameText: String = ""
     @FocusState private var renameFieldFocused: Bool
+    @Environment(\.chromeTheme) private var theme
+
+    /// Group-colour wash behind the header. Rendered as a rounded, inset
+    /// band (a pill) per the mockup. Falls back to a neutral tint when the
+    /// group has no colour.
+    private var headerTint: Color {
+        (color?.color ?? theme.textTertiary).opacity(theme.groupBandOpacity)
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Icon carries the group identity. The chosen glyph sits
-            // in a 4pt-wide slot that matches the colour pill on
-            // workspace rows, so a group header and a root workspace
-            // share the same leading-column anchor. The glyph is
-            // wider than 4pt; it overflows the slot and centres on
-            // the 18pt-from-entry-edge column — visually aligned with
-            // the pill.
-            //
-            // When no `icon` is set the default filled/outlined folder
-            // glyph tints with the group's colour. Custom SF Symbols
-            // pick up the same tint. Emoji glyphs carry their own
-            // palette and render untinted.
-            ZStack {
-                Color.clear.frame(width: 4, height: 24)
-                iconGlyph
-            }
+        HStack(spacing: 9) {
+            groupIcon
 
             if isRenaming {
                 TextField("Group name", text: $renameText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(theme.textPrimary)
                     .focused($renameFieldFocused)
                     .onAppear {
                         renameText = name
@@ -73,8 +66,8 @@ struct GroupHeaderRow: View {
                     }
             } else {
                 Text(name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -82,36 +75,25 @@ struct GroupHeaderRow: View {
             Spacer(minLength: 4)
 
             if !isRenaming {
-                if hasWaitingPanes {
-                    AgentStatusDot(color: .blue)
-                } else if hasRunningPanes {
-                    AgentStatusDot(color: .green)
-                }
-
-                Text("\(workspaceCount)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(
-                        Capsule().fill(Color.primary.opacity(0.06))
-                    )
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
             }
         }
-        // Match a workspace row's laid-out height: a workspace row's
-        // inner HStack is driven by the 13pt name + 10pt subtitle
-        // VStack at ~29pt, plus 8pt vertical padding on each side
-        // ≈ 45pt total. Driving the header to the same content height
-        // here + the same 8pt vertical padding aligns the group's
-        // count badge vertically with the workspace rows' ⌘N badges.
-        .frame(minHeight: 29)
-        .padding(.vertical, 8)
-        // 16pt total horizontal padding matches the workspace row's
-        // layered padding (8pt internal inside `WorkspaceRowView` + 8pt
-        // external in `WorkspaceListView`'s `workspaceRow`). That puts
-        // the 4pt folder slot at 16pt from the entry leading edge —
-        // centred at 18pt, exactly under the workspace row's pill.
-        .padding(.horizontal, 16)
+        // 6pt vertical padding matches WorkspaceRowView so a group band is
+        // the same height as a workspace row (both have a 22pt icon/avatar).
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Rounded, inset band (pill) — matches the mockup. The 8pt outer
+        // inset keeps it clear of the sidebar edges; the list's trailing-8
+        // scroller padding then balances the right margin.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(headerTint)
+        )
+        .padding(.leading, 8)
+        // Vertical breathing room between adjacent group bands.
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture {
             if isRenaming {
@@ -124,6 +106,25 @@ struct GroupHeaderRow: View {
         }
     }
 
+    /// Group glyph with the agent-activity dot overlaid on its corner
+    /// (green = running, blue = waiting), matching the mockup.
+    private var groupIcon: some View {
+        iconGlyph
+            .frame(width: 22, height: 22)
+            .overlay(alignment: .topTrailing) {
+                if hasWaitingPanes {
+                    statusDot(theme.statusWaiting)
+                } else if hasRunningPanes {
+                    statusDot(theme.statusRunning)
+                }
+            }
+    }
+
+    private func statusDot(_ color: Color) -> some View {
+        PulsingStatusDot(color: color, borderColor: theme.sidebarBackground)
+            .offset(x: 3, y: -2)
+    }
+
     @ViewBuilder
     private var iconGlyph: some View {
         switch icon {
@@ -131,8 +132,8 @@ struct GroupHeaderRow: View {
             // Default: colour-tinted folder (filled when a colour is
             // set, outlined otherwise).
             Image(systemName: color == nil ? "folder" : "folder.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(color?.color ?? Color.secondary)
+                .font(.system(size: 14))
+                .foregroundStyle(color?.color ?? theme.textSecondary)
         case .systemName(let name):
             // Custom SF Symbol. Inherit the group's colour tint so it
             // reads the same as the default folder would. Folder is
@@ -142,13 +143,13 @@ struct GroupHeaderRow: View {
             // coloured group.
             let effective = (name == "folder" && color != nil) ? "folder.fill" : name
             Image(systemName: effective)
-                .font(.system(size: 11))
-                .foregroundStyle(color?.color ?? Color.secondary)
+                .font(.system(size: 14))
+                .foregroundStyle(color?.color ?? theme.textSecondary)
         case .emoji(let grapheme):
             // Emoji glyphs render with their native palette — SwiftUI
             // can't recolour them cleanly, so we skip the tint.
             Text(grapheme)
-                .font(.system(size: 11))
+                .font(.system(size: 13))
         }
     }
 }

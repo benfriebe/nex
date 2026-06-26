@@ -10,6 +10,7 @@ struct NewGroupSheet: View {
 
     @State private var text: String = ""
     @State private var selectedColor: WorkspaceColor?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -69,6 +70,7 @@ struct NewGroupSheet: View {
         }
         .padding()
         .frame(width: 320)
+        .background(chromeTheme.surfaceBackground)
         .onAppear { text = defaultName }
     }
 

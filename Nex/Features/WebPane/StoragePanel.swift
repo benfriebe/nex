@@ -19,6 +19,7 @@ struct StoragePanel: View {
     let onClose: () -> Void
 
     @Environment(\.webPaneStore) private var webPaneStore
+    @Environment(\.chromeTheme) private var chromeTheme
 
     @State private var cookies: [HTTPCookie] = []
     /// Grouped + sorted view of `cookies`. Cached in @State so body
@@ -50,7 +51,7 @@ struct StoragePanel: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(chromeTheme.surfaceBackground)
         .overlay(alignment: .bottom) { Divider() }
         .onAppear(perform: refreshCookies)
         .confirmationDialog(

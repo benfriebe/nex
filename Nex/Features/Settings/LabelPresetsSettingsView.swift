@@ -17,6 +17,7 @@ private enum LabelCol {
 struct LabelPresetsSettingsView: View {
     let store: StoreOf<AppReducer>
 
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var newName = ""
     @State private var newColor: LabelColor = .named(.blue)
     @State private var newTextColor: LabelColor?
@@ -71,9 +72,11 @@ struct LabelPresetsSettingsView: View {
                         }
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(chromeTheme.surfaceBackground)
         }
     }
 

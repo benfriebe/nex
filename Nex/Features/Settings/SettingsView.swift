@@ -10,6 +10,7 @@ struct SettingsView: View {
     let store: StoreOf<AppReducer>
 
     @State private var selectedTab: SettingsTab = .general
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         WithPerceptionTracking {
@@ -55,6 +56,7 @@ struct SettingsView: View {
                 minHeight: 440, idealHeight: 520, maxHeight: .infinity
             )
             .background(WindowResizabilityModifier())
+            .background(chromeTheme.surfaceBackground)
             // Listen here too: the main WindowGroup (and ContentView's
             // observer) may be closed while the Settings scene stays
             // open. Without this, the dialog's "Don't ask again" tick
@@ -105,6 +107,7 @@ private struct WindowResizabilityModifier: NSViewRepresentable {
 private struct GeneralSettingsView: View {
     let appStore: StoreOf<AppReducer>
     @State private var tcpPortText: String = ""
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         WithPerceptionTracking {
@@ -252,6 +255,8 @@ private struct GeneralSettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(chromeTheme.surfaceBackground)
         }
     }
 }
@@ -259,10 +264,27 @@ private struct GeneralSettingsView: View {
 /// Appearance settings tab (extracted from original SettingsView).
 private struct AppearanceSettingsView: View {
     @Bindable var store: StoreOf<SettingsFeature>
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         Form {
-            Section("Appearance") {
+            Section("Chrome") {
+                Picker(
+                    "Appearance",
+                    selection: $store.chromeAppearance.sending(\.setChromeAppearance)
+                ) {
+                    ForEach(ChromeAppearance.allCases, id: \.self) { appearance in
+                        Text(appearance.displayName).tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Themes the Nex window chrome (sidebar, title bar, status bar). "
+                    + "Independent of the terminal theme below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Terminal") {
                 Picker("Theme", selection: themeBinding) {
                     Text("None (Custom)").tag(NexTheme?.none)
                     ForEach(NexTheme.builtIn) { theme in
@@ -292,6 +314,8 @@ private struct AppearanceSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(chromeTheme.surfaceBackground)
     }
 
     private var themeBinding: Binding<NexTheme?> {
@@ -326,6 +350,7 @@ private struct AppearanceSettingsView: View {
 private struct WebFavouritesSettingsView: View {
     let store: StoreOf<AppReducer>
     @State private var selection: Favourite.ID?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         WithPerceptionTracking {
@@ -364,9 +389,11 @@ private struct WebFavouritesSettingsView: View {
                         }
                     }
                     .listStyle(.inset)
+                    .scrollContentBackground(.hidden)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(chromeTheme.surfaceBackground)
         }
     }
 }

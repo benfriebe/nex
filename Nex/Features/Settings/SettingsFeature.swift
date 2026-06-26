@@ -34,6 +34,9 @@ struct SettingsFeature {
         var newGroupPlacement: SidebarPlacement = .endOfList
         var newWorkspacePlacement: SidebarPlacement = .endOfList
         var confirmQuitWhenActive: Bool = true
+        /// Warm app-chrome palette preference. Drives the sidebar / title bar /
+        /// status bar appearance independently of the Ghostty terminal theme.
+        var chromeAppearance: ChromeAppearance = .system
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -63,6 +66,7 @@ struct SettingsFeature {
         case setNewGroupPlacement(SidebarPlacement)
         case setNewWorkspacePlacement(SidebarPlacement)
         case setConfirmQuitWhenActive(Bool)
+        case setChromeAppearance(ChromeAppearance)
         case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
@@ -83,6 +87,7 @@ struct SettingsFeature {
     static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
+    static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -116,6 +121,10 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyConfirmQuitWhenActive) {
                     state.confirmQuitWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmQuitWhenActive)
+                }
+                if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
+                   let appearance = ChromeAppearance(rawValue: raw) {
+                    state.chromeAppearance = appearance
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -199,6 +208,14 @@ struct SettingsFeature {
             case .setConfirmQuitWhenActive(let enabled):
                 state.confirmQuitWhenActive = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyConfirmQuitWhenActive)
+                return .none
+
+            case .setChromeAppearance(let appearance):
+                // Chrome-only: persist and let RootChromeView re-resolve the
+                // palette. Deliberately decoupled from `.applyAppearance` —
+                // this must NOT rebuild the ghostty terminal config.
+                state.chromeAppearance = appearance
+                userDefaults.setString(appearance.rawValue, Self.defaultsKeyChromeAppearance)
                 return .none
 
             case .refreshConfirmQuitWhenActive:

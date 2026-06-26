@@ -202,6 +202,8 @@ actor PersistenceService {
                         .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
                         ?? []
 
+                    let icon = record.icon.flatMap { GroupIcon(storageString: $0) }
+
                     let workspace = WorkspaceFeature.State(
                         id: wsID,
                         name: record.name,
@@ -214,6 +216,7 @@ actor PersistenceService {
                         createdAt: Date(timeIntervalSince1970: record.createdAt),
                         lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
                         labels: labels,
+                        icon: icon,
                         webPanes: webPanes
                     )
                     workspaces.append(workspace)
@@ -320,7 +323,8 @@ struct PersistenceSnapshot {
                 createdAt: workspace.createdAt.timeIntervalSince1970,
                 lastAccessedAt: workspace.lastAccessedAt.timeIntervalSince1970,
                 sortOrder: index,
-                labelsJSON: labelsJSON
+                labelsJSON: labelsJSON,
+                icon: workspace.icon?.storageString
             )
         }
 

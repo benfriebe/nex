@@ -20,6 +20,7 @@ struct AppReducer {
         var groupDeleteConfirmation: GroupDeleteConfirmation?
         var groupBulkCreatePrompt: GroupBulkCreatePrompt?
         var groupCustomEmojiPrompt: GroupCustomEmojiPrompt?
+        var workspaceCustomEmojiPrompt: WorkspaceCustomEmojiPrompt?
         var selectedWorkspaceIDs: Set<UUID> = []
         var lastSelectionAnchor: UUID?
         var bulkDeleteConfirmationIDs: [UUID]?
@@ -28,6 +29,10 @@ struct AppReducer {
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
+        /// Running tally of agent runs whose waiting-for-input state was
+        /// cleared this session (an acknowledged finished turn). Drives the
+        /// status bar's "N done". Session-scoped, intentionally not persisted.
+        var completedAgentCount: Int = 0
         var keybindings: KeyBindingMap = .defaults
         var focusFollowsMouse: Bool = false
         var focusFollowsMouseDelay: Int = 100
@@ -115,6 +120,25 @@ struct AppReducer {
                 }
             }
             return ActivitySummary(agentCount: agentCount, workspaceCount: workspaceCount)
+        }
+
+        /// Cross-workspace agent counts for the bottom status bar. Reading
+        /// this inside a tracked view registers a dependency on `workspaces`
+        /// + `completedAgentCount`, so the footer re-bodies on any status
+        /// change (Release-safe when read from a distinct child view).
+        var chromeStatusSummary: ChromeStatusSummary {
+            var summary = ChromeStatusSummary()
+            for workspace in workspaces {
+                for pane in workspace.panes {
+                    switch pane.status {
+                    case .running: summary.running += 1
+                    case .waitingForInput: summary.waiting += 1
+                    case .idle: break
+                    }
+                }
+            }
+            summary.done = completedAgentCount
+            return summary
         }
 
         /// Sidebar entry that the active workspace occupies, used as an
@@ -387,6 +411,10 @@ struct AppReducer {
         case requestGroupCustomEmoji(UUID)
         case cancelGroupCustomEmoji
         case confirmGroupCustomEmoji(String)
+        case setWorkspaceIcon(id: UUID, icon: GroupIcon?)
+        case requestWorkspaceCustomEmoji(UUID)
+        case cancelWorkspaceCustomEmoji
+        case confirmWorkspaceCustomEmoji(String)
         case deleteGroup(id: UUID, cascade: Bool)
         case moveWorkspaceToGroup(workspaceID: UUID, groupID: UUID?, index: Int? = nil)
         case beginRenameGroup(UUID)
@@ -3047,6 +3075,18 @@ struct AppReducer {
     }
 
     var body: some ReducerOf<Self> {
+        // Declared BEFORE the main reducer's `.forEach` so it runs while the
+        // pane is still `.waitingForInput` — the child `clearPaneStatus`
+        // handler (which flips it to `.idle`) runs first within the
+        // `.forEach`, so reading the status from the parent interception
+        // below would always see `.idle`. A leading reducer sidesteps that.
+        Reduce { state, action in
+            if case let .workspaces(.element(id: wsID, action: .clearPaneStatus(paneID))) = action,
+               state.workspaces[id: wsID]?.panes[id: paneID]?.status == .waitingForInput {
+                state.completedAgentCount += 1
+            }
+            return .none
+        }
         Reduce { state, action in
             switch action {
             case .appLaunched:
@@ -3658,6 +3698,38 @@ struct AppReducer {
                 state.groupCustomEmojiPrompt = nil
                 guard state.groups[id: prompt.groupID] != nil else { return .none }
                 state.groups[id: prompt.groupID]?.icon = .emoji(String(firstGrapheme))
+                return .send(.persistState)
+
+            case .setWorkspaceIcon(let id, let icon):
+                guard state.workspaces[id: id] != nil else { return .none }
+                state.workspaces[id: id]?.icon = icon
+                return .send(.persistState)
+
+            case .requestWorkspaceCustomEmoji(let id):
+                guard let workspace = state.workspaces[id: id] else { return .none }
+                state.workspaceCustomEmojiPrompt = WorkspaceCustomEmojiPrompt(
+                    workspaceID: id,
+                    workspaceName: workspace.name
+                )
+                return .none
+
+            case .cancelWorkspaceCustomEmoji:
+                state.workspaceCustomEmojiPrompt = nil
+                return .none
+
+            case .confirmWorkspaceCustomEmoji(let emoji):
+                // Same server-side "1 emoji grapheme" guard as the group path.
+                let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let prompt = state.workspaceCustomEmojiPrompt,
+                      let firstGrapheme = trimmed.first,
+                      firstGrapheme.isGraphemeEmoji
+                else {
+                    state.workspaceCustomEmojiPrompt = nil
+                    return .none
+                }
+                state.workspaceCustomEmojiPrompt = nil
+                guard state.workspaces[id: prompt.workspaceID] != nil else { return .none }
+                state.workspaces[id: prompt.workspaceID]?.icon = .emoji(String(firstGrapheme))
                 return .send(.persistState)
 
             case .deleteGroup(let id, let cascade):

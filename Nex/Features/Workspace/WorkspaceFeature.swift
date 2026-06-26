@@ -24,6 +24,9 @@ struct WorkspaceFeature {
         var name: String
         var slug: String
         var color: WorkspaceColor
+        /// Optional avatar icon override (SF Symbol or emoji). `nil` falls
+        /// back to the first letter of the workspace name.
+        var icon: GroupIcon?
         var panes: IdentifiedArrayOf<Pane>
         var layout: PaneLayout
         var focusedPaneID: UUID?
@@ -96,6 +99,13 @@ struct WorkspaceFeature {
             return result.count >= 2 ? result : []
         }
 
+        /// The currently focused pane, if any. Used by the chrome (title
+        /// bar / status bar) to surface the active pane's cwd, branch, and
+        /// agent state.
+        var focusedPane: Pane? {
+            focusedPaneID.flatMap { panes[id: $0] }
+        }
+
         init(
             id: UUID = UUID(),
             name: String,
@@ -129,12 +139,14 @@ struct WorkspaceFeature {
             createdAt: Date,
             lastAccessedAt: Date,
             labels: [String] = [],
+            icon: GroupIcon? = nil,
             webPanes: [UUID: WebPaneState] = [:]
         ) {
             self.id = id
             self.name = name
             self.slug = slug
             self.color = color
+            self.icon = icon
             self.panes = panes
             self.layout = layout
             self.focusedPaneID = focusedPaneID
@@ -1255,7 +1267,13 @@ struct WorkspaceFeature {
                 return .none
 
             case .agentStarted(let paneID):
-                state.mutatePane(id: paneID) { $0.status = .running }
+                state.mutatePane(id: paneID) {
+                    // Start the elapsed clock only on a fresh run (a
+                    // non-running → running transition) so repeated start
+                    // pings within one run don't reset "claude · mm:ss".
+                    if $0.status != .running { $0.agentStartedAt = now }
+                    $0.status = .running
+                }
                 return .none
 
             case .agentStopped(let paneID):

@@ -11,6 +11,7 @@ struct PaneSearchOverlay: View {
     let onNavigatePrevious: () -> Void
     let onClose: () -> Void
 
+    @Environment(\.chromeTheme) private var chromeTheme
     @FocusState private var isFieldFocused: Bool
     @State private var localNeedle: String = ""
 
@@ -75,8 +76,7 @@ struct PaneSearchOverlay: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.85))
+        .background(chromeTheme.headerBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
         .onAppear {
