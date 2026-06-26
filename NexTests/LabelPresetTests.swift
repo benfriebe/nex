@@ -290,4 +290,11 @@ struct LabelPresetTests {
         #expect(hex.count == 7)
         #expect(Color(hex: hex) != nil)
     }
+
+    @Test func contrastingTextPicksReadableColor() {
+        #expect(Color(hex: "#ffffff")?.contrastingText == .black)
+        #expect(Color(hex: "#000000")?.contrastingText == .white)
+        #expect(WorkspaceColor.yellow.color.contrastingText == .black)
+        #expect(WorkspaceColor.blue.color.contrastingText == .white)
+    }
 }

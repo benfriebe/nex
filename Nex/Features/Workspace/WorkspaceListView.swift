@@ -877,8 +877,7 @@ struct WorkspaceListView: View {
                     Label {
                         Text(preset.name)
                     } icon: {
-                        Image(systemName: applied ? "checkmark.circle.fill" : "circle.fill")
-                            .foregroundStyle(preset.color.color)
+                        preset.color.color.menuSwatch(checked: applied)
                     }
                 }
             }

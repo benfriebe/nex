@@ -129,4 +129,53 @@ extension Color {
         let blue = Int((ns.blueComponent * 255).rounded())
         return String(format: "#%02x%02x%02x", red, green, blue)
     }
+
+    /// Perceived (sRGB-weighted) luminance, 0 (black) … 1 (white).
+    private var srgbLuminance: Double {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
+        return 0.299 * Double(ns.redComponent)
+            + 0.587 * Double(ns.greenComponent)
+            + 0.114 * Double(ns.blueComponent)
+    }
+
+    /// Black or white text, whichever reads better on a solid fill of this
+    /// colour. Used for the GitHub-style solid label chips.
+    var contrastingText: Color {
+        srgbLuminance > 0.6 ? .black : .white
+    }
+
+    /// A non-template swatch image for showing a real colour inside a macOS
+    /// `Menu`: SF Symbols are templated (monochrome) in menus, so a coloured
+    /// dot drawn as a non-template `NSImage` is the reliable way to show
+    /// true colours. Draws a white/black checkmark when `checked`.
+    func menuSwatch(diameter: CGFloat = 11, checked: Bool = false) -> Image {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
+        // Pull out Sendable components so the drawing closure captures no
+        // non-Sendable NSColor (Swift 6 strict concurrency).
+        let red = ns.redComponent, green = ns.greenComponent, blue = ns.blueComponent
+        let dark = (0.299 * red + 0.587 * green + 0.114 * blue) > 0.6
+        let size = NSSize(width: diameter, height: diameter)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
+            NSColor(srgbRed: red, green: green, blue: blue, alpha: 1).setFill()
+            circle.fill()
+            NSColor(white: 0.5, alpha: 0.4).setStroke()
+            circle.lineWidth = 0.5
+            circle.stroke()
+            if checked {
+                let mark = NSBezierPath()
+                mark.move(to: NSPoint(x: rect.width * 0.28, y: rect.height * 0.50))
+                mark.line(to: NSPoint(x: rect.width * 0.43, y: rect.height * 0.34))
+                mark.line(to: NSPoint(x: rect.width * 0.72, y: rect.height * 0.68))
+                mark.lineWidth = 1.5
+                mark.lineCapStyle = .round
+                mark.lineJoinStyle = .round
+                NSColor(white: dark ? 0 : 1, alpha: 1).setStroke()
+                mark.stroke()
+            }
+            return true
+        }
+        image.isTemplate = false
+        return Image(nsImage: image)
+    }
 }

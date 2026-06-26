@@ -231,9 +231,7 @@ private struct LabelColorField: View {
                         Label {
                             Text(workspaceColor.displayName)
                         } icon: {
-                            Image(systemName: color.namedColor == workspaceColor
-                                ? "checkmark.circle.fill" : "circle.fill")
-                                .foregroundStyle(workspaceColor.color)
+                            workspaceColor.color.menuSwatch(checked: color.namedColor == workspaceColor)
                         }
                     }
                 }
@@ -243,10 +241,13 @@ private struct LabelColorField: View {
                     // the well opens on something sensible.
                     color = .custom(color.hex)
                 } label: {
-                    Label(
-                        "Custom\u{2026}",
-                        systemImage: color.namedColor == nil ? "checkmark.circle.fill" : "eyedropper"
-                    )
+                    if color.namedColor == nil {
+                        Label { Text("Custom\u{2026}") } icon: {
+                            color.color.menuSwatch(checked: true)
+                        }
+                    } else {
+                        Label("Custom\u{2026}", systemImage: "eyedropper")
+                    }
                 }
             } label: {
                 HStack(spacing: 5) {

@@ -1,22 +1,15 @@
 import SwiftUI
 
-/// Pill-style label chip with an optional remove (✕) button. Used by
-/// the workspace inspector (with onRemove) and by the workspace row
-/// (read-only, onRemove == nil).
+/// Pill-style label chip with an optional remove (✕) button. When a preset
+/// tint is set the capsule is filled with the exact colour (GitHub-style)
+/// and the text auto-contrasts black/white; with no tint it falls back to
+/// the neutral free-form style. Used by the Settings preview.
 struct LabelChip: View {
     let text: String
     /// Resolved preset tint for this label, or nil for the neutral
     /// free-form style (the label string matched no configured preset).
     var tint: Color?
     var onRemove: (() -> Void)?
-
-    private var fill: Color {
-        tint.map { $0.opacity(0.22) } ?? Color.secondary.opacity(0.18)
-    }
-
-    private var stroke: Color {
-        tint.map { $0.opacity(0.5) } ?? Color.secondary.opacity(0.25)
-    }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -39,13 +32,14 @@ struct LabelChip: View {
         .padding(.vertical, 2)
         .background(
             Capsule()
-                .fill(fill)
+                .fill(tint ?? Color.secondary.opacity(0.18))
         )
-        .overlay(
-            Capsule()
-                .stroke(stroke, lineWidth: 0.5)
-        )
-        .foregroundStyle(.primary)
+        .overlay {
+            if tint == nil {
+                Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            }
+        }
+        .foregroundStyle(tint.map { AnyShapeStyle($0.contrastingText) } ?? AnyShapeStyle(.primary))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Label: \(text)")
     }
@@ -53,7 +47,8 @@ struct LabelChip: View {
 
 /// Compact read-only chip used inside workspace rows. Smaller padding +
 /// font than `LabelChip` so several fit on one line under the row
-/// metadata without crowding the agent status dot.
+/// metadata without crowding the agent status dot. Solid colour fill with
+/// auto-contrasting text when tinted; neutral otherwise.
 struct RowLabelChip: View {
     let text: String
     /// Resolved preset tint for this label, or nil for the neutral
@@ -68,8 +63,8 @@ struct RowLabelChip: View {
             .padding(.vertical, 1)
             .background(
                 Capsule()
-                    .fill(tint.map { $0.opacity(0.22) } ?? Color.secondary.opacity(0.18))
+                    .fill(tint ?? Color.secondary.opacity(0.18))
             )
-            .foregroundStyle(tint != nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .foregroundStyle(tint.map { AnyShapeStyle($0.contrastingText) } ?? AnyShapeStyle(.secondary))
     }
 }
