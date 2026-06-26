@@ -40,6 +40,9 @@ struct SettingsFeature {
         /// Per-appearance chrome colour overrides. Keyed `"<light|dark>:<key>"`
         /// (see `ChromeColorKey`) → `"RRGGBB"`. Empty = use the presets.
         var chromeColorOverrides: [String: String] = [:]
+        /// Multiplier on the opacity of the sidebar's WorkspaceColour-tinted
+        /// elements (group bands + workspace avatars). 1 = preset intensity.
+        var sidebarColorIntensity: Double = 1.0
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -72,6 +75,7 @@ struct SettingsFeature {
         case setChromeAppearance(ChromeAppearance)
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
+        case setSidebarColorIntensity(Double)
         case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
@@ -94,6 +98,7 @@ struct SettingsFeature {
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
+    static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -136,6 +141,9 @@ struct SettingsFeature {
                    let data = json.data(using: .utf8),
                    let dict = try? JSONDecoder().decode([String: String].self, from: data) {
                     state.chromeColorOverrides = dict
+                }
+                if userDefaults.hasKey(Self.defaultsKeySidebarColorIntensity) {
+                    state.sidebarColorIntensity = userDefaults.doubleForKey(Self.defaultsKeySidebarColorIntensity)
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -246,6 +254,11 @@ struct SettingsFeature {
             case .resetChromeColors:
                 state.chromeColorOverrides = [:]
                 userDefaults.setString("", Self.defaultsKeyChromeColors)
+                return .none
+
+            case .setSidebarColorIntensity(let intensity):
+                state.sidebarColorIntensity = intensity
+                userDefaults.setDouble(intensity, Self.defaultsKeySidebarColorIntensity)
                 return .none
 
             case .refreshConfirmQuitWhenActive:

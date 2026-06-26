@@ -65,6 +65,7 @@ struct ChromeThemed<Content: View>: View {
             )
             content
                 .environment(\.chromeTheme, theme)
+                .environment(\.sidebarColorIntensity, store.settings.sidebarColorIntensity)
                 .preferredColorScheme(appearance.explicitScheme)
                 .tint(theme.accent)
         }

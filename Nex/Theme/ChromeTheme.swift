@@ -264,4 +264,8 @@ extension EnvironmentValues {
     /// rendered before `RootChromeView` injects a value still read a concrete
     /// theme.
     @Entry var chromeTheme: ChromeTheme = .light
+
+    /// Multiplier on the opacity of the sidebar's WorkspaceColour-tinted
+    /// elements (group bands + workspace avatars). 1 = preset intensity.
+    @Entry var sidebarColorIntensity: Double = 1.0
 }

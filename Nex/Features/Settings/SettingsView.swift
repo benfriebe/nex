@@ -305,6 +305,23 @@ private struct AppearanceSettingsView: View {
                 }
             }
 
+            Section("Sidebar") {
+                HStack {
+                    Text("Colour intensity")
+                    Slider(
+                        value: $store.sidebarColorIntensity.sending(\.setSidebarColorIntensity),
+                        in: 0.0 ... 2.0,
+                        step: 0.05
+                    )
+                    Text("\(Int(store.sidebarColorIntensity * 100))%")
+                        .monospacedDigit()
+                        .frame(width: 44, alignment: .trailing)
+                }
+                Text("Scales how vivid the group bands and workspace avatars are.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Terminal") {
                 Picker("Theme", selection: themeBinding) {
                     Text("None (Custom)").tag(NexTheme?.none)

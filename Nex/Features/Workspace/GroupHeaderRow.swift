@@ -18,12 +18,13 @@ struct GroupHeaderRow: View {
     @State private var renameText: String = ""
     @FocusState private var renameFieldFocused: Bool
     @Environment(\.chromeTheme) private var theme
+    @Environment(\.sidebarColorIntensity) private var colorIntensity
 
     /// Group-colour wash behind the header. Rendered as a rounded, inset
     /// band (a pill) per the mockup. Falls back to a neutral tint when the
     /// group has no colour.
     private var headerTint: Color {
-        (color?.color ?? theme.textTertiary).opacity(theme.groupBandOpacity)
+        (color?.color ?? theme.textTertiary).opacity(min(1, theme.groupBandOpacity * colorIntensity))
     }
 
     var body: some View {

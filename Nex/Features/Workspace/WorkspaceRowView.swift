@@ -39,6 +39,7 @@ struct WorkspaceRowView: View {
     var labelStyles: [String: ResolvedLabelStyle] = [:]
 
     @Environment(\.chromeTheme) private var theme
+    @Environment(\.sidebarColorIntensity) private var colorIntensity
 
     /// Maximum chips rendered inline before collapsing into a `+N` more
     /// indicator. Three keeps rows visually compact in the narrow
@@ -106,11 +107,11 @@ struct WorkspaceRowView: View {
     /// running, blue = waiting) — matching the group header.
     private var avatar: some View {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(color.color.opacity(0.20))
+            .fill(color.color.opacity(min(1, 0.20 * colorIntensity)))
             .frame(width: 22, height: 22)
             .overlay(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(color.color.opacity(0.45), lineWidth: 1)
+                    .strokeBorder(color.color.opacity(min(1, 0.45 * colorIntensity)), lineWidth: 1)
             )
             .overlay(avatarContent)
             .overlay(alignment: .topTrailing) {
