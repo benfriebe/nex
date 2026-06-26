@@ -57,6 +57,9 @@ struct SettingsView: View {
             )
             .background(WindowResizabilityModifier())
             .background(chromeTheme.surfaceBackground)
+            // Match the app's header/footer tone on the Settings tab strip.
+            .toolbarBackground(chromeTheme.headerBackground, for: .windowToolbar)
+            .toolbarBackground(.visible, for: .windowToolbar)
             // Listen here too: the main WindowGroup (and ContentView's
             // observer) may be closed while the Settings scene stays
             // open. Without this, the dialog's "Don't ask again" tick
@@ -306,17 +309,11 @@ private struct AppearanceSettingsView: View {
             }
 
             Section("Sidebar") {
-                HStack {
-                    Text("Colour intensity")
-                    Slider(
-                        value: $store.sidebarColorIntensity.sending(\.setSidebarColorIntensity),
-                        in: 0.0 ... 2.0,
-                        step: 0.05
-                    )
-                    Text("\(Int(store.sidebarColorIntensity * 100))%")
-                        .monospacedDigit()
-                        .frame(width: 44, alignment: .trailing)
-                }
+                sliderRow(
+                    "Colour intensity",
+                    value: $store.sidebarColorIntensity.sending(\.setSidebarColorIntensity),
+                    in: 0.0 ... 2.0
+                )
                 Text("Scales how vivid the group bands and workspace avatars are.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -354,17 +351,11 @@ private struct AppearanceSettingsView: View {
                     )
                 }
 
-                HStack {
-                    Text("Background Opacity")
-                    Slider(
-                        value: $store.backgroundOpacity.sending(\.setBackgroundOpacity),
-                        in: 0.1 ... 1.0,
-                        step: 0.05
-                    )
-                    Text("\(Int(store.backgroundOpacity * 100))%")
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
-                }
+                sliderRow(
+                    "Background Opacity",
+                    value: $store.backgroundOpacity.sending(\.setBackgroundOpacity),
+                    in: 0.1 ... 1.0
+                )
             }
         }
         .formStyle(.grouped)
@@ -380,14 +371,21 @@ private struct AppearanceSettingsView: View {
     }
 
     private func opacityRow(_ label: String, _ param: SidebarStyleParam, _ value: Double) -> some View {
-        HStack {
+        sliderRow(
+            label,
+            value: Binding(get: { value }, set: { store.send(.setSidebarStyle(param, $0)) }),
+            in: 0.0 ... 1.0
+        )
+    }
+
+    /// Uniform slider row: fixed-width label + slider + fixed-width percent, so
+    /// every slider in the Appearance tab lines up and is the same length.
+    private func sliderRow(_ label: String, value: Binding<Double>, in range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 10) {
             Text(label)
-            Slider(
-                value: Binding(get: { value }, set: { store.send(.setSidebarStyle(param, $0)) }),
-                in: 0.0 ... 1.0,
-                step: 0.05
-            )
-            Text("\(Int(value * 100))%")
+                .frame(width: 140, alignment: .leading)
+            Slider(value: value, in: range, step: 0.05)
+            Text("\(Int((value.wrappedValue * 100).rounded()))%")
                 .monospacedDigit()
                 .frame(width: 44, alignment: .trailing)
         }
