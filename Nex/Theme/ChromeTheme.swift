@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Dedicated warm app-chrome palette, intentionally independent of the
@@ -75,6 +76,91 @@ struct ChromeTheme: Equatable {
         activeAgent: .hex(0xD3A329),
         groupBandOpacity: 0.22
     )
+
+    /// Returns a copy with the given user overrides layered on top of the
+    /// preset. The `accent` override also drives the selection stroke/fill and
+    /// the "awaiting input" status colour, since they're all the one highlight.
+    func applying(_ overrides: [ChromeColorKey: Color]) -> ChromeTheme {
+        guard !overrides.isEmpty else { return self }
+        let newAccent = overrides[.accent] ?? accent
+        return ChromeTheme(
+            windowBackground: overrides[.windowBackground] ?? windowBackground,
+            sidebarBackground: overrides[.sidebarBackground] ?? sidebarBackground,
+            surfaceBackground: overrides[.surfaceBackground] ?? surfaceBackground,
+            headerBackground: overrides[.headerBackground] ?? headerBackground,
+            footerBackground: overrides[.footerBackground] ?? footerBackground,
+            textPrimary: textPrimary,
+            textSecondary: textSecondary,
+            textTertiary: textTertiary,
+            divider: overrides[.divider] ?? divider,
+            selectionFill: overrides[.accent].map { $0.opacity(0.18) } ?? selectionFill,
+            selectionStroke: newAccent,
+            accent: newAccent,
+            statusRunning: statusRunning,
+            statusWaiting: overrides[.accent] ?? statusWaiting,
+            statusDone: statusDone,
+            activeAgent: activeAgent,
+            groupBandOpacity: groupBandOpacity
+        )
+    }
+
+    /// One-stop resolution used by both `RootChromeView` and `ChromeThemed`:
+    /// pick the preset for the (resolved) appearance, then layer the user's
+    /// per-appearance colour overrides from `SettingsFeature`.
+    static func resolve(
+        appearance: ChromeAppearance,
+        system: ColorScheme,
+        overrides: [String: String]
+    ) -> ChromeTheme {
+        let base = appearance.theme(system: system)
+        guard !overrides.isEmpty else { return base }
+        let concrete = appearance.concrete(system: system)
+        var parsed: [ChromeColorKey: Color] = [:]
+        for key in ChromeColorKey.allCases {
+            if let hex = overrides["\(concrete):\(key.rawValue)"], let color = Color(chromeHex: hex) {
+                parsed[key] = color
+            }
+        }
+        return base.applying(parsed)
+    }
+}
+
+/// The chrome colours a user can override in Settings → Appearance. Each maps
+/// to one (or, for `accent`, a small cluster of) `ChromeTheme` field(s).
+enum ChromeColorKey: String, CaseIterable, Identifiable {
+    case windowBackground
+    case sidebarBackground
+    case footerBackground
+    case headerBackground
+    case surfaceBackground
+    case accent
+    case divider
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .windowBackground: "Window gaps"
+        case .sidebarBackground: "Sidebar"
+        case .footerBackground: "Status bar / footer"
+        case .headerBackground: "Pane header / title bar"
+        case .surfaceBackground: "Surface (Settings, sheets, palette)"
+        case .accent: "Highlight (selection / focus)"
+        case .divider: "Dividers / borders"
+        }
+    }
+
+    func value(in theme: ChromeTheme) -> Color {
+        switch self {
+        case .windowBackground: theme.windowBackground
+        case .sidebarBackground: theme.sidebarBackground
+        case .footerBackground: theme.footerBackground
+        case .headerBackground: theme.headerBackground
+        case .surfaceBackground: theme.surfaceBackground
+        case .accent: theme.accent
+        case .divider: theme.divider
+        }
+    }
 }
 
 /// User preference for the chrome palette. `.system` follows the macOS
@@ -107,6 +193,16 @@ enum ChromeAppearance: String, CaseIterable, Equatable {
         case .light: .light
         case .dark: .dark
         case .system: system == .dark ? .dark : .light
+        }
+    }
+
+    /// The concrete light/dark bucket colour overrides are stored under, so a
+    /// custom colour only applies to the appearance it was picked for.
+    func concrete(system: ColorScheme) -> String {
+        switch self {
+        case .light: "light"
+        case .dark: "dark"
+        case .system: system == .dark ? "dark" : "light"
         }
     }
 }
@@ -142,6 +238,24 @@ extension Color {
             blue: Double(value & 0xFF) / 255.0,
             opacity: 1.0
         )
+    }
+
+    /// Parse a `"RRGGBB"` (or `"#RRGGBB"`) string into an opaque colour.
+    init?(chromeHex: String) {
+        var string = chromeHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if string.hasPrefix("#") { string.removeFirst() }
+        guard string.count == 6, let value = UInt32(string, radix: 16) else { return nil }
+        self = .hex(value)
+    }
+
+    /// Serialise to an uppercase `"RRGGBB"` string for persistence. Returns nil
+    /// only if the colour can't be expressed in sRGB.
+    var chromeHexString: String? {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let r = Int((c.redComponent * 255).rounded())
+        let g = Int((c.greenComponent * 255).rounded())
+        let b = Int((c.blueComponent * 255).rounded())
+        return String(format: "%02X%02X%02X", r, g, b)
     }
 }
 

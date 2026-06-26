@@ -21,8 +21,11 @@ struct RootChromeView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            let appearance = store.settings.chromeAppearance
-            let theme = appearance.theme(system: systemScheme)
+            let theme = ChromeTheme.resolve(
+                appearance: store.settings.chromeAppearance,
+                system: systemScheme,
+                overrides: store.settings.chromeColorOverrides
+            )
             ChromeThemed(store: store) {
                 ContentView(store: store)
                     .background {
@@ -55,7 +58,11 @@ struct ChromeThemed<Content: View>: View {
     var body: some View {
         WithPerceptionTracking {
             let appearance = store.settings.chromeAppearance
-            let theme = appearance.theme(system: systemScheme)
+            let theme = ChromeTheme.resolve(
+                appearance: appearance,
+                system: systemScheme,
+                overrides: store.settings.chromeColorOverrides
+            )
             content
                 .environment(\.chromeTheme, theme)
                 .preferredColorScheme(appearance.explicitScheme)

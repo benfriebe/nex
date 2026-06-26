@@ -265,6 +265,9 @@ private struct GeneralSettingsView: View {
 private struct AppearanceSettingsView: View {
     @Bindable var store: StoreOf<SettingsFeature>
     @Environment(\.chromeTheme) private var chromeTheme
+    /// Resolved scheme inside the (themed) Settings scene — tells us which
+    /// light/dark override bucket the colour pickers edit.
+    @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
         Form {
@@ -282,6 +285,24 @@ private struct AppearanceSettingsView: View {
                     + "Independent of the terminal theme below.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Chrome Colours") {
+                ForEach(ChromeColorKey.allCases) { key in
+                    ColorPicker(
+                        key.displayName,
+                        selection: chromeColorBinding(key),
+                        supportsOpacity: false
+                    )
+                }
+                HStack {
+                    Text("Editing the \(systemScheme == .dark ? "Dark" : "Light") palette — "
+                        + "switch Appearance above to edit the other.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reset") { store.send(.resetChromeColors) }
+                }
             }
 
             Section("Terminal") {
@@ -322,6 +343,21 @@ private struct AppearanceSettingsView: View {
         Binding(
             get: { store.selectedTheme },
             set: { store.send(.selectTheme($0)) }
+        )
+    }
+
+    /// Two-way binding for one customisable chrome colour. Reads the resolved
+    /// value (override or preset) and writes the override into the bucket for
+    /// the appearance currently shown.
+    private func chromeColorBinding(_ key: ChromeColorKey) -> Binding<Color> {
+        let storageKey = "\(systemScheme == .dark ? "dark" : "light"):\(key.rawValue)"
+        return Binding(
+            get: { key.value(in: chromeTheme) },
+            set: { newColor in
+                if let hex = newColor.chromeHexString {
+                    store.send(.setChromeColor(key: storageKey, hex: hex))
+                }
+            }
         )
     }
 

@@ -37,6 +37,9 @@ struct SettingsFeature {
         /// Warm app-chrome palette preference. Drives the sidebar / title bar /
         /// status bar appearance independently of the Ghostty terminal theme.
         var chromeAppearance: ChromeAppearance = .system
+        /// Per-appearance chrome colour overrides. Keyed `"<light|dark>:<key>"`
+        /// (see `ChromeColorKey`) → `"RRGGBB"`. Empty = use the presets.
+        var chromeColorOverrides: [String: String] = [:]
 
         /// The resolved absolute worktree base path. Expands ~ and substitutes
         /// the `<repo>` placeholder:
@@ -67,6 +70,8 @@ struct SettingsFeature {
         case setNewWorkspacePlacement(SidebarPlacement)
         case setConfirmQuitWhenActive(Bool)
         case setChromeAppearance(ChromeAppearance)
+        case setChromeColor(key: String, hex: String?)
+        case resetChromeColors
         case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
@@ -88,6 +93,7 @@ struct SettingsFeature {
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
+    static let defaultsKeyChromeColors = "settings.chromeColors"
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.userDefaults) var userDefaults
@@ -125,6 +131,11 @@ struct SettingsFeature {
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
                    let appearance = ChromeAppearance(rawValue: raw) {
                     state.chromeAppearance = appearance
+                }
+                if let json = userDefaults.stringForKey(Self.defaultsKeyChromeColors),
+                   let data = json.data(using: .utf8),
+                   let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+                    state.chromeColorOverrides = dict
                 }
                 if userDefaults.boolForKey(Self.defaultsKeyHasCustomColor) {
                     state.backgroundColorR = userDefaults.doubleForKey(Self.defaultsKeyColorR)
@@ -216,6 +227,25 @@ struct SettingsFeature {
                 // this must NOT rebuild the ghostty terminal config.
                 state.chromeAppearance = appearance
                 userDefaults.setString(appearance.rawValue, Self.defaultsKeyChromeAppearance)
+                return .none
+
+            case .setChromeColor(let key, let hex):
+                // Chrome-only, like setChromeAppearance: persist and let the
+                // chrome wrappers re-resolve. nil hex resets that one colour.
+                if let hex {
+                    state.chromeColorOverrides[key] = hex
+                } else {
+                    state.chromeColorOverrides.removeValue(forKey: key)
+                }
+                if let data = try? JSONEncoder().encode(state.chromeColorOverrides),
+                   let json = String(data: data, encoding: .utf8) {
+                    userDefaults.setString(json, Self.defaultsKeyChromeColors)
+                }
+                return .none
+
+            case .resetChromeColors:
+                state.chromeColorOverrides = [:]
+                userDefaults.setString("", Self.defaultsKeyChromeColors)
                 return .none
 
             case .refreshConfirmQuitWhenActive:
