@@ -22,6 +22,9 @@ struct ChromeStatusSummary: Equatable {
 struct StatusBarView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.chromeTheme) private var theme
+    /// View-layer system-stats poller; never dispatches into TCA.
+    @State private var statsSampler = SystemStatsSampler()
+    @State private var systemStats = SystemStats.zero
 
     var body: some View {
         WithPerceptionTracking {
@@ -38,6 +41,14 @@ struct StatusBarView: View {
             .frame(height: 24)
             .background(theme.footerBackground)
             .overlay(alignment: .top) { theme.divider.frame(height: 1) }
+            .onAppear {
+                if store.settings.showSystemStats { systemStats = statsSampler.sample() }
+            }
+            // 2s cadence: cheap host_statistics calls, smoother than 1s. The
+            // gate skips work entirely when the footer stats are disabled.
+            .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+                if store.settings.showSystemStats { systemStats = statsSampler.sample() }
+            }
         }
     }
 
@@ -94,6 +105,10 @@ struct StatusBarView: View {
 
     private func rightSection(_ summary: ChromeStatusSummary) -> some View {
         HStack(spacing: 8) {
+            if store.settings.showSystemStats {
+                statsSection(systemStats)
+                separator
+            }
             countItem(color: theme.statusRunning, value: summary.running, label: "running")
             separator
             countItem(color: theme.statusWaiting, value: summary.waiting, label: "waiting")
@@ -107,6 +122,36 @@ struct StatusBarView: View {
         }
         .lineLimit(1)
         .fixedSize()
+    }
+
+    /// CPU / memory / load triad. Each value is monospaced so it doesn't
+    /// jitter the layout as it ticks; the tooltip carries the precise numbers.
+    private func statsSection(_ stats: SystemStats) -> some View {
+        HStack(spacing: 8) {
+            statItem("cpu", "\(Int(stats.cpuPercent.rounded()))%")
+            statItem("memorychip", "\(Int(stats.memPercent.rounded()))%")
+            statItem("gauge.with.dots.needle.33percent", String(format: "%.2f", stats.loadAverage1m))
+        }
+        .help("CPU \(Int(stats.cpuPercent.rounded()))% · "
+            + "Memory \(memoryLabel(stats)) · "
+            + "Load \(String(format: "%.2f", stats.loadAverage1m))")
+    }
+
+    private func statItem(_ systemImage: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage).font(.system(size: 9))
+            Text(text).monospacedDigit()
+        }
+        .foregroundStyle(theme.textTertiary)
+    }
+
+    private func memoryLabel(_ stats: SystemStats) -> String {
+        let gib = 1_073_741_824.0
+        return String(
+            format: "%.1f / %.0f GB",
+            Double(stats.memUsedBytes) / gib,
+            Double(stats.memTotalBytes) / gib
+        )
     }
 
     private func countItem(color: Color, value: Int, label: String) -> some View {

@@ -42,6 +42,8 @@ struct SettingsFeature {
         var newGroupPlacement: SidebarPlacement = .endOfList
         var newWorkspacePlacement: SidebarPlacement = .endOfList
         var confirmQuitWhenActive: Bool = true
+        /// Show CPU / memory / load in the bottom status bar.
+        var showSystemStats: Bool = true
         /// Warm app-chrome palette preference. Drives the sidebar / title bar /
         /// status bar appearance independently of the Ghostty terminal theme.
         var chromeAppearance: ChromeAppearance = .system
@@ -86,6 +88,7 @@ struct SettingsFeature {
         case setNewGroupPlacement(SidebarPlacement)
         case setNewWorkspacePlacement(SidebarPlacement)
         case setConfirmQuitWhenActive(Bool)
+        case setShowSystemStats(Bool)
         case setChromeAppearance(ChromeAppearance)
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
@@ -111,6 +114,7 @@ struct SettingsFeature {
     static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
+    static let defaultsKeyShowSystemStats = "settings.showSystemStats"
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
     static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
@@ -151,6 +155,9 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyConfirmQuitWhenActive) {
                     state.confirmQuitWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmQuitWhenActive)
+                }
+                if userDefaults.hasKey(Self.defaultsKeyShowSystemStats) {
+                    state.showSystemStats = userDefaults.boolForKey(Self.defaultsKeyShowSystemStats)
                 }
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
                    let appearance = ChromeAppearance(rawValue: raw) {
@@ -258,6 +265,11 @@ struct SettingsFeature {
             case .setConfirmQuitWhenActive(let enabled):
                 state.confirmQuitWhenActive = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyConfirmQuitWhenActive)
+                return .none
+
+            case .setShowSystemStats(let enabled):
+                state.showSystemStats = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyShowSystemStats)
                 return .none
 
             case .setChromeAppearance(let appearance):

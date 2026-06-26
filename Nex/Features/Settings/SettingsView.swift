@@ -204,6 +204,16 @@ private struct GeneralSettingsView: View {
                     }
                 }
 
+                Section("Status bar") {
+                    Toggle("Show system stats (CPU / memory / load)", isOn: Binding(
+                        get: { settingsStore.showSystemStats },
+                        set: { settingsStore.send(.setShowSystemStats($0)) }
+                    ))
+                    Text("Show live system-wide CPU usage, memory used, and the 1-minute load average on the right of the bottom status bar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Quit") {
                     Toggle("Confirm before quitting", isOn: Binding(
                         get: { settingsStore.confirmQuitWhenActive },
