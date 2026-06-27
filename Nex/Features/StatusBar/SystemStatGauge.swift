@@ -93,10 +93,14 @@ struct SystemStatGauge: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: kind.systemImage).font(.system(size: 9))
-            Text(kind.compactLabel(stats))
-                .monospacedDigit()
-                .frame(width: kind.valueWidth, alignment: .leading)
+            // Right-align the icon+value cluster in a fixed slot: the value
+            // abuts the sparkline (no internal gap) and the slack falls before
+            // the icon, reading as inter-metric spacing rather than a gap.
+            HStack(spacing: 3) {
+                Image(systemName: kind.systemImage).font(.system(size: 9))
+                Text(kind.compactLabel(stats)).monospacedDigit()
+            }
+            .frame(width: kind.labelWidth, alignment: .trailing)
             if showGraph, history.count >= 2 {
                 Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor, style: graphStyle)
                     .frame(width: graphWidth, height: 11)

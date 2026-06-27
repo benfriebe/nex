@@ -65,13 +65,15 @@ enum SystemStatKind: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Fixed width reserved for the value label so the footer layout doesn't
-    /// shift as the digit count changes (e.g. "5%" → "100%", "0B/s" → "1.4M/s").
-    var valueWidth: CGFloat {
+    /// Fixed width for the icon+value cluster. The cluster is right-aligned in
+    /// this slot so the value always abuts its sparkline (no internal gap) and
+    /// the slack falls before the icon, reading as inter-metric spacing — while
+    /// the value's right edge (and everything after) stays static.
+    var labelWidth: CGFloat {
         switch self {
-        case .cpu, .memory, .diskSpace: 30 // "100%"
-        case .load: 40 // up to "999.99"
-        case .network, .diskIO: 58 // "1023.9K/s"
+        case .cpu, .memory, .diskSpace: 44 // icon + "100%"
+        case .load: 50 // icon + "99.99"
+        case .network, .diskIO: 60 // icon + "999M/s"
         }
     }
 
@@ -128,8 +130,25 @@ enum SystemStatsFormat {
         return i == 0 ? "\(Int(v))\(units[i])" : String(format: "%.1f%@", v, units[i])
     }
 
+    /// Compact rate, bounded to ~6 chars ("0B/s", "1.4M/s", "999M/s") so the
+    /// footer slot stays tight. Switches units at 1000 to avoid 4-digit values
+    /// and drops decimals as the magnitude grows.
     static func rate(_ bytesPerSec: Double) -> String {
-        "\(bytes(bytesPerSec))/s"
+        let units = ["B", "K", "M", "G", "T"]
+        var v = bytesPerSec
+        var i = 0
+        while v >= 1000, i < units.count - 1 {
+            v /= 1000
+            i += 1
+        }
+        let num = if i == 0 || v >= 100 {
+            "\(Int(v.rounded()))"
+        } else if v >= 10 {
+            String(format: "%.0f", v)
+        } else {
+            String(format: "%.1f", v)
+        }
+        return "\(num)\(units[i])/s"
     }
 }
 
