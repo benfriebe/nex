@@ -91,11 +91,9 @@ struct GroupHeaderRow: View {
         // 6pt vertical padding matches WorkspaceRowView so a group band is
         // the same height as a workspace row (both have a 22pt icon/avatar).
         .padding(.vertical, 6)
-        .padding(.horizontal, 12)
+        // 8pt inner inset matches WorkspaceRowView's internal horizontal pad.
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Rounded, inset band (pill) — matches the mockup. The 8pt outer
-        // inset keeps it clear of the sidebar edges; the list's trailing-8
-        // scroller padding then balances the right margin.
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(headerTint)
@@ -104,6 +102,9 @@ struct GroupHeaderRow: View {
                         .strokeBorder(headerStroke, lineWidth: 1)
                 )
         )
+        // 8pt outer leading stands in for the workspace row's call-site
+        // .padding(.horizontal, 8) (which the group entry doesn't get), so the
+        // band edge + icon line up with the workspace ring + avatar.
         .padding(.leading, 8)
         // Vertical breathing room between adjacent group bands.
         .padding(.vertical, 2)
