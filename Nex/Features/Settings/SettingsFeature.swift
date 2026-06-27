@@ -52,6 +52,8 @@ struct SettingsFeature {
         var sparklineColorHex: String = ""
         /// Inline sparkline width in points.
         var sparklineWidth: Double = 28
+        /// Sparkline render style (`SparklineStyle` rawValue: line / dots).
+        var sparklineStyle: String = "line"
         /// Warm app-chrome palette preference. Drives the sidebar / title bar /
         /// status bar appearance independently of the Ghostty terminal theme.
         var chromeAppearance: ChromeAppearance = .system
@@ -101,6 +103,7 @@ struct SettingsFeature {
         case setShowSystemStatGraphs(Bool)
         case setSparklineColor(String)
         case setSparklineWidth(Double)
+        case setSparklineStyle(String)
         case setChromeAppearance(ChromeAppearance)
         case setChromeColor(key: String, hex: String?)
         case resetChromeColors
@@ -131,6 +134,7 @@ struct SettingsFeature {
     static let defaultsKeyShowSystemStatGraphs = "settings.showSystemStatGraphs"
     static let defaultsKeySparklineColor = "settings.sparklineColor"
     static let defaultsKeySparklineWidth = "settings.sparklineWidth"
+    static let defaultsKeySparklineStyle = "settings.sparklineStyle"
     static let defaultsKeyChromeAppearance = "settings.chromeAppearance"
     static let defaultsKeyChromeColors = "settings.chromeColors"
     static let defaultsKeySidebarColorIntensity = "settings.sidebarColorIntensity"
@@ -186,6 +190,9 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeySparklineWidth) {
                     state.sparklineWidth = userDefaults.doubleForKey(Self.defaultsKeySparklineWidth)
+                }
+                if let style = userDefaults.stringForKey(Self.defaultsKeySparklineStyle), !style.isEmpty {
+                    state.sparklineStyle = style
                 }
                 if let raw = userDefaults.stringForKey(Self.defaultsKeyChromeAppearance),
                    let appearance = ChromeAppearance(rawValue: raw) {
@@ -325,6 +332,11 @@ struct SettingsFeature {
             case .setSparklineWidth(let width):
                 state.sparklineWidth = width
                 userDefaults.setDouble(width, Self.defaultsKeySparklineWidth)
+                return .none
+
+            case .setSparklineStyle(let style):
+                state.sparklineStyle = style
+                userDefaults.setString(style, Self.defaultsKeySparklineStyle)
                 return .none
 
             case .setChromeAppearance(let appearance):

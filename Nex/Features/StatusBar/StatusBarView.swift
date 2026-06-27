@@ -147,7 +147,8 @@ struct StatusBarView: View {
                         history: history[kind] ?? [],
                         showGraph: store.settings.showSystemStatGraphs,
                         graphColor: sparklineColor,
-                        graphWidth: CGFloat(store.settings.sparklineWidth)
+                        graphWidth: CGFloat(store.settings.sparklineWidth),
+                        graphStyle: SparklineStyle(rawValue: store.settings.sparklineStyle) ?? .line
                     )
                 }
                 separator

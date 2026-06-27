@@ -224,6 +224,14 @@ private struct GeneralSettingsView: View {
                                 get: { settingsStore.showSystemStatGraphs },
                                 set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
                             ))
+                            Picker("Graph style", selection: Binding(
+                                get: { SparklineStyle(rawValue: settingsStore.sparklineStyle) ?? .line },
+                                set: { settingsStore.send(.setSparklineStyle($0.rawValue)) }
+                            )) {
+                                ForEach(SparklineStyle.allCases) { style in
+                                    Text(style.displayName).tag(style)
+                                }
+                            }
                             ColorPicker("Graph colour", selection: Binding(
                                 get: { Color(chromeHex: settingsStore.sparklineColorHex) ?? chromeTheme.textSecondary },
                                 set: { if let hex = $0.chromeHexString { settingsStore.send(.setSparklineColor(hex)) } }
