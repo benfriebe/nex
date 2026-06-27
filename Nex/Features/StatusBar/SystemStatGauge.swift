@@ -94,7 +94,9 @@ struct SystemStatGauge: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: kind.systemImage).font(.system(size: 9))
-            Text(kind.compactLabel(stats)).monospacedDigit()
+            Text(kind.compactLabel(stats))
+                .monospacedDigit()
+                .frame(width: kind.valueWidth, alignment: .leading)
             if showGraph, history.count >= 2 {
                 Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor, style: graphStyle)
                     .frame(width: graphWidth, height: 11)

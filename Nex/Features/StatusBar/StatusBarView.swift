@@ -171,7 +171,12 @@ struct StatusBarView: View {
     private func countItem(color: Color, value: Int, label: String) -> some View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text("\(value) \(label)")
+            // Fixed-width count so the label (and everything after) doesn't
+            // shift when the number goes single → double digit.
+            Text("\(value)")
+                .monospacedDigit()
+                .frame(width: 14, alignment: .trailing)
+            Text(label)
         }
     }
 

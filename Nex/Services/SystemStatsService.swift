@@ -65,6 +65,16 @@ enum SystemStatKind: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Fixed width reserved for the value label so the footer layout doesn't
+    /// shift as the digit count changes (e.g. "5%" → "100%", "0B/s" → "1.4M/s").
+    var valueWidth: CGFloat {
+        switch self {
+        case .cpu, .memory, .diskSpace: 30 // "100%"
+        case .load: 40 // up to "999.99"
+        case .network, .diskIO: 58 // "1023.9K/s"
+        }
+    }
+
     /// The scalar plotted in the sparkline / history.
     func scalar(_ s: SystemStats) -> Double {
         switch self {
