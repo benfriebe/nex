@@ -15,6 +15,7 @@ import SwiftUI
 struct WindowTitleBar: View {
     let store: StoreOf<AppReducer>
     @Environment(\.chromeTheme) private var theme
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         WithPerceptionTracking {
@@ -81,10 +82,12 @@ struct WindowTitleBar: View {
             Spacer()
 
             Menu {
-                Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
+                Button("Settings…") { openSettings() }
                 Button(store.isInspectorVisible ? "Hide Inspector" : "Show Inspector") {
                     store.send(.toggleInspector)
                 }
+                Divider()
+                Button("Restart Socket Server") { store.send(.restartSocketServer) }
             } label: {
                 Image(systemName: "ellipsis")
             }

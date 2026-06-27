@@ -612,6 +612,7 @@ struct AppReducer {
         case setFocusFollowsMouseDelay(Int)
         case setTCPPort(Int)
         case tcpPortStartFailed(Int)
+        case restartSocketServer
 
         // Global Hotkey
         case setGlobalHotkey(KeyTrigger?)
@@ -4429,6 +4430,18 @@ struct AppReducer {
                         value: "\(delay)",
                         inFile: path
                     )
+                }
+
+            case .restartSocketServer:
+                // Tear down and rebind the Unix socket (clears /tmp/nex.sock
+                // and any wedged client FDs); bring TCP back if configured.
+                // onMessage is a singleton property, so it survives the cycle.
+                return .run { [tcpPort = state.tcpPort] _ in
+                    socketServer.stop()
+                    socketServer.start()
+                    if tcpPort > 0 {
+                        _ = socketServer.startTCP(port: tcpPort)
+                    }
                 }
 
             case .setTCPPort(let port):
