@@ -5,7 +5,6 @@ import SwiftUI
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.openSettings) private var openSettings
-    @Environment(\.colorScheme) private var systemScheme
     @Environment(\.chromeTheme) private var chromeTheme
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
@@ -586,16 +585,6 @@ struct WorkspaceListView: View {
         return ids
     }
 
-    /// True when the resolved chrome appearance is currently dark — drives the
-    /// sun/moon glyph and which scheme the quick-toggle flips to.
-    private var isChromeDark: Bool {
-        switch store.settings.chromeAppearance {
-        case .dark: true
-        case .light: false
-        case .system: systemScheme == .dark
-        }
-    }
-
     private var filterField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -638,21 +627,6 @@ struct WorkspaceListView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar.filter.clear")
             }
-
-            // Quick light/dark toggle for the warm chrome palette. Flips to the
-            // opposite explicit scheme; the tri-state (incl. System) lives in
-            // Settings → Appearance. Button only — no keybinding, so no
-            // KeyBindingMap collision.
-            Button {
-                store.send(.settings(.setChromeAppearance(isChromeDark ? .light : .dark)))
-            } label: {
-                Image(systemName: isChromeDark ? "moon.fill" : "sun.max.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(chromeTheme.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle light / dark chrome")
-            .accessibilityIdentifier("sidebar.appearance.toggle")
         }
         // Inner padding → the rounded "pill" fill; outer padding → the margin
         // between the pill and the sidebar edges (matches the mockup).
