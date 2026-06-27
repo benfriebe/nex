@@ -69,21 +69,16 @@ struct WindowTitleBar: View {
         .lineLimit(1)
         .truncationMode(.tail)
         // Asymmetric insets: clear the traffic lights on the left (80) and
-        // reserve room for the trailing controls on the right (110) so a long
-        // name + branch truncates instead of overlapping the record / menu /
-        // sidebar buttons on a narrow window.
+        // reserve room for the trailing controls on the right (86) so a long
+        // name + branch truncates instead of overlapping the menu / sidebar
+        // buttons on a narrow window.
         .padding(.leading, 80)
-        .padding(.trailing, 110)
+        .padding(.trailing, 86)
     }
 
     private var trailingControls: some View {
         HStack(spacing: 14) {
             Spacer()
-
-            // Record is a visual stub (no capture backend yet).
-            Image(systemName: "record.circle")
-                .foregroundStyle(theme.textTertiary)
-                .help("Recording — coming soon")
 
             Menu {
                 Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
