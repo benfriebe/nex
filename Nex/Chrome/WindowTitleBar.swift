@@ -33,7 +33,10 @@ struct WindowTitleBar: View {
                 trailingControls
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 38)
+            // 32pt centres the title bar on the macOS traffic lights' fixed
+            // vertical position (~16pt from the window top), so they sit
+            // vertically centred in the bar.
+            .frame(height: 32)
             .overlay(alignment: .bottom) {
                 theme.divider.frame(height: 1)
             }
