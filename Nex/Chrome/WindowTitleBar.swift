@@ -94,6 +94,9 @@ struct WindowTitleBar: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            // borderlessButton tints its label with the accent; force it to the
+            // neutral text colour so the ••• matches the other title-bar controls.
+            .tint(theme.textSecondary)
             .foregroundStyle(theme.textSecondary)
 
             Button { store.send(.toggleSidebar) } label: {
