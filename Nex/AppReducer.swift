@@ -62,6 +62,13 @@ struct AppReducer {
         /// text matches a preset name.
         var labelPresets: [LabelPreset] = []
 
+        /// One-time label→preset migration runs once both the workspaces and
+        /// the (UserDefaults) presets have loaded — they load concurrently, so
+        /// each completion sets its flag and triggers the migration when both
+        /// are ready.
+        var didRestoreWorkspaces = false
+        var didLoadLabelPresets = false
+
         /// Color for a workspace label string, or nil when no preset
         /// matches (chip renders in the neutral free-form style). Match is
         /// exact and case-sensitive, mirroring how `addLabel` stores
@@ -554,6 +561,10 @@ struct AppReducer {
         // MARK: - Label presets
 
         case labelPresetsLoaded([LabelPreset])
+        /// Back-fill a preset (default colour) for every existing workspace
+        /// label that predates the presets feature, so they survive being
+        /// unapplied. Runs once both workspaces + presets have loaded.
+        case migrateLabelsToPresets
         /// Add a preset. Name is normalized (trim/clamp); empty or a
         /// case-sensitive duplicate name is ignored.
         case addLabelPreset(name: String, color: LabelColor)
@@ -3984,6 +3995,7 @@ struct AppReducer {
                 state.groups = groups
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
                 state.repoRegistry = repoRegistry
+                state.didRestoreWorkspaces = true
 
                 // Use persisted topLevelOrder if present; otherwise synthesize
                 // from the flat workspaces list (legacy DBs predate groups).
@@ -4071,6 +4083,7 @@ struct AppReducer {
                         },
                         .send(.refreshGitStatus),
                         .send(.startGitStatusTimer),
+                        .send(.migrateLabelsToPresets),
                         .send(.graft(.onAppLaunched(parentRepoRoots: parentRepoRoots)))
                     ] + watcherSeeds
                 )
@@ -4297,7 +4310,24 @@ struct AppReducer {
 
             case .labelPresetsLoaded(let list):
                 state.labelPresets = list
-                return .none
+                state.didLoadLabelPresets = true
+                return .send(.migrateLabelsToPresets)
+
+            case .migrateLabelsToPresets:
+                // Only once both halves have loaded (they load concurrently).
+                guard state.didRestoreWorkspaces, state.didLoadLabelPresets else { return .none }
+                var seen = Set(state.labelPresets.map(\.name))
+                var added: [LabelPreset] = []
+                for workspace in state.workspaces {
+                    for label in workspace.labels where !seen.contains(label) {
+                        seen.insert(label)
+                        // Default colour; the user can recolour it in Settings.
+                        added.append(LabelPreset(name: label, color: .named(.gray)))
+                    }
+                }
+                guard !added.isEmpty else { return .none }
+                state.labelPresets.append(contentsOf: added)
+                return persistLabelPresets(state.labelPresets)
 
             case .addLabelPreset(let name, let color):
                 let normalized = WorkspaceFeature.normalizeLabel(name)
