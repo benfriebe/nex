@@ -9,7 +9,7 @@ struct SplitDividerInfo: Identifiable {
 }
 
 indirect enum PaneLayout: Equatable, Codable {
-    static let dividerThickness: CGFloat = 4
+    static let dividerThickness: CGFloat = 2
     case leaf(UUID)
     case split(SplitDirection, ratio: Double, first: PaneLayout, second: PaneLayout)
     case empty

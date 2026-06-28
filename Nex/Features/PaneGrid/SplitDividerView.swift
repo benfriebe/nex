@@ -19,8 +19,8 @@ struct SplitDividerView: View {
             .fill(chromeTheme.divider)
             .overlay(isDragging ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.2))
             .frame(
-                width: isHorizontal ? 4 : nil,
-                height: isHorizontal ? nil : 4
+                width: isHorizontal ? PaneLayout.dividerThickness : nil,
+                height: isHorizontal ? nil : PaneLayout.dividerThickness
             )
             .contentShape(Rectangle().inset(by: -4))
             .onHover { hovering in
