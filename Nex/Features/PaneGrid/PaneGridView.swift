@@ -336,8 +336,10 @@ struct PaneGridView: View {
         }
         .overlay {
             if pane.id == focusedPaneID {
+                // Full highlight around the focused pane (header + body), in the
+                // dedicated pane-focus colour (separate from the sidebar accent).
                 Rectangle()
-                    .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(chromeTheme.paneFocus, lineWidth: 2)
             }
         }
         .overlay {

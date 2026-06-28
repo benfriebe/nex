@@ -24,6 +24,9 @@ struct ChromeTheme: Equatable {
     let selectionFill: Color
     let selectionStroke: Color
     let accent: Color
+    /// Border drawn around the focused pane. Separate from the sidebar
+    /// highlight (`accent`) so the two can be themed independently.
+    let paneFocus: Color
     // Semantic status (chrome-specific; not the system .green/.blue used before)
     let statusRunning: Color
     let statusWaiting: Color
@@ -50,6 +53,7 @@ struct ChromeTheme: Equatable {
         selectionFill: Color.hex(0x5E8AC4).opacity(0.16),
         selectionStroke: .hex(0x5E8AC4),
         accent: .hex(0x5E8AC4),
+        paneFocus: .hex(0x5E8AC4),
         statusRunning: .hex(0x4FA46B),
         statusWaiting: .hex(0x5E8AC4),
         statusDone: .hex(0x9A9A96),
@@ -70,6 +74,7 @@ struct ChromeTheme: Equatable {
         selectionFill: Color.hex(0x5276B8).opacity(0.24),
         selectionStroke: .hex(0x5276B8),
         accent: .hex(0x6F9BD8),
+        paneFocus: .hex(0x6F9BD8),
         statusRunning: .hex(0x5FBE89),
         statusWaiting: .hex(0x6F9BD8),
         statusDone: .hex(0x8A8A92),
@@ -96,6 +101,7 @@ struct ChromeTheme: Equatable {
             selectionFill: overrides[.accent].map { $0.opacity(0.18) } ?? selectionFill,
             selectionStroke: newAccent,
             accent: newAccent,
+            paneFocus: overrides[.paneFocus] ?? paneFocus,
             statusRunning: statusRunning,
             statusWaiting: overrides[.accent] ?? statusWaiting,
             statusDone: statusDone,
@@ -134,6 +140,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
     case headerBackground
     case surfaceBackground
     case accent
+    case paneFocus
     case divider
 
     var id: String { rawValue }
@@ -145,7 +152,8 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .footerBackground: "Status bar / footer"
         case .headerBackground: "Pane header / title bar"
         case .surfaceBackground: "Surface (Settings, sheets, palette)"
-        case .accent: "Highlight (selection / focus)"
+        case .accent: "Sidebar highlight"
+        case .paneFocus: "Pane focus"
         case .divider: "Dividers / borders"
         }
     }
@@ -158,6 +166,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .headerBackground: theme.headerBackground
         case .surfaceBackground: theme.surfaceBackground
         case .accent: theme.accent
+        case .paneFocus: theme.paneFocus
         case .divider: theme.divider
         }
     }

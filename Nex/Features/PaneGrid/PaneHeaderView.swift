@@ -261,16 +261,12 @@ struct PaneHeaderView: View {
                     onDragEnded?()
                 }
         )
-        // Keep the header at the flat header tone (no focus tint), so it
-        // renders exactly the spec'd colour; focus is shown by the accent
-        // underline below.
+        // Flat header tone with just the structural divider; focus is shown by
+        // the full pane-focus border (drawn around the whole pane in
+        // PaneGridView), not a header underline.
         .background(theme.headerBackground)
         .overlay(alignment: .bottom) {
             theme.divider.frame(height: 1)
-            if isFocused {
-                theme.selectionStroke.opacity(0.7)
-                    .frame(height: 2)
-            }
         }
     }
 
