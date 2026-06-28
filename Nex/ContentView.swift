@@ -238,6 +238,9 @@ struct ContentView: View {
                         WorkspaceInspectorView(store: store)
                     }
                 }
+                // Clip the content row to its own bounds so full-height pane
+                // dividers can't draw up into the title bar above it.
+                .clipped()
                 .environment(
                     \.sidebarTextEditingActive,
                     store.renamingGroupID != nil || store.renamingWorkspaceID != nil
