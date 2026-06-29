@@ -17,6 +17,9 @@ struct LabelMigrationTests {
     private func store(_ state: AppReducer.State) -> TestStoreOf<AppReducer> {
         let store = TestStore(initialState: state) { AppReducer() } withDependencies: {
             $0.surfaceManager = SurfaceManager()
+            // Isolated so the one-shot migration flag starts unset per test (the
+            // shared testValue dict otherwise leaks the flag across tests).
+            $0.userDefaults = .ephemeral()
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
         return store

@@ -4317,6 +4317,13 @@ struct AppReducer {
             case .migrateLabelsToPresets:
                 // Only once both halves have loaded (they load concurrently).
                 guard state.didRestoreWorkspaces, state.didLoadLabelPresets else { return .none }
+                // One-shot: a back-fill that ran every launch would resurrect a
+                // preset the user later deletes (its label can still be applied
+                // to a workspace), reverting their delete + custom colour.
+                guard !userDefaults.boolForKey(LabelPresetsStorage.migratedKey) else { return .none }
+                let markMigrated = Effect<Action>.run { _ in
+                    userDefaults.setBool(true, LabelPresetsStorage.migratedKey)
+                }
                 var seen = Set(state.labelPresets.map(\.name))
                 var added: [LabelPreset] = []
                 for workspace in state.workspaces {
@@ -4326,9 +4333,9 @@ struct AppReducer {
                         added.append(LabelPreset(name: label, color: .named(.gray)))
                     }
                 }
-                guard !added.isEmpty else { return .none }
+                guard !added.isEmpty else { return markMigrated }
                 state.labelPresets.append(contentsOf: added)
-                return persistLabelPresets(state.labelPresets)
+                return .merge(persistLabelPresets(state.labelPresets), markMigrated)
 
             case .addLabelPreset(let name, let color):
                 let normalized = WorkspaceFeature.normalizeLabel(name)

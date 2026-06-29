@@ -115,6 +115,10 @@ extension [LabelPreset] {
 /// GRDB entity graph.
 enum LabelPresetsStorage {
     static let defaultsKey = "settings.labelPresets"
+    /// One-shot marker for the legacy-label → preset back-fill. Once set, the
+    /// migration never runs again, so a preset the user later deletes is not
+    /// resurrected just because a workspace still carries that label.
+    static let migratedKey = "settings.labelPresets.migrated"
 
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
