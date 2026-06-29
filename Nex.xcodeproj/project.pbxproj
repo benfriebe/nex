@@ -148,6 +148,7 @@
 		CCBCDD690DA8A082B0C3D1EF /* StatusBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */; };
 		CF6DEC598C1A3508555E8EB3 /* LabelPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D6C6671997547A9F95AD39 /* LabelPresetTests.swift */; };
 		D0B97CB294CE96D259C08960 /* GraftCLIReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */; };
+		D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8AC09DCB2726BE14209A6AD /* BuiltInChromeThemes.swift */; };
 		D5E5F5395113992874C7D4D7 /* RootChromeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6762B22A5CA7CC5867025DA2 /* RootChromeView.swift */; };
 		D9A2EC37D7FABEAFE48E109A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DB65E3CCBB3A287C413A6015 /* Foundation.framework */; };
 		DA4AC555E9C3FC84061F2FB9 /* PaneFocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD9BCE4ABC267C7E34EAF09 /* PaneFocusView.swift */; };
@@ -382,6 +383,7 @@
 		F5CE8D708EEECA4A82BE0AC1 /* PaneCloseReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneCloseReplyTests.swift; sourceTree = "<group>"; };
 		F7AC7FA0FAA2F922FF783A82 /* ActuatorTestHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActuatorTestHost.swift; sourceTree = "<group>"; };
 		F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListView.swift; sourceTree = "<group>"; };
+		F8AC09DCB2726BE14209A6AD /* BuiltInChromeThemes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInChromeThemes.swift; sourceTree = "<group>"; };
 		F90FF9C2E7F0BC50E51C47DE /* RepoRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryView.swift; sourceTree = "<group>"; };
 		F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneListTests.swift; sourceTree = "<group>"; };
@@ -772,6 +774,7 @@
 		F095B23294C4398DA905D114 /* Theme */ = {
 			isa = PBXGroup;
 			children = (
+				F8AC09DCB2726BE14209A6AD /* BuiltInChromeThemes.swift */,
 				C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */,
 				483277A20C203022712FB04D /* ChromeTheme.swift */,
 			);
@@ -981,6 +984,7 @@
 				759B67A4E8D35868EC6E2295 /* AppActivation.swift in Sources */,
 				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
+				D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */,
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,
 				B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */,
 				65FD103A31E7591016424457 /* ChromeStyleTheme.swift in Sources */,

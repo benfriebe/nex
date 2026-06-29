@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Foundation
 @testable import Nex
+import SwiftUI
 import Testing
 
 @MainActor
@@ -156,6 +157,56 @@ struct ChromeStyleThemeTests {
             #expect(state.sparklineColorHex == "00FF99")
             #expect(state.sparklineWidth == 40)
             #expect(state.sparklineStyle == "dots")
+        }
+    }
+
+    // MARK: - Built-in preset themes
+
+    @Test func atLeastFivePresetsExistWithUniqueNames() {
+        #expect(BuiltInChromeTheme.all.count >= 5)
+        let names = BuiltInChromeTheme.all.map(\.name)
+        #expect(Set(names).count == names.count)
+    }
+
+    @Test func everyPresetColourParsesAndUsesItsNativeBucket() {
+        for preset in BuiltInChromeTheme.all {
+            let bucket = preset.appearance == .light ? "light" : "dark"
+            let overrides = preset.styleTheme.colorOverrides
+            // One entry per ChromeColorKey, all in the native bucket, all valid hex.
+            #expect(overrides.count == ChromeColorKey.allCases.count)
+            for (key, hex) in overrides {
+                #expect(key.hasPrefix("\(bucket):"), "\(preset.name) key \(key) wrong bucket")
+                #expect(Color(chromeHex: hex) != nil, "\(preset.name) bad hex \(hex)")
+            }
+            // The sparkline picks up the accent.
+            #expect(preset.styleTheme.sparklineColorHex == preset.palette.accent)
+        }
+    }
+
+    @Test func presetKeysCoverEveryChromeColorKey() {
+        for preset in BuiltInChromeTheme.all {
+            let bucket = preset.appearance == .light ? "light" : "dark"
+            let keys = Set(preset.styleTheme.colorOverrides.keys)
+            for colorKey in ChromeColorKey.allCases {
+                #expect(keys.contains("\(bucket):\(colorKey.rawValue)"),
+                        "\(preset.name) missing \(colorKey.rawValue)")
+            }
+        }
+    }
+
+    @Test func applyingDraculaWritesItsDarkPalette() async throws {
+        let dracula = try #require(BuiltInChromeTheme.all.first { $0.name == "Dracula" })
+        let store = TestStore(initialState: SettingsFeature.State()) {
+            SettingsFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.applyStyleTheme(dracula.styleTheme)) { state in
+            #expect(state.chromeColorOverrides["dark:accent"] == "BD93F9")
+            #expect(state.chromeColorOverrides["dark:sidebarBackground"] == "282A36")
+            #expect(state.sparklineColorHex == "BD93F9")
         }
     }
 

@@ -325,9 +325,26 @@ private struct AppearanceSettingsView: View {
     /// Transient feedback for the Theme export/import/copy/paste actions.
     @State private var themeStatus: String?
 
+    private let presetColumns = [GridItem(.adaptive(minimum: 132), spacing: 10)]
+
     var body: some View {
         Form {
-            Section("Theme") {
+            Section("Preset Themes") {
+                LazyVGrid(columns: presetColumns, spacing: 12) {
+                    ForEach(BuiltInChromeTheme.all) { preset in
+                        presetCell(preset)
+                    }
+                }
+                .padding(.vertical, 4)
+                Text("One-click chrome palettes based on popular editor themes. Each "
+                    + "recolours the sidebar, title bar, status bar and agent dots, and "
+                    + "switches Light/Dark to suit. Your terminal theme is unchanged; "
+                    + "tweak any colour below afterwards.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Save & Share") {
                 HStack {
                     Button("Export…") { exportTheme() }
                     Button("Import…") { importTheme() }
@@ -516,6 +533,32 @@ private struct AppearanceSettingsView: View {
         )
     }
 
+    // MARK: - Preset themes
+
+    private func presetCell(_ preset: BuiltInChromeTheme) -> some View {
+        Button {
+            applyPreset(preset)
+        } label: {
+            VStack(spacing: 5) {
+                ThemeSwatch(palette: preset.palette)
+                Text(preset.name)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Apply the \(preset.name) theme (\(preset.appearance.displayName))")
+    }
+
+    private func applyPreset(_ preset: BuiltInChromeTheme) {
+        // Switch to the palette's native mode, then overwrite the styling.
+        store.send(.setChromeAppearance(preset.appearance))
+        store.send(.applyStyleTheme(preset.styleTheme))
+        themeStatus = "Applied \u{201C}\(preset.name)\u{201D} (\(preset.appearance.displayName))."
+    }
+
     // MARK: - Theme export / import
 
     /// The chrome styling currently in settings, captured into a shareable theme.
@@ -584,6 +627,56 @@ private struct AppearanceSettingsView: View {
         } catch {
             themeStatus = "That clipboard text isn't a Nex theme."
         }
+    }
+}
+
+/// A compact mock of the chrome — sidebar strip, header bar and three agent
+/// status dots — painted in a preset's palette, so the gallery previews how a
+/// theme actually looks before it's applied.
+private struct ThemeSwatch: View {
+    let palette: ChromePalette
+
+    private func color(_ hex: String) -> Color {
+        Color(chromeHex: hex) ?? .gray
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Sidebar: an accent pill + two muted "rows".
+            VStack(alignment: .leading, spacing: 4) {
+                Capsule().fill(color(palette.accent)).frame(width: 18, height: 4)
+                Capsule().fill(color(palette.divider)).frame(width: 13, height: 3)
+                Capsule().fill(color(palette.divider)).frame(width: 15, height: 3)
+                Spacer(minLength: 0)
+            }
+            .padding(6)
+            .frame(width: 38, alignment: .topLeading)
+            .frame(maxHeight: .infinity)
+            .background(color(palette.sidebarBackground))
+
+            // Main: a header strip over the surface, with three status dots.
+            VStack(spacing: 0) {
+                Rectangle().fill(color(palette.headerBackground)).frame(height: 10)
+                HStack(spacing: 4) {
+                    Circle().fill(color(palette.statusRunning)).frame(width: 5, height: 5)
+                    Circle().fill(color(palette.statusWaiting)).frame(width: 5, height: 5)
+                    Circle().fill(color(palette.statusInactive)).frame(width: 5, height: 5)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 5)
+                .padding(.top, 5)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(color(palette.surfaceBackground))
+        }
+        .frame(height: 46)
+        .background(color(palette.windowBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(color(palette.divider), lineWidth: 1)
+        )
     }
 }
 
