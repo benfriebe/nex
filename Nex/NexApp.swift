@@ -11,6 +11,12 @@ struct NexApp: App {
     }
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
+    // Holds the loaded ghostty config so the `\.ghosttyConfig` environment
+    // reflects the real terminal background once it's read in `.onAppear`.
+    // Injecting `.liveValue` directly captured the pre-load default
+    // (windowBackgroundColor), so markdown / scratchpad / diff panes rendered a
+    // different background from the terminal surfaces.
+    @State private var ghosttyConfig = GhosttyConfigClient()
     @StateObject private var updaterViewModel = UpdaterViewModel(
         startUpdater: !NexApp.isTestMode
     )
@@ -29,7 +35,7 @@ struct NexApp: App {
             RootChromeView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
-                .environment(\.ghosttyConfig, .liveValue)
+                .environment(\.ghosttyConfig, ghosttyConfig)
                 .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
                 .frame(minWidth: 600, minHeight: 400)
@@ -98,6 +104,9 @@ struct NexApp: App {
                     }
 
                     GhosttyConfigClient.liveValue = config
+                    // Drive the environment so the pane views (markdown /
+                    // scratchpad / diff) pick up the real terminal background.
+                    ghosttyConfig = config
 
                     if let window = NSApp.windows.first {
                         if config.backgroundOpacity < 1 {
