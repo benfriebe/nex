@@ -39,6 +39,12 @@ struct NexApp: App {
                 .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
                 .frame(minWidth: 600, minHeight: 400)
+                // An appearance change updates `liveValue` and posts this; mirror
+                // it into @State so the env re-injects and the non-terminal panes
+                // pick up the new terminal background live.
+                .onReceive(NotificationCenter.default.publisher(for: GhosttyConfigClient.changedNotification)) { _ in
+                    ghosttyConfig = .liveValue
+                }
                 .onAppear {
                     guard !Self.isTestMode else { return }
 

@@ -10,6 +10,11 @@ struct GhosttyConfigClient: @unchecked Sendable {
     var backgroundOpacity: Double = 1.0
     var backgroundColor: NSColor = .windowBackgroundColor
 
+    /// Posted after `liveValue` changes (e.g. an appearance change) so the
+    /// SwiftUI `\.ghosttyConfig` environment can be re-injected and the
+    /// non-terminal panes pick up the new background live.
+    static let changedNotification = Notification.Name("nex.ghosttyConfigChanged")
+
     /// Build from the live ghostty config. Call on main actor after `GhosttyApp.shared.start()`.
     @MainActor
     static func load() -> GhosttyConfigClient {

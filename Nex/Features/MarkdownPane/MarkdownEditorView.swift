@@ -26,9 +26,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.usesFindBar = true
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textColor = NSColor.textColor
+        let fg = Self.foreground(for: backgroundColor)
+        textView.textColor = fg
         textView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
-        textView.insertionPointColor = NSColor.textColor
+        textView.insertionPointColor = fg
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -79,6 +80,18 @@ struct MarkdownEditorView: NSViewRepresentable {
             context.coordinator.filePath = filePath
             context.coordinator.loadFile()
         }
+        // Re-apply the terminal background (+ contrasting text) live on an
+        // appearance change.
+        if let textView = context.coordinator.textView {
+            let bg = backgroundColor.withAlphaComponent(backgroundOpacity)
+            if textView.backgroundColor != bg {
+                textView.backgroundColor = bg
+                context.coordinator.scrollView?.backgroundColor = bg
+                let fg = Self.foreground(for: backgroundColor)
+                textView.textColor = fg
+                textView.insertionPointColor = fg
+            }
+        }
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
         // palette's TextField) don't yank first responder back.
@@ -106,6 +119,17 @@ struct MarkdownEditorView: NSViewRepresentable {
     private func releaseFirstResponderIfHeld(_ textView: NSTextView) {
         guard let window = textView.window, window.firstResponder === textView else { return }
         window.makeFirstResponder(nil)
+    }
+
+    /// Readable text colour for the given background: light text on a dark
+    /// background, dark text on a light one (luminance-based, mirroring the
+    /// scratchpad editor and the markdown/diff HTML renderers).
+    private static func foreground(for background: NSColor) -> NSColor {
+        let rgb = background.usingColorSpace(.deviceRGB) ?? background
+        let luminance = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luminance < 0.5
+            ? NSColor(white: 0.90, alpha: 1)
+            : NSColor(white: 0.12, alpha: 1)
     }
 
     // MARK: - Coordinator

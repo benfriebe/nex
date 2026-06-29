@@ -71,6 +71,10 @@ struct DiffPaneView: NSViewRepresentable {
         let tokenBumped = coord.lastRefreshToken != refreshToken
         let focusGained = isFocused && !coord.lastIsFocused
         let fontChanged = coord.fontSize != fontSize
+        // Compare before overwriting: the background is baked into the HTML/CSS,
+        // so an appearance change needs a re-render to match the terminal live.
+        let bgChanged = coord.backgroundColor != backgroundColor
+            || coord.backgroundOpacity != backgroundOpacity
 
         coord.repoPath = repoPath
         coord.targetPath = targetPath
@@ -81,7 +85,7 @@ struct DiffPaneView: NSViewRepresentable {
         if pathChanged || tokenBumped || focusGained {
             coord.lastRefreshToken = refreshToken
             coord.loadDiff()
-        } else if fontChanged {
+        } else if fontChanged || bgChanged {
             coord.renderCurrent()
         }
 

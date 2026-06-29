@@ -461,6 +461,9 @@ struct SettingsFeature {
                         // Read resolved background from ghostty (correct for both theme and custom).
                         GhosttyConfigClient.liveValue.backgroundOpacity = opacity
                         GhosttyConfigClient.liveValue.backgroundColor = newConfig.backgroundColor
+                        // Let the SwiftUI environment re-inject so the markdown /
+                        // scratchpad / diff panes pick up the new background live.
+                        NotificationCenter.default.post(name: GhosttyConfigClient.changedNotification, object: nil)
 
                         // Update window compositing
                         if let window = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
