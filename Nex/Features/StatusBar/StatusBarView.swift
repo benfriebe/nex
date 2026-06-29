@@ -102,6 +102,10 @@ struct StatusBarView: View {
                     .foregroundStyle(theme.textTertiary)
                 }
 
+                if let stats = gitStats(for: pane) {
+                    gitStatsLabel(stats)
+                }
+
                 if pane.agentSessionID != nil {
                     agentSection(pane)
                 }
@@ -110,6 +114,45 @@ struct StatusBarView: View {
             // the right-hand counts off-screen on a narrow window.
             .lineLimit(1)
         }
+    }
+
+    /// Working-tree diff stats for the focused pane's repo, mirroring the
+    /// sidebar inspector's `doc N +A -B`. The pane carries no association id, so
+    /// match its cwd to the repo association whose worktree path it sits in
+    /// (longest prefix wins for nested/multi-repo workspaces). `nil` when the
+    /// pane isn't inside a tracked worktree, or its tree is clean.
+    private func gitStats(for pane: Pane) -> (files: Int, adds: Int, dels: Int)? {
+        guard let workspace = store.activeWorkspace else { return nil }
+        let cwd = pane.workingDirectory
+        let match = workspace.repoAssociations
+            .filter { cwd == $0.worktreePath || cwd.hasPrefix($0.worktreePath + "/") }
+            .max { $0.worktreePath.count < $1.worktreePath.count }
+        guard let assoc = match,
+              case .dirty(let files, let adds, let dels) = store.gitStatuses[assoc.id] ?? .unknown
+        else { return nil }
+        return (files, adds, dels)
+    }
+
+    @ViewBuilder
+    private func gitStatsLabel(_ stats: (files: Int, adds: Int, dels: Int)) -> some View {
+        HStack(spacing: 4) {
+            HStack(spacing: 2) {
+                Image(systemName: "doc").font(.system(size: 9))
+                Text("\(stats.files)")
+            }
+            .foregroundStyle(theme.textTertiary)
+            if stats.adds > 0 {
+                Text("+\(stats.adds)").foregroundStyle(.green)
+            }
+            if stats.dels > 0 {
+                Text("-\(stats.dels)").foregroundStyle(.red)
+            }
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .accessibilityLabel(
+            "\(stats.files) file\(stats.files == 1 ? "" : "s") changed, "
+                + "\(stats.adds) added, \(stats.dels) removed"
+        )
     }
 
     @ViewBuilder
