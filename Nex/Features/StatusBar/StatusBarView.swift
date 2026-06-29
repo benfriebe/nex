@@ -121,7 +121,6 @@ struct StatusBarView: View {
                 // relaunch-restored `.running` pane until the agent
                 // re-emits a start).
                 if let started = pane.agentStartedAt {
-                    Text("·").foregroundStyle(theme.textTertiary)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(chromeElapsedLabel(from: started, to: context.date))
                             .monospacedDigit()
@@ -137,7 +136,8 @@ struct StatusBarView: View {
     }
 
     private func rightSection(_ summary: ChromeStatusSummary) -> some View {
-        HStack(spacing: 8) {
+        // Spacing-separated (no dot separators) — the gaps carry the grouping.
+        HStack(spacing: 14) {
             let kinds = enabledStatKinds
             if !kinds.isEmpty {
                 ForEach(kinds) { kind in
@@ -151,14 +151,10 @@ struct StatusBarView: View {
                         graphStyle: SparklineStyle(rawValue: store.settings.sparklineStyle) ?? .line
                     )
                 }
-                separator
             }
-            countItem(color: theme.statusRunning, value: summary.running, label: "running")
-            separator
-            countItem(color: theme.statusWaiting, value: summary.waiting, label: "waiting")
-            separator
-            countItem(color: theme.statusDone, value: summary.done, label: "done")
-            separator
+            StatusCountItem(store: store, kind: .running, color: theme.statusRunning, value: summary.running)
+            StatusCountItem(store: store, kind: .waiting, color: theme.statusWaiting, value: summary.waiting)
+            StatusCountItem(store: store, kind: .done, color: theme.statusDone, value: summary.done)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(context.date, format: .dateTime.hour().minute())
                     .monospacedDigit()
@@ -167,8 +163,81 @@ struct StatusBarView: View {
         .lineLimit(1)
         .fixedSize()
     }
+}
 
-    private func countItem(color: Color, value: Int, label: String) -> some View {
+/// The three agent states surfaced in the footer's right-hand counts.
+enum AgentStatusKind: Equatable {
+    case running, waiting, done
+
+    var label: String {
+        switch self {
+        case .running: "running"
+        case .waiting: "waiting"
+        case .done: "done"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .running: "Running agents"
+        case .waiting: "Awaiting input"
+        case .done: "Completed"
+        }
+    }
+}
+
+/// One running/waiting pane shown in the hover popover + click menu.
+struct AgentPaneRef: Identifiable {
+    let id: UUID
+    let workspaceID: UUID
+    let workspaceName: String
+    let workspaceColor: WorkspaceColor
+    let paneTitle: String
+    let startedAt: Date?
+}
+
+/// A footer count (dot · number · label). When there are panes in this state
+/// (running / waiting), a click opens a popover listing them; selecting one
+/// switches to its workspace and focuses it. `.done` is a session counter with
+/// no live panes, and a 0-count item is inert (plain, non-interactive).
+struct StatusCountItem: View {
+    let store: StoreOf<AppReducer>
+    let kind: AgentStatusKind
+    let color: Color
+    let value: Int
+    @Environment(\.chromeTheme) private var theme
+    @State private var showingDetail = false
+
+    /// Running/waiting with at least one pane open a navigable popover; `.done`
+    /// is a session counter with nothing to navigate to.
+    private var isNavigable: Bool { kind != .done && value > 0 }
+
+    var body: some View {
+        // Only the navigable items become buttons, so the 0-count items keep
+        // their plain (un-dimmed, non-clickable) appearance.
+        if isNavigable {
+            Button { showingDetail = true } label: { countLabel }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .popover(isPresented: $showingDetail, arrowEdge: .top) {
+                    AgentStatusDetailPopover(
+                        kind: kind,
+                        color: color,
+                        count: value,
+                        panes: panes,
+                        onSelect: { ref in
+                            navigate(to: ref)
+                            showingDetail = false
+                        }
+                    )
+                    .environment(\.chromeTheme, theme)
+                }
+        } else {
+            countLabel
+        }
+    }
+
+    private var countLabel: some View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             // Fixed-width count so the label (and everything after) doesn't
@@ -176,11 +245,115 @@ struct StatusBarView: View {
             Text("\(value)")
                 .monospacedDigit()
                 .frame(width: 14, alignment: .trailing)
-            Text(label)
+            Text(kind.label)
+        }
+        // Plain button can tint its label; restate the footer's neutral tone.
+        .foregroundStyle(theme.textSecondary)
+    }
+
+    private func navigate(to ref: AgentPaneRef) {
+        store.send(.setActiveWorkspace(ref.workspaceID))
+        store.send(.workspaces(.element(id: ref.workspaceID, action: .focusPane(ref.id))))
+    }
+
+    /// Panes currently in this state (empty for `.done`). Read lazily when the
+    /// popover opens.
+    private var panes: [AgentPaneRef] {
+        guard kind != .done else { return [] }
+        let target: PaneStatus = kind == .running ? .running : .waitingForInput
+        return store.workspaces.flatMap { workspace in
+            workspace.panes
+                .filter { $0.status == target }
+                .map { pane in
+                    AgentPaneRef(
+                        id: pane.id,
+                        workspaceID: workspace.id,
+                        workspaceName: workspace.name,
+                        workspaceColor: workspace.color,
+                        paneTitle: pane.title ?? pane.label ?? "Shell",
+                        startedAt: pane.agentStartedAt
+                    )
+                }
+        }
+    }
+}
+
+/// Popover for a footer agent count: a titled list of the panes in that state
+/// (workspace · pane · live elapsed for running). When `onSelect` is provided
+/// each row is a button that jumps to that pane. `.done` shows the session
+/// total instead (nothing to navigate to).
+struct AgentStatusDetailPopover: View {
+    let kind: AgentStatusKind
+    let color: Color
+    let count: Int
+    let panes: [AgentPaneRef]
+    var onSelect: ((AgentPaneRef) -> Void)?
+    @Environment(\.chromeTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(kind.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+            }
+            .padding(.bottom, 2)
+
+            if kind == .done {
+                Text("\(count) agent\(count == 1 ? "" : "s") completed this session.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+            } else if panes.isEmpty {
+                Text("None.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textTertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(panes) { row($0) }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 252, alignment: .leading)
+        .background(theme.surfaceBackground)
+        // No focus ring on the popover / its row buttons (the macOS focus
+        // effect otherwise draws an accent-tinted ring when the popover is key).
+        .focusEffectDisabled()
+    }
+
+    @ViewBuilder
+    private func row(_ ref: AgentPaneRef) -> some View {
+        if let onSelect {
+            Button { onSelect(ref) } label: { rowContent(ref) }
+                .buttonStyle(.plain)
+        } else {
+            rowContent(ref)
         }
     }
 
-    private var separator: some View {
-        Text("·").foregroundStyle(theme.textTertiary)
+    private func rowContent(_ ref: AgentPaneRef) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(ref.workspaceColor.color).frame(width: 7, height: 7)
+            Text(ref.workspaceName).foregroundStyle(theme.textSecondary)
+            Text("·").foregroundStyle(theme.textTertiary)
+            Text(ref.paneTitle)
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 10)
+            if kind == .running, let started = ref.startedAt {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(chromeElapsedLabel(from: started, to: context.date))
+                        .monospacedDigit()
+                        .foregroundStyle(theme.activeAgent)
+                }
+            }
+        }
+        .font(.system(size: 12))
+        // Whole row (incl. the trailing gap) is the hit target.
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
     }
 }
