@@ -102,7 +102,7 @@ struct SystemStatGauge: View {
             }
             .frame(width: kind.labelWidth, alignment: .trailing)
             if showGraph, history.count >= 2 {
-                Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor, style: graphStyle)
+                Sparkline(values: history, isPercentage: kind.isPercentage, color: graphColor, style: graphStyle, filled: true)
                     .frame(width: graphWidth, height: 11)
             }
         }
