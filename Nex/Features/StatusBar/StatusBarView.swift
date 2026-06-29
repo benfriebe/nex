@@ -208,14 +208,12 @@ struct StatusCountItem: View {
     @Environment(\.chromeTheme) private var theme
     @State private var showingDetail = false
 
-    /// Running/waiting with at least one pane open a navigable popover; `.done`
-    /// is a session counter with nothing to navigate to.
-    private var isNavigable: Bool { kind != .done && value > 0 }
-
     var body: some View {
-        // Only the navigable items become buttons, so the 0-count items keep
-        // their plain (un-dimmed, non-clickable) appearance.
-        if isNavigable {
+        // Any non-zero count opens a detail popover; 0-count items stay plain
+        // (un-dimmed, non-clickable). Running/waiting rows navigate to the live
+        // pane; done lists the recently-finished agents (nothing to navigate
+        // to), so its rows are read-only.
+        if value > 0 {
             Button { showingDetail = true } label: { countLabel }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
@@ -225,7 +223,8 @@ struct StatusCountItem: View {
                         color: color,
                         count: value,
                         panes: panes,
-                        onSelect: { ref in
+                        completed: completed,
+                        onSelect: kind == .done ? nil : { ref in
                             navigate(to: ref)
                             showingDetail = false
                         }
@@ -253,7 +252,18 @@ struct StatusCountItem: View {
 
     private func navigate(to ref: AgentPaneRef) {
         store.send(.setActiveWorkspace(ref.workspaceID))
-        store.send(.workspaces(.element(id: ref.workspaceID, action: .focusPane(ref.id))))
+        // Defer focus until the popover has dismissed and the main window has
+        // restored its prior first responder — otherwise that restoration
+        // re-emits focus for the previously-focused surface and reverts the
+        // selection when the target pane is in the already-active workspace.
+        DispatchQueue.main.async {
+            store.send(.workspaces(.element(id: ref.workspaceID, action: .focusPane(ref.id))))
+        }
+    }
+
+    /// Recently-finished agents for the `.done` popover (newest first), else [].
+    private var completed: [CompletedAgent] {
+        kind == .done ? store.completedAgents : []
     }
 
     /// Panes currently in this state (empty for `.done`). Read lazily when the
@@ -287,6 +297,7 @@ struct AgentStatusDetailPopover: View {
     let color: Color
     let count: Int
     let panes: [AgentPaneRef]
+    var completed: [CompletedAgent] = []
     var onSelect: ((AgentPaneRef) -> Void)?
     @Environment(\.chromeTheme) private var theme
 
@@ -301,9 +312,21 @@ struct AgentStatusDetailPopover: View {
             .padding(.bottom, 2)
 
             if kind == .done {
-                Text("\(count) agent\(count == 1 ? "" : "s") completed this session.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textSecondary)
+                Text("\(count) completed this session")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+                if !completed.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(completed.prefix(12).enumerated()), id: \.offset) { _, agent in
+                            completedRow(agent)
+                        }
+                    }
+                    if count > completed.count {
+                        Text("+ \(count - completed.count) earlier")
+                            .font(.system(size: 10))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
             } else if panes.isEmpty {
                 Text("None.")
                     .font(.system(size: 12))
@@ -355,5 +378,24 @@ struct AgentStatusDetailPopover: View {
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
+    }
+
+    /// Read-only row for a finished agent: workspace · pane · completion time.
+    private func completedRow(_ agent: CompletedAgent) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(agent.workspaceColor.color).frame(width: 7, height: 7)
+            Text(agent.workspaceName).foregroundStyle(theme.textSecondary)
+            Text("·").foregroundStyle(theme.textTertiary)
+            Text(agent.paneTitle)
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 10)
+            Text(agent.completedAt, style: .time)
+                .monospacedDigit()
+                .foregroundStyle(theme.textTertiary)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 4)
     }
 }

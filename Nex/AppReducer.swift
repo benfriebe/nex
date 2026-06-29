@@ -4,6 +4,15 @@ import Foundation
 import SwiftUI
 import WebKit
 
+/// A finished agent run, captured when its waiting-for-input state is cleared.
+/// Backs the footer's "done" hover detail. Session-scoped; not persisted.
+struct CompletedAgent: Equatable {
+    let workspaceName: String
+    let workspaceColor: WorkspaceColor
+    let paneTitle: String
+    let completedAt: Date
+}
+
 @Reducer
 struct AppReducer {
     @ObservableState
@@ -34,6 +43,10 @@ struct AppReducer {
         /// cleared this session (an acknowledged finished turn). Drives the
         /// status bar's "N done". Session-scoped, intentionally not persisted.
         var completedAgentCount: Int = 0
+        /// Recent finished agents (newest first, capped), captured at the same
+        /// moment `completedAgentCount` increments — backs the "done" hover
+        /// detail. Session-scoped, not persisted.
+        var completedAgents: [CompletedAgent] = []
         var keybindings: KeyBindingMap = .defaults
         var focusFollowsMouse: Bool = false
         var focusFollowsMouseDelay: Int = 100
@@ -3097,6 +3110,17 @@ struct AppReducer {
             if case let .workspaces(.element(id: wsID, action: .clearPaneStatus(paneID))) = action,
                state.workspaces[id: wsID]?.panes[id: paneID]?.status == .waitingForInput {
                 state.completedAgentCount += 1
+                if let workspace = state.workspaces[id: wsID], let pane = workspace.panes[id: paneID] {
+                    state.completedAgents.insert(CompletedAgent(
+                        workspaceName: workspace.name,
+                        workspaceColor: workspace.color,
+                        paneTitle: pane.title ?? pane.label ?? "Shell",
+                        completedAt: Date()
+                    ), at: 0)
+                    if state.completedAgents.count > 30 {
+                        state.completedAgents.removeLast(state.completedAgents.count - 30)
+                    }
+                }
             }
             return .none
         }
