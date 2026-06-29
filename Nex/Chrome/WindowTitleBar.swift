@@ -22,9 +22,9 @@ import SwiftUI
 struct WindowTitleBar: View {
     let store: StoreOf<AppReducer>
     @Environment(\.chromeTheme) private var theme
-    // Owned here (an in-scene view) so the titlebar-accessory ••• menu — which
-    // is outside the SwiftUI scene and can't reach `openSettings` itself — can
-    // relay through `nexOpenSettings`.
+    /// Owned here (an in-scene view) so the titlebar-accessory ••• menu — which
+    /// is outside the SwiftUI scene and can't reach `openSettings` itself — can
+    /// relay through `nexOpenSettings`.
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {

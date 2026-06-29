@@ -54,9 +54,9 @@ struct RootChromeView: View {
 struct ChromeThemed<Content: View>: View {
     let store: StoreOf<AppReducer>
     @ViewBuilder var content: Content
-    // The true OS scheme, read from `NSApp.effectiveAppearance` and kept live —
-    // NOT `@Environment(\.colorScheme)`, which reflects this window's forced
-    // override and so can't tell us what "System" should resolve to.
+    /// The true OS scheme, read from `NSApp.effectiveAppearance` and kept live —
+    /// NOT `@Environment(\.colorScheme)`, which reflects this window's forced
+    /// override and so can't tell us what "System" should resolve to.
     @StateObject private var systemAppearance = SystemAppearanceModel()
 
     var body: some View {
