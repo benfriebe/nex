@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import SwiftUI
 
@@ -215,6 +216,7 @@ struct StatusCountItem: View {
     let color: Color
     let value: Int
     @Environment(\.chromeTheme) private var theme
+    @Environment(\.surfaceManager) private var surfaceManager
     @State private var showingDetail = false
 
     var body: some View {
@@ -258,12 +260,16 @@ struct StatusCountItem: View {
 
     private func navigate(to ref: AgentPaneRef) {
         store.send(.setActiveWorkspace(ref.workspaceID))
-        // Defer focus until the popover has dismissed and the main window has
-        // restored its prior first responder — otherwise that restoration
-        // re-emits focus for the previously-focused surface and reverts the
-        // selection when the target pane is in the already-active workspace.
-        DispatchQueue.main.async {
-            store.send(.workspaces(.element(id: ref.workspaceID, action: .focusPane(ref.id))))
+        store.send(.workspaces(.element(id: ref.workspaceID, action: .focusPane(ref.id))))
+        // Make the target surface the main window's first responder *now*, while
+        // the popover still holds key. When the popover dismisses and the main
+        // window becomes key again it fires `becomeFirstResponder` on its current
+        // first responder — without this that's the previously-focused surface,
+        // which re-emits its focus and reverts the selection for a pane already
+        // in the active workspace. (Cross-workspace the surface isn't in a window
+        // yet, so this no-ops and the `focusPane` above drives focus on render.)
+        if let surface = surfaceManager.surface(for: ref.id) {
+            surface.window?.makeFirstResponder(surface)
         }
     }
 
