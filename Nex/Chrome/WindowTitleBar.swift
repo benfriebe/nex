@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Custom in-content window title bar shown under the hidden native
 /// titlebar (`.windowStyle(.hiddenTitleBar)`). Centres the active
-/// workspace identity (status dot · name · pane count · branch). Traffic
+/// workspace identity (status dot · name · pane count). Traffic
 /// lights float over its leading edge; window dragging is handled by the
 /// `WindowDragRegion`.
 ///
@@ -77,24 +77,14 @@ struct WindowTitleBar: View {
                 Text("\(workspace.panes.count) pane\(workspace.panes.count == 1 ? "" : "s")")
                     .foregroundStyle(theme.textTertiary)
             }
-
-            if let branch = activeBranch(workspace) {
-                separator
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 9))
-                    Text(branch)
-                }
-                .foregroundStyle(theme.textTertiary)
-            }
         }
         .font(.system(size: 12))
         .lineLimit(1)
         .truncationMode(.tail)
         // Asymmetric insets: clear the traffic lights on the left (80) and
         // reserve room for the trailing controls on the right (86) so a long
-        // name + branch truncates instead of overlapping the menu / sidebar
-        // buttons on a narrow window.
+        // name truncates instead of overlapping the menu / sidebar buttons on a
+        // narrow window.
         .padding(.leading, 80)
         .padding(.trailing, 86)
     }
@@ -112,18 +102,6 @@ struct WindowTitleBar: View {
             return theme.statusRunning
         }
         return workspace.color.color
-    }
-
-    /// Branch of the focused pane, falling back to the first pane that has
-    /// one (so the title bar still shows a branch when focus is on a
-    /// non-shell pane).
-    private func activeBranch(_ workspace: WorkspaceFeature.State?) -> String? {
-        guard let workspace else { return nil }
-        if let focusedID = workspace.focusedPaneID,
-           let branch = workspace.panes[id: focusedID]?.gitBranch {
-            return branch
-        }
-        return workspace.panes.compactMap(\.gitBranch).first
     }
 }
 
