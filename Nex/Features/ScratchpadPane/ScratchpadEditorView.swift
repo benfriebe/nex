@@ -34,7 +34,11 @@ struct ScratchpadEditorView: NSViewRepresentable {
         // background renders unreadable black-on-dark text.
         let fg = Self.foreground(for: backgroundColor)
         textView.textColor = fg
-        textView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
+        // Transparent content: the pane body's SwiftUI background is the single
+        // ghostty-coloured surface (matches the terminal exactly and goes fully
+        // transparent at 0% opacity), instead of the text view + scroll view
+        // each painting their own opaque layer beneath it.
+        textView.drawsBackground = false
         textView.insertionPointColor = fg
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isVerticallyResizable = true
@@ -46,8 +50,7 @@ struct ScratchpadEditorView: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
-        scrollView.drawsBackground = true
-        scrollView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
+        scrollView.drawsBackground = false
 
         // Line number gutter
         scrollView.rulersVisible = true
@@ -83,15 +86,13 @@ struct ScratchpadEditorView: NSViewRepresentable {
 
     func updateNSView(_: PaneFocusView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
-        // Keep colours in sync if the (terminal) background changes.
+        // Keep the text colour in sync if the (terminal) background changes;
+        // the surface itself is the pane body's SwiftUI background.
         let fg = Self.foreground(for: backgroundColor)
-        let bg = backgroundColor.withAlphaComponent(backgroundOpacity)
-        if textView.backgroundColor != bg { textView.backgroundColor = bg }
         if textView.textColor != fg {
             textView.textColor = fg
             textView.insertionPointColor = fg
         }
-        context.coordinator.scrollView?.backgroundColor = bg
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
         // palette's TextField) don't yank first responder back.

@@ -28,7 +28,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let fg = Self.foreground(for: backgroundColor)
         textView.textColor = fg
-        textView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
+        // Transparent content: the pane body's SwiftUI background is the single
+        // ghostty-coloured surface (see ScratchpadEditorView).
+        textView.drawsBackground = false
         textView.insertionPointColor = fg
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isVerticallyResizable = true
@@ -40,8 +42,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
-        scrollView.drawsBackground = true
-        scrollView.backgroundColor = backgroundColor.withAlphaComponent(backgroundOpacity)
+        scrollView.drawsBackground = false
 
         // Line number gutter
         scrollView.rulersVisible = true
@@ -80,14 +81,11 @@ struct MarkdownEditorView: NSViewRepresentable {
             context.coordinator.filePath = filePath
             context.coordinator.loadFile()
         }
-        // Re-apply the terminal background (+ contrasting text) live on an
-        // appearance change.
+        // Keep the text colour contrasting with the (terminal) background on an
+        // appearance change; the surface is the pane body's SwiftUI background.
         if let textView = context.coordinator.textView {
-            let bg = backgroundColor.withAlphaComponent(backgroundOpacity)
-            if textView.backgroundColor != bg {
-                textView.backgroundColor = bg
-                context.coordinator.scrollView?.backgroundColor = bg
-                let fg = Self.foreground(for: backgroundColor)
+            let fg = Self.foreground(for: backgroundColor)
+            if textView.textColor != fg {
                 textView.textColor = fg
                 textView.insertionPointColor = fg
             }

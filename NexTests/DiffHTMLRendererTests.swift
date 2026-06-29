@@ -103,13 +103,17 @@ struct DiffHTMLRendererTests {
         #expect(html.contains("<html class=\"light\">"))
     }
 
-    @Test func backgroundColorEmittedAsRGBA() {
+    @Test func bodyBackgroundIsTransparent() {
+        // The body background is transparent so the pane's SwiftUI background
+        // (the shared terminal surface) shows through the web view — rather than
+        // the renderer painting a second opaque layer of its own.
         let html = DiffHTMLRenderer.renderToHTML(
             diffText: "+x",
             backgroundColor: NSColor(red: 1, green: 0, blue: 0, alpha: 1),
             backgroundOpacity: 0.5
         )
-        #expect(html.contains("rgba(255, 0, 0, 0.5)"))
+        #expect(html.contains("background-color: transparent;"))
+        #expect(!html.contains("rgba(255, 0, 0, 0.5)"))
     }
 
     // MARK: - Sticky / collapsible file headers
