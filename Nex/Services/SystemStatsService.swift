@@ -178,15 +178,20 @@ final class SystemStatsSampler {
 
         let net = sampleNetwork()
         if let prev = previousNet, elapsed > 0 {
-            stats.netDownBytesPerSec = Double(net.down &- prev.down) / elapsed
-            stats.netUpBytesPerSec = Double(net.up &- prev.up) / elapsed
+            // Treat any decrease as a counter reset → 0 for this sample. The
+            // 32-bit per-interface counters are summed into 64-bit before the
+            // delta, so a single interface's wrap (or one dropping out) shrinks
+            // the sum; a wrapping `&-` would underflow to a ~1.8e19 byte/s spike
+            // that auto-scales the sparkline and flattens the whole trace.
+            stats.netDownBytesPerSec = net.down >= prev.down ? Double(net.down - prev.down) / elapsed : 0
+            stats.netUpBytesPerSec = net.up >= prev.up ? Double(net.up - prev.up) / elapsed : 0
         }
         previousNet = net
 
         let disk = sampleDiskIO()
         if let prev = previousDisk, elapsed > 0 {
-            stats.diskReadBytesPerSec = Double(disk.read &- prev.read) / elapsed
-            stats.diskWriteBytesPerSec = Double(disk.write &- prev.write) / elapsed
+            stats.diskReadBytesPerSec = disk.read >= prev.read ? Double(disk.read - prev.read) / elapsed : 0
+            stats.diskWriteBytesPerSec = disk.write >= prev.write ? Double(disk.write - prev.write) / elapsed : 0
         }
         previousDisk = disk
 
