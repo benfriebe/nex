@@ -2156,7 +2156,9 @@ private struct ScrollViewFinder: NSViewRepresentable {
         // Re-fire on every SwiftUI update so callers can re-assert state AppKit
         // resets during re-layout — e.g. the thin overlay scroller style, which
         // otherwise reverts to the wide legacy scroller as the list navigates.
-        probe.reportIfAvailable()
+        // Dispatched async so `onFound` (which captures @State) never mutates
+        // SwiftUI state synchronously during a view update.
+        DispatchQueue.main.async { [weak probe] in probe?.reportIfAvailable() }
     }
 
     private final class ProbeView: NSView {
