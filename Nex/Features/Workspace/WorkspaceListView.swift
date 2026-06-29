@@ -2163,20 +2163,31 @@ private struct ScrollViewFinder: NSViewRepresentable {
 
     private final class ProbeView: NSView {
         var onFound: ((NSScrollView) -> Void)?
-        // Set once on the main thread, read in deinit; `nonisolated(unsafe)` so
-        // the nonisolated deinit can remove the observer.
-        private nonisolated(unsafe) var styleObserver: NSObjectProtocol?
+        // Registered/removed on the main thread; `nonisolated(unsafe)` so the
+        // nonisolated deinit can remove the observer.
+        private nonisolated(unsafe) var updateObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            // AppKit resets every scroll view to the system "preferred" scroller
-            // style on certain events — e.g. a WKWebView appearing when a
-            // markdown pane toggles edit/view. The sidebar doesn't re-render
-            // then, so re-assert the overlay style whenever that fires.
-            if styleObserver == nil {
-                styleObserver = NotificationCenter.default.addObserver(
-                    forName: NSScroller.preferredScrollerStyleDidChangeNotification,
-                    object: nil,
+            if let updateObserver {
+                NotificationCenter.default.removeObserver(updateObserver)
+                self.updateObserver = nil
+            }
+            if let window {
+                // AppKit reverts the thin overlay scroller back to the wide
+                // legacy scroller during layout passes that don't re-run this
+                // view's SwiftUI update — e.g. a markdown pane toggling
+                // edit/view, which creates/destroys a WKWebView. The system
+                // `preferredScrollerStyle` never changes (it stays on "always
+                // show"), so there's no scroller notification to hook; instead
+                // the window posts `didUpdate` after each layout pass. Re-assert
+                // the overlay style then — the same path a window resize takes,
+                // which is why resizing the window fixes it manually. The
+                // re-assert in `onFound` is guarded, so this is a cheap no-op
+                // once the style already sticks.
+                updateObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didUpdateNotification,
+                    object: window,
                     queue: .main
                 ) { [weak self] _ in
                     self?.reportIfAvailable()
@@ -2193,7 +2204,7 @@ private struct ScrollViewFinder: NSViewRepresentable {
         }
 
         deinit {
-            if let styleObserver { NotificationCenter.default.removeObserver(styleObserver) }
+            if let updateObserver { NotificationCenter.default.removeObserver(updateObserver) }
         }
     }
 }
