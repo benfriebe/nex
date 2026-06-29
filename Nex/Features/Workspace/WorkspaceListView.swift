@@ -2163,8 +2163,8 @@ private struct ScrollViewFinder: NSViewRepresentable {
 
     private final class ProbeView: NSView {
         var onFound: ((NSScrollView) -> Void)?
-        // Registered/removed on the main thread; `nonisolated(unsafe)` so the
-        // nonisolated deinit can remove the observer.
+        /// Registered/removed on the main thread; `nonisolated(unsafe)` so the
+        /// nonisolated deinit can remove the observer.
         private nonisolated(unsafe) var updateObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {

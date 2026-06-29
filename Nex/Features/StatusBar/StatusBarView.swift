@@ -133,7 +133,6 @@ struct StatusBarView: View {
         return (files, adds, dels)
     }
 
-    @ViewBuilder
     private func gitStatsLabel(_ stats: (files: Int, adds: Int, dels: Int)) -> some View {
         HStack(spacing: 4) {
             HStack(spacing: 2) {
