@@ -11,6 +11,7 @@ struct ScratchpadEditorView: NSViewRepresentable {
     var backgroundColor: NSColor = .textBackgroundColor
     var backgroundOpacity: Double = 1.0
     @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
+    @Environment(\.chromeTheme) private var chromeTheme
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -52,9 +53,12 @@ struct ScratchpadEditorView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
 
-        // Line number gutter
+        // Line number gutter — uses the pane-header chrome colour so the gutter
+        // reads as chrome, distinct from the terminal-coloured editor body.
         scrollView.rulersVisible = true
         let rulerView = LineNumberRulerView(textView: textView)
+        rulerView.gutterBackgroundColor = NSColor(chromeTheme.headerBackground)
+        rulerView.gutterTextColor = NSColor(chromeTheme.textTertiary)
         scrollView.verticalRulerView = rulerView
 
         context.coordinator.textView = textView
@@ -93,6 +97,9 @@ struct ScratchpadEditorView: NSViewRepresentable {
             textView.textColor = fg
             textView.insertionPointColor = fg
         }
+        // Keep the gutter on the pane-header chrome colour across appearance changes.
+        context.coordinator.rulerView?.gutterBackgroundColor = NSColor(chromeTheme.headerBackground)
+        context.coordinator.rulerView?.gutterTextColor = NSColor(chromeTheme.textTertiary)
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
         // palette's TextField) don't yank first responder back.

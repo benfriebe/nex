@@ -8,6 +8,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     var backgroundColor: NSColor = .textBackgroundColor
     var backgroundOpacity: Double = 1.0
     @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
+    @Environment(\.chromeTheme) private var chromeTheme
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -44,9 +45,11 @@ struct MarkdownEditorView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
 
-        // Line number gutter
+        // Line number gutter — pane-header chrome colour (see ScratchpadEditorView).
         scrollView.rulersVisible = true
         let rulerView = LineNumberRulerView(textView: textView)
+        rulerView.gutterBackgroundColor = NSColor(chromeTheme.headerBackground)
+        rulerView.gutterTextColor = NSColor(chromeTheme.textTertiary)
         scrollView.verticalRulerView = rulerView
 
         context.coordinator.textView = textView
@@ -90,6 +93,9 @@ struct MarkdownEditorView: NSViewRepresentable {
                 textView.insertionPointColor = fg
             }
         }
+        // Keep the gutter on the pane-header chrome colour across appearance changes.
+        context.coordinator.rulerView?.gutterBackgroundColor = NSColor(chromeTheme.headerBackground)
+        context.coordinator.rulerView?.gutterTextColor = NSColor(chromeTheme.textTertiary)
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command
         // palette's TextField) don't yank first responder back.
