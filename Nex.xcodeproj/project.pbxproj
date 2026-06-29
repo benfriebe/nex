@@ -73,6 +73,7 @@
 		630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B04ED477C0C51A44953A8C /* WebPaneState.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
 		654B31F33D5872341839A91E /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8908AF59D359222CBC0EF21D /* GameController.framework */; };
+		65FD103A31E7591016424457 /* ChromeStyleTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */; };
 		692A08796F7DF555CFAF0653 /* MarkdownFindScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */; };
 		696312BB96D35569F48B7CAE /* MarkdownFrontMatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43F769C33118440222BF5FA /* MarkdownFrontMatter.swift */; };
 		6ACFF31A3875EBE87E78C587 /* RepoAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257A1CB3D7653911EF93F8F5 /* RepoAssociation.swift */; };
@@ -119,6 +120,7 @@
 		A8626EC08DC12588F912E1EF /* WebPaneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A94E80914F7411EED712E5 /* WebPaneStore.swift */; };
 		A895048D11AFDC1FDA5DF846 /* WebPaneChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DFA60F59651234F0F59BE9 /* WebPaneChrome.swift */; };
 		A8F1A82072120476BAEC2D52 /* UserDefaultsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */; };
+		ABDC80C6FF2934417FFC931B /* ChromeStyleThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */; };
 		AC234A5AAADE90A7EC7BB5F8 /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7D450881FC7318F58CB78F /* MarkdownHTMLRenderer.swift */; };
 		AD62C235AF0D846B08655B16 /* RingBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0625B2E7935BDDF63DC5D19 /* RingBufferTests.swift */; };
 		AF0F22742F34298F1E06A238 /* WorkspaceGroupSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9F7D5571F89D43BC6C76928 /* WorkspaceGroupSocketTests.swift */; };
@@ -257,6 +259,7 @@
 		3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroup.swift; sourceTree = "<group>"; };
 		3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFindScript.swift; sourceTree = "<group>"; };
 		3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftCLIReplyTests.swift; sourceTree = "<group>"; };
+		3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyleThemeTests.swift; sourceTree = "<group>"; };
 		42A24C1FEC6EA31096603326 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
 		45141531B99E3E1B79620ECA /* StoragePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoragePanel.swift; sourceTree = "<group>"; };
@@ -332,6 +335,7 @@
 		BECB2222837AC350E94222BB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BF16F0C4A6A8BF8151651F53 /* InspectPayloadSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectPayloadSanitiser.swift; sourceTree = "<group>"; };
 		C4D5453E5B7EB4E8E7F11453 /* PaneSendReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSendReplyTests.swift; sourceTree = "<group>"; };
+		C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyleTheme.swift; sourceTree = "<group>"; };
 		C58BE92A0878D9CCC786A657 /* WorkspaceRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRowView.swift; sourceTree = "<group>"; };
 		C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterService.swift; sourceTree = "<group>"; };
 		CAA7FF54B539D06E39903C41 /* PaneShortcutMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneShortcutMonitorTests.swift; sourceTree = "<group>"; };
@@ -484,6 +488,7 @@
 				A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */,
 				D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */,
 				ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */,
+				3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */,
 				89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */,
 				309F641591BB580429299666 /* ConfigParserTests.swift */,
 				21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */,
@@ -767,6 +772,7 @@
 		F095B23294C4398DA905D114 /* Theme */ = {
 			isa = PBXGroup;
 			children = (
+				C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */,
 				483277A20C203022712FB04D /* ChromeTheme.swift */,
 			);
 			path = Theme;
@@ -913,6 +919,7 @@
 				840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */,
 				B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */,
 				DC11308E0E92225F551CF162 /* AutoDetectRepoTests.swift in Sources */,
+				ABDC80C6FF2934417FFC931B /* ChromeStyleThemeTests.swift in Sources */,
 				FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */,
 				A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */,
 				B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */,
@@ -976,6 +983,7 @@
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,
 				B23A46CD372F9E16C2C1D716 /* CheckForUpdatesView.swift in Sources */,
+				65FD103A31E7591016424457 /* ChromeStyleTheme.swift in Sources */,
 				C35AD7E358BD4B5B0EABF5E9 /* ChromeTheme.swift in Sources */,
 				B221D950378165611A0DF932 /* ClipboardImageHelper.swift in Sources */,
 				3C74513CA9D5FD60E672B477 /* CommandPaletteItem.swift in Sources */,

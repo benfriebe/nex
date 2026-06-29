@@ -1,6 +1,7 @@
 import AppKit
 import ComposableArchitecture
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Identifier for the Settings TabView's tabs, used for deep-linking
 /// from the web pane's "Manage favourites…" menu.
@@ -321,9 +322,33 @@ private struct AppearanceSettingsView: View {
     /// Resolved scheme inside the (themed) Settings scene — tells us which
     /// light/dark override bucket the colour pickers edit.
     @Environment(\.colorScheme) private var systemScheme
+    /// Transient feedback for the Theme export/import/copy/paste actions.
+    @State private var themeStatus: String?
 
     var body: some View {
         Form {
+            Section("Theme") {
+                HStack {
+                    Button("Export…") { exportTheme() }
+                    Button("Import…") { importTheme() }
+                    Spacer()
+                    Button("Copy Code") { copyThemeCode() }
+                    Button("Paste Code") { pasteThemeCode() }
+                }
+                if let themeStatus {
+                    Text(themeStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Save your custom chrome colours and sidebar styling as a "
+                        + "shareable .nextheme file or a copyable code. Importing restyles "
+                        + "the chrome without changing your light/dark mode or terminal "
+                        + "background.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Chrome") {
                 Picker(
                     "Appearance",
@@ -489,6 +514,76 @@ private struct AppearanceSettingsView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Theme export / import
+
+    /// The chrome styling currently in settings, captured into a shareable theme.
+    private func currentTheme(name: String? = nil) -> ChromeStyleTheme {
+        store.withState { ChromeStyleTheme(capturing: $0, name: name) }
+    }
+
+    private static let themeUTType = UTType(filenameExtension: "nextheme") ?? .json
+
+    private func exportTheme() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [Self.themeUTType]
+        panel.nameFieldStringValue = "MyTheme.nextheme"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let name = url.deletingPathExtension().lastPathComponent
+        do {
+            try currentTheme(name: name).jsonData().write(to: url)
+            themeStatus = "Exported \u{201C}\(name)\u{201D}."
+        } catch {
+            themeStatus = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importTheme() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [Self.themeUTType, .json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let theme = try ChromeStyleTheme(jsonData: Data(contentsOf: url))
+            store.send(.applyStyleTheme(theme))
+            let label = theme.name ?? url.deletingPathExtension().lastPathComponent
+            themeStatus = "Imported \u{201C}\(label)\u{201D}."
+        } catch let error as ChromeStyleThemeError {
+            themeStatus = error.message
+        } catch {
+            themeStatus = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyThemeCode() {
+        do {
+            let code = try currentTheme().shareCode()
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(code, forType: .string)
+            themeStatus = "Theme code copied to the clipboard."
+        } catch {
+            themeStatus = "Couldn't generate a theme code."
+        }
+    }
+
+    private func pasteThemeCode() {
+        guard let code = NSPasteboard.general.string(forType: .string),
+              !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            themeStatus = "The clipboard has no theme code to paste."
+            return
+        }
+        do {
+            let theme = try ChromeStyleTheme(shareCode: code)
+            store.send(.applyStyleTheme(theme))
+            themeStatus = "Imported theme from the clipboard" + (theme.name.map { " (\u{201C}\($0)\u{201D})" } ?? "") + "."
+        } catch let error as ChromeStyleThemeError {
+            themeStatus = error.message
+        } catch {
+            themeStatus = "That clipboard text isn't a Nex theme."
+        }
     }
 }
 

@@ -112,6 +112,10 @@ struct SettingsFeature {
         case refreshConfirmQuitWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
+        /// Apply an imported shareable chrome-style theme: overwrites the colour
+        /// overrides + sidebar + sparkline styling and persists them. Leaves the
+        /// appearance mode and terminal background untouched.
+        case applyStyleTheme(ChromeStyleTheme)
     }
 
     private enum AppearanceDebounceID: Hashable { case debounce }
@@ -366,6 +370,34 @@ struct SettingsFeature {
                 userDefaults.setString("", Self.defaultsKeyChromeColors)
                 return .none
 
+            case .applyStyleTheme(let theme):
+                // Chrome-only, like setChromeColor: overwrite the styling fields
+                // and persist them; the chrome wrappers re-resolve from state.
+                // Appearance mode + terminal background are deliberately left as
+                // the recipient set them.
+                state.chromeColorOverrides = theme.colorOverrides
+                if let data = try? JSONEncoder().encode(theme.colorOverrides),
+                   let json = String(data: data, encoding: .utf8) {
+                    userDefaults.setString(json, Self.defaultsKeyChromeColors)
+                }
+                state.sidebarColorIntensity = theme.sidebarColorIntensity
+                userDefaults.setDouble(theme.sidebarColorIntensity, Self.defaultsKeySidebarColorIntensity)
+                state.sidebarAvatarFillOpacity = theme.sidebarAvatarFillOpacity
+                userDefaults.setDouble(theme.sidebarAvatarFillOpacity, Self.defaultsKeySidebarAvatarFill)
+                state.sidebarAvatarStrokeOpacity = theme.sidebarAvatarStrokeOpacity
+                userDefaults.setDouble(theme.sidebarAvatarStrokeOpacity, Self.defaultsKeySidebarAvatarStroke)
+                state.sidebarGroupFillOpacity = theme.sidebarGroupFillOpacity
+                userDefaults.setDouble(theme.sidebarGroupFillOpacity, Self.defaultsKeySidebarGroupFill)
+                state.sidebarGroupStrokeOpacity = theme.sidebarGroupStrokeOpacity
+                userDefaults.setDouble(theme.sidebarGroupStrokeOpacity, Self.defaultsKeySidebarGroupStroke)
+                state.sparklineColorHex = theme.sparklineColorHex
+                userDefaults.setString(theme.sparklineColorHex, Self.defaultsKeySparklineColor)
+                state.sparklineWidth = theme.sparklineWidth
+                userDefaults.setDouble(theme.sparklineWidth, Self.defaultsKeySparklineWidth)
+                state.sparklineStyle = theme.sparklineStyle
+                userDefaults.setString(theme.sparklineStyle, Self.defaultsKeySparklineStyle)
+                return .none
+
             case .setSidebarColorIntensity(let intensity):
                 state.sidebarColorIntensity = intensity
                 userDefaults.setDouble(intensity, Self.defaultsKeySidebarColorIntensity)
@@ -477,5 +509,26 @@ struct SettingsFeature {
                 }
             }
         }
+    }
+}
+
+extension ChromeStyleTheme {
+    /// Capture the chrome styling currently in `SettingsFeature.State` into a
+    /// shareable theme. `name` becomes the theme's label (set from the file
+    /// name on export).
+    init(capturing state: SettingsFeature.State, name: String? = nil) {
+        self.init(
+            version: Self.currentVersion,
+            name: name,
+            colorOverrides: state.chromeColorOverrides,
+            sidebarColorIntensity: state.sidebarColorIntensity,
+            sidebarAvatarFillOpacity: state.sidebarAvatarFillOpacity,
+            sidebarAvatarStrokeOpacity: state.sidebarAvatarStrokeOpacity,
+            sidebarGroupFillOpacity: state.sidebarGroupFillOpacity,
+            sidebarGroupStrokeOpacity: state.sidebarGroupStrokeOpacity,
+            sparklineColorHex: state.sparklineColorHex,
+            sparklineWidth: state.sparklineWidth,
+            sparklineStyle: state.sparklineStyle
+        )
     }
 }
