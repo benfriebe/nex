@@ -1,6 +1,7 @@
 import AppKit
 import ComposableArchitecture
 import Foundation
+import SwiftUI
 import WebKit
 
 @Reducer
@@ -6321,6 +6322,15 @@ struct AppReducer {
 
             // MARK: - External Indicators
 
+            // The in-app SwiftUI surfaces re-read the status colours from the
+            // chrome environment automatically, but the AppKit menu-bar icon +
+            // popover are pushed their colours imperatively in
+            // `updateExternalIndicators` — so re-push when the chrome theme
+            // changes, otherwise the menu-bar dot keeps a stale colour until the
+            // next agent-status change.
+            case .settings(.setChromeAppearance), .settings(.setChromeColor), .settings(.resetChromeColors):
+                return .send(.updateExternalIndicators)
+
             case .updateExternalIndicators:
                 var totalWaiting = 0
                 var totalRunning = 0
@@ -6359,12 +6369,26 @@ struct AppReducer {
                 let finalWaiting = totalWaiting
                 let finalRunning = totalRunning
                 let finalItems = statusItems
+                let appearance = state.settings.chromeAppearance
+                let colorOverrides = state.settings.chromeColorOverrides
                 return .run { _ in
                     await MainActor.run {
+                        // Resolve the chrome status colours so the menu-bar icon
+                        // + popover match the in-app status colours. The menu bar
+                        // sits in the OS appearance, so resolve against it.
+                        let scheme: ColorScheme = NSApp.effectiveAppearance
+                            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+                        let theme = ChromeTheme.resolve(
+                            appearance: appearance,
+                            system: scheme,
+                            overrides: colorOverrides
+                        )
                         controller.update(
                             waitingCount: finalWaiting,
                             runningCount: finalRunning,
-                            items: finalItems
+                            items: finalItems,
+                            waitingColor: theme.statusWaiting,
+                            runningColor: theme.statusRunning
                         )
                         if finalWaiting > 0 {
                             NSApp.dockTile.badgeLabel = "\(finalWaiting)"

@@ -341,7 +341,7 @@ private struct AppearanceSettingsView: View {
             }
 
             Section("Chrome Colours") {
-                ForEach(ChromeColorKey.allCases) { key in
+                ForEach(ChromeColorKey.allCases.filter { !$0.isAgentStatus }) { key in
                     ColorPicker(
                         key.displayName,
                         selection: chromeColorBinding(key),
@@ -356,6 +356,20 @@ private struct AppearanceSettingsView: View {
                     Spacer()
                     Button("Reset") { store.send(.resetChromeColors) }
                 }
+            }
+
+            Section("Agent status") {
+                ForEach(ChromeColorKey.allCases.filter(\.isAgentStatus)) { key in
+                    ColorPicker(
+                        key.displayName,
+                        selection: chromeColorBinding(key),
+                        supportsOpacity: false
+                    )
+                }
+                Text("The dot / badge colour shown for each agent state across the "
+                    + "status bar, sidebar, pane headers, title bar and menu-bar icon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Sidebar") {

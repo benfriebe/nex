@@ -83,8 +83,10 @@ struct ChromeTheme: Equatable {
     )
 
     /// Returns a copy with the given user overrides layered on top of the
-    /// preset. The `accent` override also drives the selection stroke/fill and
-    /// the "awaiting input" status colour, since they're all the one highlight.
+    /// preset. The `accent` override also drives the selection stroke/fill,
+    /// since they're the one sidebar highlight. The agent status colours are
+    /// independently overridable (`statusRunning` / `statusWaiting` /
+    /// `statusDone`).
     func applying(_ overrides: [ChromeColorKey: Color]) -> ChromeTheme {
         guard !overrides.isEmpty else { return self }
         let newAccent = overrides[.accent] ?? accent
@@ -102,9 +104,9 @@ struct ChromeTheme: Equatable {
             selectionStroke: newAccent,
             accent: newAccent,
             paneFocus: overrides[.paneFocus] ?? paneFocus,
-            statusRunning: statusRunning,
-            statusWaiting: overrides[.accent] ?? statusWaiting,
-            statusDone: statusDone,
+            statusRunning: overrides[.statusRunning] ?? statusRunning,
+            statusWaiting: overrides[.statusWaiting] ?? statusWaiting,
+            statusDone: overrides[.statusDone] ?? statusDone,
             activeAgent: activeAgent,
             groupBandOpacity: groupBandOpacity
         )
@@ -142,8 +144,23 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
     case accent
     case paneFocus
     case divider
+    // Agent status colours — rendered everywhere agent status appears (status
+    // bar, sidebar dots, pane-header badges, title-bar dot, menu-bar icon +
+    // popover). Grouped into their own Settings section via `isAgentStatus`.
+    case statusRunning
+    case statusWaiting
+    case statusDone
 
     var id: String { rawValue }
+
+    /// Agent status colours are shown in a separate "Agent status" Settings
+    /// section from the chrome surface colours.
+    var isAgentStatus: Bool {
+        switch self {
+        case .statusRunning, .statusWaiting, .statusDone: true
+        default: false
+        }
+    }
 
     var displayName: String {
         switch self {
@@ -155,6 +172,9 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .accent: "Sidebar highlight"
         case .paneFocus: "Pane focus"
         case .divider: "Dividers / borders"
+        case .statusRunning: "Running"
+        case .statusWaiting: "Awaiting input"
+        case .statusDone: "Done"
         }
     }
 
@@ -168,6 +188,9 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .accent: theme.accent
         case .paneFocus: theme.paneFocus
         case .divider: theme.divider
+        case .statusRunning: theme.statusRunning
+        case .statusWaiting: theme.statusWaiting
+        case .statusDone: theme.statusDone
         }
     }
 }
