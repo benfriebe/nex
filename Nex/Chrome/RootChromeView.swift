@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import SwiftUI
 
@@ -53,11 +54,26 @@ struct RootChromeView: View {
 struct ChromeThemed<Content: View>: View {
     let store: StoreOf<AppReducer>
     @ViewBuilder var content: Content
-    @Environment(\.colorScheme) private var systemScheme
+    // The true OS scheme, read from `NSApp.effectiveAppearance` and kept live —
+    // NOT `@Environment(\.colorScheme)`, which reflects this window's forced
+    // override and so can't tell us what "System" should resolve to.
+    @StateObject private var systemAppearance = SystemAppearanceModel()
 
     var body: some View {
         WithPerceptionTracking {
             let appearance = store.settings.chromeAppearance
+            let systemScheme = systemAppearance.colorScheme
+            // Always resolve to a CONCRETE scheme. `.preferredColorScheme(nil)`
+            // (the old `.system` path) does not reliably revert a window that was
+            // previously forced to .light/.dark — that left the surfaces resolving
+            // light while text/native chrome followed the dark window. Forcing a
+            // concrete scheme makes every transition concrete→concrete (reliable),
+            // and `systemAppearance` keeps `.system` following the OS live.
+            let effective: ColorScheme = switch appearance {
+            case .system: systemScheme
+            case .light: .light
+            case .dark: .dark
+            }
             let theme = ChromeTheme.resolve(
                 appearance: appearance,
                 system: systemScheme,
@@ -72,8 +88,38 @@ struct ChromeThemed<Content: View>: View {
                     groupFill: store.settings.sidebarGroupFillOpacity,
                     groupStroke: store.settings.sidebarGroupStrokeOpacity
                 ))
-                .preferredColorScheme(appearance.explicitScheme)
+                .preferredColorScheme(effective)
                 .tint(theme.accent)
         }
+    }
+}
+
+/// Publishes the true system colour scheme from `NSApp.effectiveAppearance`,
+/// independent of any window's `.preferredColorScheme` override. Drives the
+/// `.system` chrome preference: we force this concrete scheme rather than
+/// `.preferredColorScheme(nil)` (which doesn't reliably revert a previously
+/// forced window), and re-publish when the OS flips light/dark so `.system`
+/// stays live (e.g. the auto day/night schedule).
+@MainActor
+final class SystemAppearanceModel: ObservableObject {
+    @Published private(set) var colorScheme: ColorScheme
+    private var observation: NSKeyValueObservation?
+
+    init() {
+        colorScheme = SystemAppearanceModel.current()
+        // NSKeyValueObservation invalidates itself on deinit, so no manual
+        // teardown is needed.
+        observation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.refresh() }
+        }
+    }
+
+    private func refresh() {
+        let scheme = SystemAppearanceModel.current()
+        if colorScheme != scheme { colorScheme = scheme }
+    }
+
+    private static func current() -> ColorScheme {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
     }
 }
