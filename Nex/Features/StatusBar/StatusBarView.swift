@@ -5,7 +5,7 @@ import SwiftUI
 struct ChromeStatusSummary: Equatable {
     var running = 0
     var waiting = 0
-    var done = 0
+    var inactive = 0
 }
 
 /// Bottom status bar: focused-pane context (cwd · branch · agent · elapsed)
@@ -154,7 +154,7 @@ struct StatusBarView: View {
             }
             StatusCountItem(store: store, kind: .running, color: theme.statusRunning, value: summary.running)
             StatusCountItem(store: store, kind: .waiting, color: theme.statusWaiting, value: summary.waiting)
-            StatusCountItem(store: store, kind: .done, color: theme.statusDone, value: summary.done)
+            StatusCountItem(store: store, kind: .inactive, color: theme.statusInactive, value: summary.inactive)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(context.date, format: .dateTime.hour().minute())
                     .monospacedDigit()
@@ -167,13 +167,22 @@ struct StatusBarView: View {
 
 /// The three agent states surfaced in the footer's right-hand counts.
 enum AgentStatusKind: Equatable {
-    case running, waiting, done
+    case running, waiting, inactive
+
+    /// The pane status this kind lists (inactive = an attached but idle agent).
+    func matches(_ pane: Pane) -> Bool {
+        switch self {
+        case .running: pane.status == .running
+        case .waiting: pane.status == .waitingForInput
+        case .inactive: pane.agentSessionID != nil && pane.status == .idle
+        }
+    }
 
     var label: String {
         switch self {
         case .running: "running"
         case .waiting: "waiting"
-        case .done: "done"
+        case .inactive: "inactive"
         }
     }
 
@@ -181,7 +190,7 @@ enum AgentStatusKind: Equatable {
         switch self {
         case .running: "Running agents"
         case .waiting: "Awaiting input"
-        case .done: "Completed"
+        case .inactive: "Inactive agents"
         }
     }
 }
@@ -197,9 +206,9 @@ struct AgentPaneRef: Identifiable {
 }
 
 /// A footer count (dot · number · label). When there are panes in this state
-/// (running / waiting), a click opens a popover listing them; selecting one
-/// switches to its workspace and focuses it. `.done` is a session counter with
-/// no live panes, and a 0-count item is inert (plain, non-interactive).
+/// (running / waiting / inactive) a click opens a popover listing them;
+/// selecting one switches to its workspace and focuses it. A 0-count item is
+/// inert (plain, non-interactive).
 struct StatusCountItem: View {
     let store: StoreOf<AppReducer>
     let kind: AgentStatusKind
@@ -210,9 +219,8 @@ struct StatusCountItem: View {
 
     var body: some View {
         // Any non-zero count opens a detail popover; 0-count items stay plain
-        // (un-dimmed, non-clickable). Running/waiting rows navigate to the live
-        // pane; done lists the recently-finished agents (nothing to navigate
-        // to), so its rows are read-only.
+        // (un-dimmed, non-clickable). Every kind lists live panes and a row
+        // click jumps to that pane.
         if value > 0 {
             Button { showingDetail = true } label: { countLabel }
                 .buttonStyle(.plain)
@@ -221,10 +229,8 @@ struct StatusCountItem: View {
                     AgentStatusDetailPopover(
                         kind: kind,
                         color: color,
-                        count: value,
                         panes: panes,
-                        completed: completed,
-                        onSelect: kind == .done ? nil : { ref in
+                        onSelect: { ref in
                             navigate(to: ref)
                             showingDetail = false
                         }
@@ -261,19 +267,11 @@ struct StatusCountItem: View {
         }
     }
 
-    /// Recently-finished agents for the `.done` popover (newest first), else [].
-    private var completed: [CompletedAgent] {
-        kind == .done ? store.completedAgents : []
-    }
-
-    /// Panes currently in this state (empty for `.done`). Read lazily when the
-    /// popover opens.
+    /// Live panes in this state. Read lazily when the popover opens.
     private var panes: [AgentPaneRef] {
-        guard kind != .done else { return [] }
-        let target: PaneStatus = kind == .running ? .running : .waitingForInput
-        return store.workspaces.flatMap { workspace in
+        store.workspaces.flatMap { workspace in
             workspace.panes
-                .filter { $0.status == target }
+                .filter { kind.matches($0) }
                 .map { pane in
                     AgentPaneRef(
                         id: pane.id,
@@ -290,14 +288,11 @@ struct StatusCountItem: View {
 
 /// Popover for a footer agent count: a titled list of the panes in that state
 /// (workspace · pane · live elapsed for running). When `onSelect` is provided
-/// each row is a button that jumps to that pane. `.done` shows the session
-/// total instead (nothing to navigate to).
+/// each row is a button that jumps to that pane.
 struct AgentStatusDetailPopover: View {
     let kind: AgentStatusKind
     let color: Color
-    let count: Int
     let panes: [AgentPaneRef]
-    var completed: [CompletedAgent] = []
     var onSelect: ((AgentPaneRef) -> Void)?
     @Environment(\.chromeTheme) private var theme
 
@@ -311,23 +306,7 @@ struct AgentStatusDetailPopover: View {
             }
             .padding(.bottom, 2)
 
-            if kind == .done {
-                Text("\(count) completed this session")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textTertiary)
-                if !completed.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(completed.prefix(12).enumerated()), id: \.offset) { _, agent in
-                            completedRow(agent)
-                        }
-                    }
-                    if count > completed.count {
-                        Text("+ \(count - completed.count) earlier")
-                            .font(.system(size: 10))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                }
-            } else if panes.isEmpty {
+            if panes.isEmpty {
                 Text("None.")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.textTertiary)
@@ -378,24 +357,5 @@ struct AgentStatusDetailPopover: View {
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
-    }
-
-    /// Read-only row for a finished agent: workspace · pane · completion time.
-    private func completedRow(_ agent: CompletedAgent) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(agent.workspaceColor.color).frame(width: 7, height: 7)
-            Text(agent.workspaceName).foregroundStyle(theme.textSecondary)
-            Text("·").foregroundStyle(theme.textTertiary)
-            Text(agent.paneTitle)
-                .foregroundStyle(theme.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 10)
-            Text(agent.completedAt, style: .time)
-                .monospacedDigit()
-                .foregroundStyle(theme.textTertiary)
-        }
-        .font(.system(size: 12))
-        .padding(.horizontal, 4)
     }
 }

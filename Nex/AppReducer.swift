@@ -4,15 +4,6 @@ import Foundation
 import SwiftUI
 import WebKit
 
-/// A finished agent run, captured when its waiting-for-input state is cleared.
-/// Backs the footer's "done" hover detail. Session-scoped; not persisted.
-struct CompletedAgent: Equatable {
-    let workspaceName: String
-    let workspaceColor: WorkspaceColor
-    let paneTitle: String
-    let completedAt: Date
-}
-
 @Reducer
 struct AppReducer {
     @ObservableState
@@ -39,14 +30,6 @@ struct AppReducer {
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
-        /// Running tally of agent runs whose waiting-for-input state was
-        /// cleared this session (an acknowledged finished turn). Drives the
-        /// status bar's "N done". Session-scoped, intentionally not persisted.
-        var completedAgentCount: Int = 0
-        /// Recent finished agents (newest first, capped), captured at the same
-        /// moment `completedAgentCount` increments — backs the "done" hover
-        /// detail. Session-scoped, not persisted.
-        var completedAgents: [CompletedAgent] = []
         var keybindings: KeyBindingMap = .defaults
         var focusFollowsMouse: Bool = false
         var focusFollowsMouseDelay: Int = 100
@@ -144,9 +127,9 @@ struct AppReducer {
         }
 
         /// Cross-workspace agent counts for the bottom status bar. Reading
-        /// this inside a tracked view registers a dependency on `workspaces`
-        /// + `completedAgentCount`, so the footer re-bodies on any status
-        /// change (Release-safe when read from a distinct child view).
+        /// this inside a tracked view registers a dependency on `workspaces`,
+        /// so the footer re-bodies on any status change (Release-safe when
+        /// read from a distinct child view).
         var chromeStatusSummary: ChromeStatusSummary {
             var summary = ChromeStatusSummary()
             for workspace in workspaces {
@@ -154,11 +137,13 @@ struct AppReducer {
                     switch pane.status {
                     case .running: summary.running += 1
                     case .waitingForInput: summary.waiting += 1
-                    case .idle: break
+                    case .idle:
+                        // An attached-but-idle agent session is "inactive"
+                        // (a resumable agent that isn't running or waiting).
+                        if pane.agentSessionID != nil { summary.inactive += 1 }
                     }
                 }
             }
-            summary.done = completedAgentCount
             return summary
         }
 
@@ -3101,29 +3086,6 @@ struct AppReducer {
     }
 
     var body: some ReducerOf<Self> {
-        // Declared BEFORE the main reducer's `.forEach` so it runs while the
-        // pane is still `.waitingForInput` — the child `clearPaneStatus`
-        // handler (which flips it to `.idle`) runs first within the
-        // `.forEach`, so reading the status from the parent interception
-        // below would always see `.idle`. A leading reducer sidesteps that.
-        Reduce { state, action in
-            if case let .workspaces(.element(id: wsID, action: .clearPaneStatus(paneID))) = action,
-               state.workspaces[id: wsID]?.panes[id: paneID]?.status == .waitingForInput {
-                state.completedAgentCount += 1
-                if let workspace = state.workspaces[id: wsID], let pane = workspace.panes[id: paneID] {
-                    state.completedAgents.insert(CompletedAgent(
-                        workspaceName: workspace.name,
-                        workspaceColor: workspace.color,
-                        paneTitle: pane.title ?? pane.label ?? "Shell",
-                        completedAt: Date()
-                    ), at: 0)
-                    if state.completedAgents.count > 30 {
-                        state.completedAgents.removeLast(state.completedAgents.count - 30)
-                    }
-                }
-            }
-            return .none
-        }
         Reduce { state, action in
             switch action {
             case .appLaunched:

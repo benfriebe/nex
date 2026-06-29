@@ -30,7 +30,7 @@ struct ChromeTheme: Equatable {
     // Semantic status (chrome-specific; not the system .green/.blue used before)
     let statusRunning: Color
     let statusWaiting: Color
-    let statusDone: Color
+    let statusInactive: Color
     let activeAgent: Color
     /// Opacity applied to a group's colour for its full-width header band.
     /// Light needs more to read as a pastel; dark needs less over near-black.
@@ -56,7 +56,7 @@ struct ChromeTheme: Equatable {
         paneFocus: .hex(0x5E8AC4),
         statusRunning: .hex(0x4FA46B),
         statusWaiting: .hex(0x5E8AC4),
-        statusDone: .hex(0x9A9A96),
+        statusInactive: .hex(0x9A9A96),
         activeAgent: .hex(0xA97C17),
         groupBandOpacity: 0.30
     )
@@ -77,7 +77,7 @@ struct ChromeTheme: Equatable {
         paneFocus: .hex(0x6F9BD8),
         statusRunning: .hex(0x5FBE89),
         statusWaiting: .hex(0x6F9BD8),
-        statusDone: .hex(0x8A8A92),
+        statusInactive: .hex(0x8A8A92),
         activeAgent: .hex(0xD3A329),
         groupBandOpacity: 0.22
     )
@@ -86,7 +86,7 @@ struct ChromeTheme: Equatable {
     /// preset. The `accent` override also drives the selection stroke/fill,
     /// since they're the one sidebar highlight. The agent status colours are
     /// independently overridable (`statusRunning` / `statusWaiting` /
-    /// `statusDone`).
+    /// `statusInactive`).
     func applying(_ overrides: [ChromeColorKey: Color]) -> ChromeTheme {
         guard !overrides.isEmpty else { return self }
         let newAccent = overrides[.accent] ?? accent
@@ -106,7 +106,7 @@ struct ChromeTheme: Equatable {
             paneFocus: overrides[.paneFocus] ?? paneFocus,
             statusRunning: overrides[.statusRunning] ?? statusRunning,
             statusWaiting: overrides[.statusWaiting] ?? statusWaiting,
-            statusDone: overrides[.statusDone] ?? statusDone,
+            statusInactive: overrides[.statusInactive] ?? statusInactive,
             activeAgent: activeAgent,
             groupBandOpacity: groupBandOpacity
         )
@@ -149,7 +149,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
     // popover). Grouped into their own Settings section via `isAgentStatus`.
     case statusRunning
     case statusWaiting
-    case statusDone
+    case statusInactive
 
     var id: String { rawValue }
 
@@ -157,7 +157,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
     /// section from the chrome surface colours.
     var isAgentStatus: Bool {
         switch self {
-        case .statusRunning, .statusWaiting, .statusDone: true
+        case .statusRunning, .statusWaiting, .statusInactive: true
         default: false
         }
     }
@@ -174,7 +174,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .divider: "Dividers / borders"
         case .statusRunning: "Running"
         case .statusWaiting: "Awaiting input"
-        case .statusDone: "Done"
+        case .statusInactive: "Inactive"
         }
     }
 
@@ -190,7 +190,7 @@ enum ChromeColorKey: String, CaseIterable, Identifiable {
         case .divider: theme.divider
         case .statusRunning: theme.statusRunning
         case .statusWaiting: theme.statusWaiting
-        case .statusDone: theme.statusDone
+        case .statusInactive: theme.statusInactive
         }
     }
 }
