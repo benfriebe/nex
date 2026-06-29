@@ -303,6 +303,12 @@ enum MarkdownRenderer {
             \(backgroundCSS)
         }
         .dark body { color: #e6edf3; }
+        /* Thin scrollbar matching the sidebar's overlay scroller. */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, 0.6); }
+        ::-webkit-scrollbar-corner { background: transparent; }
         h1, h2, h3, h4, h5, h6 {
             margin-top: 1.5em;
             margin-bottom: 0.5em;

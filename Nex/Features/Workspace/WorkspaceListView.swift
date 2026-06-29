@@ -2163,9 +2163,25 @@ private struct ScrollViewFinder: NSViewRepresentable {
 
     private final class ProbeView: NSView {
         var onFound: ((NSScrollView) -> Void)?
+        // Set once on the main thread, read in deinit; `nonisolated(unsafe)` so
+        // the nonisolated deinit can remove the observer.
+        private nonisolated(unsafe) var styleObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            // AppKit resets every scroll view to the system "preferred" scroller
+            // style on certain events — e.g. a WKWebView appearing when a
+            // markdown pane toggles edit/view. The sidebar doesn't re-render
+            // then, so re-assert the overlay style whenever that fires.
+            if styleObserver == nil {
+                styleObserver = NotificationCenter.default.addObserver(
+                    forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.reportIfAvailable()
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.reportIfAvailable()
             }
@@ -2174,6 +2190,10 @@ private struct ScrollViewFinder: NSViewRepresentable {
         func reportIfAvailable() {
             guard let sv = enclosingScrollView else { return }
             onFound?(sv)
+        }
+
+        deinit {
+            if let styleObserver { NotificationCenter.default.removeObserver(styleObserver) }
         }
     }
 }

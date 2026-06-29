@@ -278,6 +278,12 @@ enum DiffHTMLRenderer {
             overflow-x: hidden;
         }
         .dark body { color: #e6edf3; }
+        /* Thin scrollbar matching the sidebar's overlay scroller. */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, 0.6); }
+        ::-webkit-scrollbar-corner { background: transparent; }
         .diff {
             padding-bottom: 8px;
         }

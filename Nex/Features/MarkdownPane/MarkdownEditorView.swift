@@ -44,6 +44,8 @@ struct MarkdownEditorView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
+        // Thin overlay scroller, matching the sidebar.
+        scrollView.scrollerStyle = .overlay
 
         // Line number gutter — pane-header chrome colour (see ScratchpadEditorView).
         scrollView.rulersVisible = true

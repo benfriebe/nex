@@ -52,6 +52,8 @@ struct ScratchpadEditorView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
+        // Thin overlay scroller, matching the sidebar.
+        scrollView.scrollerStyle = .overlay
 
         // Line number gutter — uses the pane-header chrome colour so the gutter
         // reads as chrome, distinct from the terminal-coloured editor body.
