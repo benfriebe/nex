@@ -272,6 +272,12 @@ struct WorkspaceListView: View {
                         // can drive pixel-perfect scrolling and query
                         // documentVisibleRect for viewport detection.
                         ScrollViewFinder { sv in
+                            // Thin overlay scroller regardless of the system
+                            // "Show scroll bars: Always" setting. Re-asserted on
+                            // every update (ScrollViewFinder.updateNSView)
+                            // because AppKit reverts it to the wide legacy
+                            // scroller as the list re-lays-out.
+                            if sv.scrollerStyle != .overlay { sv.scrollerStyle = .overlay }
                             if hostScrollView !== sv { hostScrollView = sv }
                         }
                         .frame(height: 0)
@@ -683,6 +689,10 @@ struct WorkspaceListView: View {
                 selectionHeader
 
                 ScrollView {
+                    // Match the main list's thin overlay scroller (re-asserted
+                    // on every update; AppKit reverts it during re-layout).
+                    ScrollViewFinder { if $0.scrollerStyle != .overlay { $0.scrollerStyle = .overlay } }
+                        .frame(height: 0)
                     let ids = filteredWorkspaceIDs
                     if ids.isEmpty {
                         VStack(spacing: 4) {
@@ -2143,6 +2153,10 @@ private struct ScrollViewFinder: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context _: Context) {
         guard let probe = nsView as? ProbeView else { return }
         probe.onFound = onFound
+        // Re-fire on every SwiftUI update so callers can re-assert state AppKit
+        // resets during re-layout — e.g. the thin overlay scroller style, which
+        // otherwise reverts to the wide legacy scroller as the list navigates.
+        probe.reportIfAvailable()
     }
 
     private final class ProbeView: NSView {
