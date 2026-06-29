@@ -21,6 +21,11 @@ struct ContentView: View {
                         WorkspaceListView(store: store)
                             .frame(width: sidebarWidth)
                             .background(chromeTheme.sidebarBackground)
+                            // Same 1px divider as the "New Workspace" footer bar,
+                            // on the trailing edge to split the sidebar from the panes.
+                            .overlay(alignment: .trailing) {
+                                chromeTheme.divider.frame(width: 1)
+                            }
 
                         sidebarResizeHandle
                     }
