@@ -16,6 +16,7 @@
 		0A3E7A2B0CB52F2FE791A2B5 /* GroupCustomEmojiSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD30BE0FDF3CC57813A5DB46 /* GroupCustomEmojiSheet.swift */; };
 		0A70A24697C96E83D6A201CE /* PaneSendReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D5453E5B7EB4E8E7F11453 /* PaneSendReplyTests.swift */; };
 		0CB9F718A5EF25AF73DED570 /* WorkspaceGroupRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */; };
+		0D060C5B2588E0B6913B74BB /* AppReducer+WebPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */; };
 		0D23E37D86270E1BAADFF549 /* MarkdownCheckboxRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */; };
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
@@ -265,6 +266,7 @@
 		3A3FCA7A9AA41A0B3A67A8C7 /* LabelMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelMigrationTests.swift; sourceTree = "<group>"; };
 		3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroup.swift; sourceTree = "<group>"; };
 		3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFindScript.swift; sourceTree = "<group>"; };
+		3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+WebPane.swift"; sourceTree = "<group>"; };
 		3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftCLIReplyTests.swift; sourceTree = "<group>"; };
 		3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+Domain.swift"; sourceTree = "<group>"; };
 		3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyleThemeTests.swift; sourceTree = "<group>"; };
@@ -587,6 +589,7 @@
 				D9335AE3C92A37DD50A5715A /* AppReducer.swift */,
 				3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */,
 				BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */,
+				3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
 				BECB2222837AC350E94222BB /* Info.plist */,
@@ -1017,6 +1020,7 @@
 				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
 				9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */,
 				EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */,
+				0D060C5B2588E0B6913B74BB /* AppReducer+WebPane.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
 				D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */,
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,

@@ -18,6 +18,7 @@ extension AppReducer {
     enum ReducerDomain: Equatable {
         case core
         case searchNotify
+        case webPane
     }
 
     static func domain(of action: Action) -> ReducerDomain {
@@ -37,6 +38,34 @@ extension AppReducer {
              .openFile,
              .openFileAtPath:
             .searchNotify
+
+        // MARK: WebPane
+
+        // Web-pane top-level actions: URL-bar focus, new-tab / tab
+        // cycle / tab close, the batch-inspector lifecycle, private-mode
+        // toggle, and the inspect-payload receiver. The `nex web ...`
+        // socket verbs stay in `core`'s `.socketMessage` handler (they
+        // are `SocketMessage` cases, not `Action` cases) but call the
+        // relocated `handleWeb*` helpers via `self`.
+        case .openWebPanePath,
+             .webPaneFocusURLBar,
+             .webPaneOpenNewTab,
+             .webPaneTabCycleFocused,
+             .webPaneTabCloseActiveFocused,
+             .webInspectPayloadReceived,
+             .setWebInspectArmedSubmit,
+             .webBatchInspectStart,
+             .webBatchInspectHide,
+             .webBatchInspectShow,
+             .webBatchInspectToggle,
+             .webBatchInspectSend,
+             .webBatchInspectCancel,
+             .webPaneSetPrivate,
+             .webBatchFocusItem,
+             .syncBatchMarkers,
+             .pushBatchCommentToPage,
+             .webBatchDismissPopover:
+            .webPane
 
         // MARK: Core
 
@@ -109,24 +138,6 @@ extension AppReducer {
              .repoRemoteURLResolved,
              .repoAssociationBranchResolved,
              .openDiffPath,
-             .openWebPanePath,
-             .webPaneFocusURLBar,
-             .webPaneOpenNewTab,
-             .webPaneTabCycleFocused,
-             .webPaneTabCloseActiveFocused,
-             .webInspectPayloadReceived,
-             .setWebInspectArmedSubmit,
-             .webBatchInspectStart,
-             .webBatchInspectHide,
-             .webBatchInspectShow,
-             .webBatchInspectToggle,
-             .webBatchInspectSend,
-             .webBatchInspectCancel,
-             .webPaneSetPrivate,
-             .webBatchFocusItem,
-             .syncBatchMarkers,
-             .pushBatchCommentToPage,
-             .webBatchDismissPopover,
              .presets,
              .migrateLabelsToPresets,
              .toggleInspector,
