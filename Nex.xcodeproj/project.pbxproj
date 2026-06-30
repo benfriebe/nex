@@ -138,6 +138,7 @@
 		B7D2BF4B62D8D6DB71C707B5 /* RecursiveFSWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBD3F55DB0088089F62AFBFA /* RecursiveFSWatcherTests.swift */; };
 		B8B5B666D5CC24071420A966 /* StoragePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45141531B99E3E1B79620ECA /* StoragePanel.swift */; };
 		B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */; };
+		BAEEBBBC67C9969D0553D084 /* ChromeIndicatorRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */; };
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
 		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
 		C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */; };
@@ -216,6 +217,7 @@
 		09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncInputTests.swift; sourceTree = "<group>"; };
 		0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTarget.swift; sourceTree = "<group>"; };
 		0E79DA6455C6FF3D2124CBA9 /* GraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftService.swift; sourceTree = "<group>"; };
+		0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeIndicatorRefreshTests.swift; sourceTree = "<group>"; };
 		110ABCD54BF803110E5F5060 /* GraftInspectorButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftInspectorButton.swift; sourceTree = "<group>"; };
 		110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPopoverView.swift; sourceTree = "<group>"; };
 		11C5539104EFEFA5CCB936F1 /* GroupIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIcon.swift; sourceTree = "<group>"; };
@@ -490,6 +492,7 @@
 				A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */,
 				D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */,
 				ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */,
+				0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */,
 				3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */,
 				89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */,
 				309F641591BB580429299666 /* ConfigParserTests.swift */,
@@ -922,6 +925,7 @@
 				840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */,
 				B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */,
 				DC11308E0E92225F551CF162 /* AutoDetectRepoTests.swift in Sources */,
+				BAEEBBBC67C9969D0553D084 /* ChromeIndicatorRefreshTests.swift in Sources */,
 				ABDC80C6FF2934417FFC931B /* ChromeStyleThemeTests.swift in Sources */,
 				FD494AFC9E74F4C5D7E125B8 /* CommandPaletteTests.swift in Sources */,
 				A1937931A23F2D0EB8472737 /* ConfigParserTests.swift in Sources */,

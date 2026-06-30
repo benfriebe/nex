@@ -68,4 +68,29 @@ struct LabelMigrationTests {
         }
         await store.finish()
     }
+
+    /// A fresh install marks the migration done immediately (see the empty
+    /// `stateLoaded` path). This asserts the safety that buys: once the flag is
+    /// set, a later launch whose workspaces now carry the user's *own* labels
+    /// must NOT back-fill them into gray presets (which would also resurrect any
+    /// preset they deleted in the meantime).
+    @Test func migrationIsSkippedOnceMarkedDone() async {
+        let defaults = UserDefaultsClient.ephemeral()
+        defaults.setBool(true, LabelPresetsStorage.migratedKey)
+        var initial = AppReducer.State()
+        initial.workspaces = [workspace(labels: ["Alpha", "Beta"])]
+        initial.didRestoreWorkspaces = true
+
+        let store = TestStore(initialState: initial) { AppReducer() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.userDefaults = defaults
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.labelPresetsLoaded([]))
+        await store.receive(\.migrateLabelsToPresets) { state in
+            #expect(state.labelPresets.isEmpty)
+        }
+        await store.finish()
+    }
 }

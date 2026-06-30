@@ -3975,7 +3975,13 @@ struct AppReducer {
                     // to status / stop / quit-flush.
                     return .merge(
                         .send(.createWorkspace(name: "Default")),
-                        .send(.graft(.onAppLaunched(parentRepoRoots: [])))
+                        .send(.graft(.onAppLaunched(parentRepoRoots: []))),
+                        // A fresh install has no legacy free-form labels to
+                        // migrate. Mark the one-shot label→preset migration done
+                        // now so a later launch (workspaces no longer empty)
+                        // doesn't run it against the user's *new* labels and
+                        // resurrect any preset they deleted in the meantime.
+                        .run { _ in userDefaults.setBool(true, LabelPresetsStorage.migratedKey) }
                     )
                 }
                 state.workspaces = workspaces
@@ -4167,6 +4173,18 @@ struct AppReducer {
             case .workspaces:
                 // Child workspace actions — persist after mutations
                 return .send(.persistState)
+
+            // Chrome appearance / colour / theme changes recolour the agent
+            // status dots. In-app SwiftUI surfaces re-read them from the chrome
+            // environment automatically, but the AppKit menu-bar icon + popover
+            // are pushed their colours imperatively in `updateExternalIndicators`
+            // — so re-push when the chrome theme changes, otherwise the menu-bar
+            // dot keeps a stale colour until the next agent-status change. This
+            // MUST sit above the catch-all `case .settings:` below, which would
+            // otherwise shadow it (first-match-wins) and return `.none`.
+            case .settings(.setChromeAppearance), .settings(.setChromeColor),
+                 .settings(.resetChromeColors), .settings(.applyStyleTheme):
+                return .send(.updateExternalIndicators)
 
             case .settings:
                 return .none
@@ -6314,15 +6332,6 @@ struct AppReducer {
                 )))
 
             // MARK: - External Indicators
-
-            // The in-app SwiftUI surfaces re-read the status colours from the
-            // chrome environment automatically, but the AppKit menu-bar icon +
-            // popover are pushed their colours imperatively in
-            // `updateExternalIndicators` — so re-push when the chrome theme
-            // changes, otherwise the menu-bar dot keeps a stale colour until the
-            // next agent-status change.
-            case .settings(.setChromeAppearance), .settings(.setChromeColor), .settings(.resetChromeColors):
-                return .send(.updateExternalIndicators)
 
             case .updateExternalIndicators:
                 var totalWaiting = 0
