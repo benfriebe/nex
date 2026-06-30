@@ -12,7 +12,7 @@ struct LabelPresetTests {
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State> = []
     ) -> TestStoreOf<AppReducer> {
         var appState = AppReducer.State()
-        appState.labelPresets = labelPresets
+        appState.presets.labelPresets = labelPresets
         appState.workspaces = workspaces
 
         let store = TestStore(initialState: appState) {
@@ -49,41 +49,41 @@ struct LabelPresetTests {
 
     @Test func addAppendsPreset() async {
         let store = makeStore()
-        await store.send(.addLabelPreset(name: "backend", color: .named(.blue))) {
-            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.blue))]
+        await store.send(.presets(.addLabelPreset(name: "backend", color: .named(.blue)))) {
+            $0.presets.labelPresets = [LabelPreset(name: "backend", color: .named(.blue))]
         }
     }
 
     @Test func addCustomColorPreset() async {
         let store = makeStore()
-        await store.send(.addLabelPreset(name: "brand", color: .custom("#123456"))) {
-            $0.labelPresets = [LabelPreset(name: "brand", color: .custom("#123456"))]
+        await store.send(.presets(.addLabelPreset(name: "brand", color: .custom("#123456")))) {
+            $0.presets.labelPresets = [LabelPreset(name: "brand", color: .custom("#123456"))]
         }
     }
 
     @Test func addNormalizesWhitespace() async {
         let store = makeStore()
-        await store.send(.addLabelPreset(name: "  backend  ", color: .named(.green))) {
-            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.green))]
+        await store.send(.presets(.addLabelPreset(name: "  backend  ", color: .named(.green)))) {
+            $0.presets.labelPresets = [LabelPreset(name: "backend", color: .named(.green))]
         }
     }
 
     @Test func addRejectsEmptyName() async {
         let store = makeStore()
-        await store.send(.addLabelPreset(name: "   ", color: .named(.red)))
-        #expect(store.state.labelPresets.isEmpty)
+        await store.send(.presets(.addLabelPreset(name: "   ", color: .named(.red))))
+        #expect(store.state.presets.labelPresets.isEmpty)
     }
 
     @Test func addRejectsDuplicateName() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.addLabelPreset(name: "backend", color: .named(.red)))
-        #expect(store.state.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.presets(.addLabelPreset(name: "backend", color: .named(.red))))
+        #expect(store.state.presets.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
     }
 
     @Test func addTreatsCaseAsDistinct() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.addLabelPreset(name: "Backend", color: .named(.purple))) {
-            $0.labelPresets = [
+        await store.send(.presets(.addLabelPreset(name: "Backend", color: .named(.purple)))) {
+            $0.presets.labelPresets = [
                 LabelPreset(name: "backend", color: .named(.blue)),
                 LabelPreset(name: "Backend", color: .named(.purple))
             ]
@@ -94,15 +94,15 @@ struct LabelPresetTests {
 
     @Test func updateRenamesAndRecolors() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.updateLabelPreset(id: "backend", name: "api", color: .named(.orange))) {
-            $0.labelPresets = [LabelPreset(name: "api", color: .named(.orange))]
+        await store.send(.presets(.updateLabelPreset(id: "backend", name: "api", color: .named(.orange)))) {
+            $0.presets.labelPresets = [LabelPreset(name: "api", color: .named(.orange))]
         }
     }
 
     @Test func updateRecolorOnly() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.updateLabelPreset(id: "backend", name: "backend", color: .custom("#abcdef"))) {
-            $0.labelPresets = [LabelPreset(name: "backend", color: .custom("#abcdef"))]
+        await store.send(.presets(.updateLabelPreset(id: "backend", name: "backend", color: .custom("#abcdef")))) {
+            $0.presets.labelPresets = [LabelPreset(name: "backend", color: .custom("#abcdef"))]
         }
     }
 
@@ -113,8 +113,8 @@ struct LabelPresetTests {
             LabelPreset(name: "backend", color: .named(.blue)),
             LabelPreset(name: "frontend", color: .named(.green))
         ])
-        await store.send(.updateLabelPreset(id: "backend", name: "backend", color: .named(.pink))) {
-            $0.labelPresets = [
+        await store.send(.presets(.updateLabelPreset(id: "backend", name: "backend", color: .named(.pink)))) {
+            $0.presets.labelPresets = [
                 LabelPreset(name: "backend", color: .named(.pink)),
                 LabelPreset(name: "frontend", color: .named(.green))
             ]
@@ -123,15 +123,15 @@ struct LabelPresetTests {
 
     @Test func updateNormalizesWhitespace() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.updateLabelPreset(id: "backend", name: "  api  ", color: .named(.orange))) {
-            $0.labelPresets = [LabelPreset(name: "api", color: .named(.orange))]
+        await store.send(.presets(.updateLabelPreset(id: "backend", name: "  api  ", color: .named(.orange)))) {
+            $0.presets.labelPresets = [LabelPreset(name: "api", color: .named(.orange))]
         }
     }
 
     @Test func updateRejectsEmptyName() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.updateLabelPreset(id: "backend", name: "  ", color: .named(.red)))
-        #expect(store.state.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.presets(.updateLabelPreset(id: "backend", name: "  ", color: .named(.red))))
+        #expect(store.state.presets.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
     }
 
     @Test func updateRejectsRenameCollision() async {
@@ -139,8 +139,8 @@ struct LabelPresetTests {
             LabelPreset(name: "backend", color: .named(.blue)),
             LabelPreset(name: "frontend", color: .named(.green))
         ])
-        await store.send(.updateLabelPreset(id: "frontend", name: "backend", color: .named(.red)))
-        #expect(store.state.labelPresets == [
+        await store.send(.presets(.updateLabelPreset(id: "frontend", name: "backend", color: .named(.red))))
+        #expect(store.state.presets.labelPresets == [
             LabelPreset(name: "backend", color: .named(.blue)),
             LabelPreset(name: "frontend", color: .named(.green))
         ])
@@ -148,8 +148,8 @@ struct LabelPresetTests {
 
     @Test func updateUnknownIDIsNoOp() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.updateLabelPreset(id: "ghost", name: "x", color: .named(.red)))
-        #expect(store.state.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.presets(.updateLabelPreset(id: "ghost", name: "x", color: .named(.red))))
+        #expect(store.state.presets.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
     }
 
     // MARK: - remove
@@ -158,18 +158,18 @@ struct LabelPresetTests {
 
     @Test func setTextColorUpdatesAndClears() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff"))) {
-            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: .custom("#ffffff"))]
+        await store.send(.presets(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff")))) {
+            $0.presets.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: .custom("#ffffff"))]
         }
-        await store.send(.setLabelPresetTextColor(id: "backend", textColor: nil)) {
-            $0.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: nil)]
+        await store.send(.presets(.setLabelPresetTextColor(id: "backend", textColor: nil))) {
+            $0.presets.labelPresets = [LabelPreset(name: "backend", color: .named(.blue), textColor: nil)]
         }
     }
 
     @Test func setTextColorUnknownIDIsNoOp() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "backend", color: .named(.blue))])
-        await store.send(.setLabelPresetTextColor(id: "ghost", textColor: .custom("#ffffff")))
-        #expect(store.state.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
+        await store.send(.presets(.setLabelPresetTextColor(id: "ghost", textColor: .custom("#ffffff"))))
+        #expect(store.state.presets.labelPresets == [LabelPreset(name: "backend", color: .named(.blue))])
     }
 
     @Test func resolvedStyleUsesAutoOrExplicitText() {
@@ -185,8 +185,8 @@ struct LabelPresetTests {
             LabelPreset(name: "backend", color: .named(.blue)),
             LabelPreset(name: "frontend", color: .named(.green))
         ])
-        await store.send(.removeLabelPreset(id: "backend")) {
-            $0.labelPresets = [LabelPreset(name: "frontend", color: .named(.green))]
+        await store.send(.presets(.removeLabelPreset(id: "backend"))) {
+            $0.presets.labelPresets = [LabelPreset(name: "frontend", color: .named(.green))]
         }
     }
 
@@ -198,13 +198,13 @@ struct LabelPresetTests {
             labelPresets: [LabelPreset(name: "backend", color: .named(.blue))],
             workspaces: [ws]
         )
-        await store.send(.removeLabelPreset(id: "backend")) {
-            $0.labelPresets = []
+        await store.send(.presets(.removeLabelPreset(id: "backend"))) {
+            $0.presets.labelPresets = []
         }
         // Presets are a colour lookup only; the workspace keeps its label,
         // which now renders in the neutral style.
         #expect(store.state.workspaces[id: wsID]?.labels == ["backend"])
-        #expect(store.state.colorForLabel("backend") == nil)
+        #expect(store.state.presets.colorForLabel("backend") == nil)
     }
 
     // MARK: - move
@@ -215,8 +215,8 @@ struct LabelPresetTests {
             LabelPreset(name: "b", color: .named(.green)),
             LabelPreset(name: "c", color: .named(.blue))
         ])
-        await store.send(.moveLabelPreset(fromIndex: 0, toIndex: 3)) {
-            $0.labelPresets = [
+        await store.send(.presets(.moveLabelPreset(fromIndex: 0, toIndex: 3))) {
+            $0.presets.labelPresets = [
                 LabelPreset(name: "b", color: .named(.green)),
                 LabelPreset(name: "c", color: .named(.blue)),
                 LabelPreset(name: "a", color: .named(.red))
@@ -230,8 +230,8 @@ struct LabelPresetTests {
             LabelPreset(name: "b", color: .named(.green))
         ]
         let store = makeStore(labelPresets: presets)
-        await store.send(.moveLabelPreset(fromIndex: 1, toIndex: 1))
-        #expect(store.state.labelPresets == presets)
+        await store.send(.presets(.moveLabelPreset(fromIndex: 1, toIndex: 1)))
+        #expect(store.state.presets.labelPresets == presets)
     }
 
     @Test func moveOutOfBoundsIsNoOp() async {
@@ -240,8 +240,8 @@ struct LabelPresetTests {
             LabelPreset(name: "b", color: .named(.green))
         ]
         let store = makeStore(labelPresets: presets)
-        await store.send(.moveLabelPreset(fromIndex: 5, toIndex: 0))
-        #expect(store.state.labelPresets == presets)
+        await store.send(.presets(.moveLabelPreset(fromIndex: 5, toIndex: 0)))
+        #expect(store.state.presets.labelPresets == presets)
     }
 
     // MARK: - load + colorForLabel
@@ -249,17 +249,17 @@ struct LabelPresetTests {
     @Test func loadReplacesPresets() async {
         let store = makeStore(labelPresets: [LabelPreset(name: "old", color: .named(.gray))])
         let loaded = [LabelPreset(name: "new", color: .named(.yellow))]
-        await store.send(.labelPresetsLoaded(loaded)) {
-            $0.labelPresets = loaded
+        await store.send(.presets(.labelPresetsLoaded(loaded))) {
+            $0.presets.labelPresets = loaded
         }
     }
 
     @Test func colorForLabelMatchesExactCaseSensitive() {
         var state = AppReducer.State()
-        state.labelPresets = [LabelPreset(name: "backend", color: .named(.blue))]
-        #expect(state.colorForLabel("backend") == .named(.blue))
-        #expect(state.colorForLabel("Backend") == nil)
-        #expect(state.colorForLabel("missing") == nil)
+        state.presets.labelPresets = [LabelPreset(name: "backend", color: .named(.blue))]
+        #expect(state.presets.colorForLabel("backend") == .named(.blue))
+        #expect(state.presets.colorForLabel("Backend") == nil)
+        #expect(state.presets.colorForLabel("missing") == nil)
     }
 
     // MARK: - storage round-trip + LabelColor
@@ -319,8 +319,8 @@ struct LabelPresetTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.addLabelPreset(name: "backend", color: .named(.blue)))
-        await store.send(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff")))
+        await store.send(.presets(.addLabelPreset(name: "backend", color: .named(.blue))))
+        await store.send(.presets(.setLabelPresetTextColor(id: "backend", textColor: .custom("#ffffff"))))
         await store.finish()
 
         let json = lock.withLock { dict[LabelPresetsStorage.defaultsKey] as? String }

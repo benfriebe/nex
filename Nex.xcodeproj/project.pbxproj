@@ -147,6 +147,7 @@
 		C1FC2BD79FF0D9DC86910028 /* WebPaneInspectorScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2BAD220346CCE551765FCD9 /* WebPaneInspectorScript.swift */; };
 		C276E6F9F7B46ED43FF491D5 /* NexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3714AA1F15C85762BF36B1FE /* NexApp.swift */; };
 		C35AD7E358BD4B5B0EABF5E9 /* ChromeTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483277A20C203022712FB04D /* ChromeTheme.swift */; };
+		CB44792B290665E1AFEAD3E6 /* PresetsFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC03B83D15C0B9F7298F2E6A /* PresetsFeature.swift */; };
 		CCBCDD690DA8A082B0C3D1EF /* StatusBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */; };
 		CF6DEC598C1A3508555E8EB3 /* LabelPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D6C6671997547A9F95AD39 /* LabelPresetTests.swift */; };
 		D0B97CB294CE96D259C08960 /* GraftCLIReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */; };
@@ -325,6 +326,7 @@
 		A11F5427AE75515696FB8295 /* PaneLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutTests.swift; sourceTree = "<group>"; };
 		A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigClient.swift; sourceTree = "<group>"; };
+		AC03B83D15C0B9F7298F2E6A /* PresetsFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetsFeature.swift; sourceTree = "<group>"; };
 		AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingTests.swift; sourceTree = "<group>"; };
 		ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDetectRepoTests.swift; sourceTree = "<group>"; };
 		ADD43112159981D690331BA5 /* SettingsFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureTests.swift; sourceTree = "<group>"; };
@@ -623,6 +625,7 @@
 				DF5C0A1272DF055BCEA24B8E /* Help */,
 				B83E9D548B12F0748394A98C /* MarkdownPane */,
 				575CB385F691D30D4A449F9C /* PaneGrid */,
+				A92450B4AE2B865C4D63B81C /* Presets */,
 				09ECBBE13D93F1F5CFC8849D /* RepoRegistry */,
 				0E3C930E9EEBE1D0094A6538 /* ScratchpadPane */,
 				3C80F4E7F9BFB46382583CF8 /* Settings */,
@@ -741,6 +744,14 @@
 				75DCD589969583F84BFCE38B /* NexTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A92450B4AE2B865C4D63B81C /* Presets */ = {
+			isa = PBXGroup;
+			children = (
+				AC03B83D15C0B9F7298F2E6A /* PresetsFeature.swift */,
+			);
+			path = Presets;
 			sourceTree = "<group>";
 		};
 		AC905926869FDDF14867CEFA /* Config */ = {
@@ -1060,6 +1071,7 @@
 				5883FFD10BE73F44EA8F4A5C /* PaneSearchOverlay.swift in Sources */,
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
+				CB44792B290665E1AFEAD3E6 /* PresetsFeature.swift in Sources */,
 				FF3255F9A9213474DC14A2A0 /* QuitGate.swift in Sources */,
 				9443792BCB5BEA5B06312F00 /* RecursiveFSWatcher.swift in Sources */,
 				C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */,

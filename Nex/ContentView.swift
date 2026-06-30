@@ -214,9 +214,9 @@ struct ContentView: View {
                             onWebTogglePrivate: { paneID in
                                 store.send(.webPaneSetPrivate(paneID: paneID, enabled: nil))
                             },
-                            favourites: store.favourites,
+                            favourites: store.presets.favourites,
                             onToggleFavourite: { url, title in
-                                store.send(.toggleFavourite(url: url, title: title))
+                                store.send(.presets(.toggleFavourite(url: url, title: title)))
                             },
                             onOpenFavourite: { paneID, url in
                                 store.send(.workspaces(.element(

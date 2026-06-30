@@ -31,11 +31,14 @@ struct LabelMigrationTests {
         initial.didRestoreWorkspaces = true // workspaces already restored
 
         let store = store(initial)
-        // Presets load (none stored) → triggers the migration.
-        await store.send(.labelPresetsLoaded([]))
-        await store.receive(\.migrateLabelsToPresets) { state in
-            #expect(state.labelPresets.map(\.name) == ["Alpha", "Beta"])
-            #expect(state.labelPresets.allSatisfy { $0.color == .named(.gray) })
+        // Presets load (none stored) → child signals didLoadLabelPresets →
+        // core runs the gate (migrateLabelsToPresets) → child back-fills via
+        // applyMigratedLabels.
+        await store.send(.presets(.labelPresetsLoaded([])))
+        await store.receive(\.migrateLabelsToPresets)
+        await store.receive(\.presets.applyMigratedLabels) { state in
+            #expect(state.presets.labelPresets.map(\.name) == ["Alpha", "Beta"])
+            #expect(state.presets.labelPresets.allSatisfy { $0.color == .named(.gray) })
         }
         await store.finish()
     }
@@ -47,11 +50,12 @@ struct LabelMigrationTests {
 
         let store = store(initial)
         // "Alpha" already has a blue preset → only "Beta" is back-filled.
-        await store.send(.labelPresetsLoaded([LabelPreset(name: "Alpha", color: .named(.blue))]))
-        await store.receive(\.migrateLabelsToPresets) { state in
-            #expect(state.labelPresets.count == 2)
-            #expect(state.labelPresets.first { $0.name == "Alpha" }?.color == .named(.blue))
-            #expect(state.labelPresets.first { $0.name == "Beta" }?.color == .named(.gray))
+        await store.send(.presets(.labelPresetsLoaded([LabelPreset(name: "Alpha", color: .named(.blue))])))
+        await store.receive(\.migrateLabelsToPresets)
+        await store.receive(\.presets.applyMigratedLabels) { state in
+            #expect(state.presets.labelPresets.count == 2)
+            #expect(state.presets.labelPresets.first { $0.name == "Alpha" }?.color == .named(.blue))
+            #expect(state.presets.labelPresets.first { $0.name == "Beta" }?.color == .named(.gray))
         }
         await store.finish()
     }
@@ -62,9 +66,10 @@ struct LabelMigrationTests {
         // didRestoreWorkspaces stays false: presets loading alone must not migrate.
 
         let store = store(initial)
-        await store.send(.labelPresetsLoaded([]))
+        // Gate fails (workspaces not restored) → no applyMigratedLabels.
+        await store.send(.presets(.labelPresetsLoaded([])))
         await store.receive(\.migrateLabelsToPresets) { state in
-            #expect(state.labelPresets.isEmpty)
+            #expect(state.presets.labelPresets.isEmpty)
         }
         await store.finish()
     }
@@ -87,9 +92,10 @@ struct LabelMigrationTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.labelPresetsLoaded([]))
+        // Gate fails (migration already marked done) → no applyMigratedLabels.
+        await store.send(.presets(.labelPresetsLoaded([])))
         await store.receive(\.migrateLabelsToPresets) { state in
-            #expect(state.labelPresets.isEmpty)
+            #expect(state.presets.labelPresets.isEmpty)
         }
         await store.finish()
     }

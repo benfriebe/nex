@@ -688,7 +688,7 @@ private struct WebFavouritesSettingsView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
-                if store.favourites.isEmpty {
+                if store.presets.favourites.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "star")
                             .font(.system(size: 28))
@@ -704,21 +704,21 @@ private struct WebFavouritesSettingsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selection) {
-                        ForEach(store.favourites) { fav in
+                        ForEach(store.presets.favourites) { fav in
                             FavouriteRow(
                                 favourite: fav,
                                 onRename: { newTitle in
-                                    store.send(.renameFavourite(id: fav.id, title: newTitle))
+                                    store.send(.presets(.renameFavourite(id: fav.id, title: newTitle)))
                                 },
                                 onRemove: {
-                                    store.send(.removeFavourite(id: fav.id))
+                                    store.send(.presets(.removeFavourite(id: fav.id)))
                                 }
                             )
                             .tag(fav.id)
                         }
                         .onMove { source, destination in
                             guard let from = source.first else { return }
-                            store.send(.moveFavourite(fromIndex: from, toIndex: destination))
+                            store.send(.presets(.moveFavourite(fromIndex: from, toIndex: destination)))
                         }
                     }
                     .listStyle(.inset)

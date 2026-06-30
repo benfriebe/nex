@@ -44,28 +44,14 @@ struct AppReducer {
         /// not state worth surfacing to the view layer or persisting.
         var webInspectArmedSubmit: [UUID: Bool] = [:]
 
-        var favourites: [Favourite] = []
+        /// Web favourites + workspace label presets. See `PresetsFeature`.
+        var presets = PresetsFeature.State()
 
-        /// User-defined workspace label presets (name + color). A flat
-        /// global list, persisted in UserDefaults like `favourites`. Used
-        /// to offer canned labels in the inspector and to tint chips whose
-        /// text matches a preset name.
-        var labelPresets: [LabelPreset] = []
-
-        /// One-time label→preset migration runs once both the workspaces and
-        /// the (UserDefaults) presets have loaded — they load concurrently, so
-        /// each completion sets its flag and triggers the migration when both
-        /// are ready.
+        /// One half of the one-time label→preset migration gate (the other,
+        /// `presets.didLoadLabelPresets`, lives in `PresetsFeature.State`).
+        /// They load concurrently; core's `migrateLabelsToPresets` runs the
+        /// back-fill once both are ready.
         var didRestoreWorkspaces = false
-        var didLoadLabelPresets = false
-
-        /// Color for a workspace label string, or nil when no preset
-        /// matches (chip renders in the neutral free-form style). Match is
-        /// exact and case-sensitive, mirroring how `addLabel` stores
-        /// labels (trim/clamp only, no lowercasing).
-        func colorForLabel(_ label: String) -> LabelColor? {
-            labelPresets.color(for: label)
-        }
 
         // Command Palette
         var isCommandPaletteVisible: Bool = false
@@ -526,33 +512,18 @@ struct AppReducer {
         /// the popover + focus ring (page side).
         case webBatchDismissPopover(paneID: UUID)
 
-        // MARK: - Web favourites
+        /// Web favourites + label presets child reducer. See `PresetsFeature`.
+        case presets(PresetsFeature.Action)
 
-        case favouritesLoaded([Favourite])
-        case removeFavourite(id: UUID)
-        case renameFavourite(id: UUID, title: String)
-        case moveFavourite(fromIndex: Int, toIndex: Int)
-        /// Star toggle: add when missing, remove when present.
-        /// URL match is case-insensitive with trailing-slash stripped.
-        case toggleFavourite(url: String, title: String)
+        // MARK: - Label preset migration (coordinator)
 
-        // MARK: - Label presets
-
-        case labelPresetsLoaded([LabelPreset])
         /// Back-fill a preset (default colour) for every existing workspace
         /// label that predates the presets feature, so they survive being
-        /// unapplied. Runs once both workspaces + presets have loaded.
+        /// unapplied. Runs once both workspaces + presets have loaded. Core
+        /// owns the gate (it reads `workspaces` + `didRestoreWorkspaces`) and
+        /// passes the collected labels into `PresetsFeature` for the actual
+        /// back-fill.
         case migrateLabelsToPresets
-        /// Add a preset. Name is normalized (trim/clamp); empty or a
-        /// case-sensitive duplicate name is ignored.
-        case addLabelPreset(name: String, color: LabelColor)
-        /// Edit a preset addressed by its current name. Renaming to
-        /// collide with another preset's name is ignored.
-        case updateLabelPreset(id: String, name: String, color: LabelColor)
-        /// Set (or clear, with nil = auto black/white) a preset's text colour.
-        case setLabelPresetTextColor(id: String, textColor: LabelColor?)
-        case removeLabelPreset(id: String)
-        case moveLabelPreset(fromIndex: Int, toIndex: Int)
 
         // Inspector + Git Status
         case toggleInspector
@@ -647,25 +618,6 @@ struct AppReducer {
             await surfaceManager.focus(paneID: paneID)
         }
         .cancellable(id: PaletteFocusID.pending, cancelInFlight: true)
-    }
-
-    private func persistFavourites(_ favourites: [Favourite]) -> Effect<Action> {
-        let json = FavouritesStorage.encode(favourites)
-        return .run { [userDefaults] _ in
-            userDefaults.setString(json, FavouritesStorage.defaultsKey)
-        }
-    }
-
-    private func persistLabelPresets(_ presets: [LabelPreset]) -> Effect<Action> {
-        // Write immediately (like favourites) rather than debouncing: a
-        // debounce would drop a preset add/remove/rename made within the
-        // window of a Cmd-Q (the effect is cancelled on terminate). The
-        // colour-picker drag that motivated a debounce only produces cheap,
-        // off-main, cfprefsd-coalesced UserDefaults writes anyway.
-        let json = LabelPresetsStorage.encode(presets)
-        return .run { [userDefaults] _ in
-            userDefaults.setString(json, LabelPresetsStorage.defaultsKey)
-        }
     }
 
     /// Coalesce rapid `cd`s before scanning the directory for a repo root.
@@ -3085,11 +3037,11 @@ struct AppReducer {
                     },
                     .run { [userDefaults] send in
                         let json = userDefaults.stringForKey(FavouritesStorage.defaultsKey)
-                        await send(.favouritesLoaded(FavouritesStorage.decode(json)))
+                        await send(.presets(.favouritesLoaded(FavouritesStorage.decode(json))))
                     },
                     .run { [userDefaults] send in
                         let json = userDefaults.stringForKey(LabelPresetsStorage.defaultsKey)
-                        await send(.labelPresetsLoaded(LabelPresetsStorage.decode(json)))
+                        await send(.presets(.labelPresetsLoaded(LabelPresetsStorage.decode(json))))
                     }
                 )
 
@@ -4241,51 +4193,29 @@ struct AppReducer {
                 effects.append(scheduleFocusAfterPaletteClose(paneID: targetPaneID))
                 return .merge(effects)
 
-            // MARK: - Web favourites
+            // MARK: - Presets child reducer (web favourites + label presets)
 
-            case .favouritesLoaded(let list):
-                state.favourites = list
-                return .none
+            // Field mutations + persistence live in `PresetsFeature` (wired
+            // via the `Scope` below). Core keeps only the migration
+            // coordinator: once the presets load, the child signals via
+            // `.delegate(.didLoadLabelPresets)`, and core runs the one-time
+            // gate (`migrateLabelsToPresets`) which reads `workspaces` +
+            // `didRestoreWorkspaces` and passes the collected labels back
+            // into the child for the actual back-fill.
+            //
 
-            case .removeFavourite(let id):
-                guard let idx = state.favourites.firstIndex(where: { $0.id == id })
-                else { return .none }
-                state.favourites.remove(at: idx)
-                return persistFavourites(state.favourites)
-
-            case .renameFavourite(let id, let title):
-                guard let idx = state.favourites.firstIndex(where: { $0.id == id })
-                else { return .none }
-                state.favourites[idx].title = title
-                return persistFavourites(state.favourites)
-
-            case .moveFavourite(let from, let to):
-                guard from >= 0, from < state.favourites.count,
-                      to >= 0, to <= state.favourites.count, from != to
-                else { return .none }
-                state.favourites.move(fromOffsets: IndexSet(integer: from), toOffset: to)
-                return persistFavourites(state.favourites)
-
-            case .toggleFavourite(let url, let title):
-                let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return .none }
-                if let existing = state.favourites.firstMatching(url: trimmed) {
-                    state.favourites.removeAll { $0.id == existing.id }
-                } else {
-                    state.favourites.append(Favourite(id: uuid(), url: trimmed, title: title))
-                }
-                return persistFavourites(state.favourites)
-
-            // MARK: - Label presets
-
-            case .labelPresetsLoaded(let list):
-                state.labelPresets = list
-                state.didLoadLabelPresets = true
+            // This specific case MUST sit above the catch-all `case .presets:`
+            // below, which would otherwise shadow it (first-match-wins) and
+            // return `.none`.
+            case .presets(.delegate(.didLoadLabelPresets)):
                 return .send(.migrateLabelsToPresets)
+
+            case .presets:
+                return .none
 
             case .migrateLabelsToPresets:
                 // Only once both halves have loaded (they load concurrently).
-                guard state.didRestoreWorkspaces, state.didLoadLabelPresets else { return .none }
+                guard state.didRestoreWorkspaces, state.presets.didLoadLabelPresets else { return .none }
                 // One-shot: a back-fill that ran every launch would resurrect a
                 // preset the user later deletes (its label can still be applied
                 // to a workspace), reverting their delete + custom colour.
@@ -4293,61 +4223,18 @@ struct AppReducer {
                 let markMigrated = Effect<Action>.run { _ in
                     userDefaults.setBool(true, LabelPresetsStorage.migratedKey)
                 }
-                var seen = Set(state.labelPresets.map(\.name))
-                var added: [LabelPreset] = []
+                // Collect the workspace labels (deduped, first-seen order). The
+                // dedup against the *existing presets* happens in the child,
+                // which owns `labelPresets`.
+                var seen = Set<String>()
+                var labels: [String] = []
                 for workspace in state.workspaces {
                     for label in workspace.labels where !seen.contains(label) {
                         seen.insert(label)
-                        // Default colour; the user can recolour it in Settings.
-                        added.append(LabelPreset(name: label, color: .named(.gray)))
+                        labels.append(label)
                     }
                 }
-                guard !added.isEmpty else { return markMigrated }
-                state.labelPresets.append(contentsOf: added)
-                return .merge(persistLabelPresets(state.labelPresets), markMigrated)
-
-            case .addLabelPreset(let name, let color):
-                let normalized = WorkspaceFeature.normalizeLabel(name)
-                guard !normalized.isEmpty,
-                      !state.labelPresets.contains(where: { $0.name == normalized })
-                else { return .none }
-                state.labelPresets.append(LabelPreset(name: normalized, color: color))
-                return persistLabelPresets(state.labelPresets)
-
-            case .updateLabelPreset(let id, let name, let color):
-                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
-                else { return .none }
-                let normalized = WorkspaceFeature.normalizeLabel(name)
-                guard !normalized.isEmpty else { return .none }
-                // Reject a rename that collides with a *different* preset.
-                // Excluding the edited row by id means a recolor or a
-                // whitespace-only edit of the same row is never a
-                // self-collision.
-                if state.labelPresets.contains(where: { $0.id != id && $0.name == normalized }) {
-                    return .none
-                }
-                state.labelPresets[idx].name = normalized
-                state.labelPresets[idx].color = color
-                return persistLabelPresets(state.labelPresets)
-
-            case .setLabelPresetTextColor(let id, let textColor):
-                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
-                else { return .none }
-                state.labelPresets[idx].textColor = textColor
-                return persistLabelPresets(state.labelPresets)
-
-            case .removeLabelPreset(let id):
-                guard let idx = state.labelPresets.firstIndex(where: { $0.id == id })
-                else { return .none }
-                state.labelPresets.remove(at: idx)
-                return persistLabelPresets(state.labelPresets)
-
-            case .moveLabelPreset(let from, let to):
-                guard from >= 0, from < state.labelPresets.count,
-                      to >= 0, to <= state.labelPresets.count, from != to
-                else { return .none }
-                state.labelPresets.move(fromOffsets: IndexSet(integer: from), toOffset: to)
-                return persistLabelPresets(state.labelPresets)
+                return .merge(markMigrated, .send(.presets(.applyMigratedLabels(labels: labels))))
 
             // MARK: - Config + Hotkey child reducer
 
@@ -6254,6 +6141,10 @@ struct AppReducer {
 
         Scope(state: \.configHotkey, action: \.configHotkey) {
             ConfigHotkeyFeature()
+        }
+
+        Scope(state: \.presets, action: \.presets) {
+            PresetsFeature()
         }
     }
 
