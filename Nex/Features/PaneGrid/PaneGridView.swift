@@ -32,6 +32,7 @@ struct PaneGridView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
+    var onSetPaneStatus: ((UUID, PaneStatus) -> Void)?
     /// Issue #121 sync-input state. `isSyncInputActive` flips the
     /// workspace toggle (drives the per-pane SYNC badge for every
     /// non-excluded pane); `syncInputExcluded` lists panes opted out.
@@ -186,6 +187,9 @@ struct PaneGridView: View {
                 onMoveToWorkspace: onMovePaneToWorkspace.map { handler in
                     { targetWS in handler(pane.id, targetWS) }
                 },
+                onSetStatus: pane.type == .shell
+                    ? onSetPaneStatus.map { handler in { status in handler(pane.id, status) } }
+                    : nil,
                 isSyncExcluded: syncInputExcluded.contains(pane.id),
                 workspaceSyncActive: isSyncInputActive,
                 onToggleSyncExcluded: onToggleSyncExcluded.map { handler in

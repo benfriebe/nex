@@ -125,6 +125,9 @@ struct ContentView: View {
                                     reply: nil
                                 ))
                             },
+                            onSetPaneStatus: { paneID, status in
+                                store.send(.setPaneStatus(paneID: paneID, status: status))
+                            },
                             isSyncInputActive: workspace.isSyncInputActive,
                             syncInputExcluded: workspace.syncInputExcluded,
                             onToggleSyncExcluded: { paneID in

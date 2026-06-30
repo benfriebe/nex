@@ -2340,4 +2340,103 @@ struct WorkspaceFeatureTests {
             #expect(state.panes[id: newID]?.workingDirectory == NSHomeDirectory())
         }
     }
+
+    // MARK: - setPaneStatus (issue #183)
+
+    /// The pane context menu's manual status override updates `Pane.status`.
+    @Test func setPaneStatusUpdatesStatus() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setPaneStatus(paneID: paneID, status: .waitingForInput)) { state in
+            #expect(state.panes[id: paneID]?.status == .waitingForInput)
+        }
+        await store.send(.setPaneStatus(paneID: paneID, status: .idle)) { state in
+            #expect(state.panes[id: paneID]?.status == .idle)
+        }
+    }
+
+    /// Manually marking a pane `.running` starts the elapsed clock so the
+    /// "claude · mm:ss" badge ticks from the moment of the override.
+    @Test func setPaneStatusToRunningStartsClock() async {
+        let now = Date(timeIntervalSince1970: 5000)
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(now)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setPaneStatus(paneID: paneID, status: .running)) { state in
+            #expect(state.panes[id: paneID]?.status == .running)
+            #expect(state.panes[id: paneID]?.agentStartedAt == now)
+        }
+    }
+
+    /// A repeated `.running` override doesn't reset the elapsed clock — only a
+    /// fresh non-running → running transition stamps `agentStartedAt`.
+    @Test func setPaneStatusRunningPreservesExistingClock() async {
+        let firstStart = Date(timeIntervalSince1970: 5000)
+        var pane = Pane(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000aa")!)
+        pane.status = .running
+        pane.agentStartedAt = firstStart
+        let workspace = WorkspaceFeature.State(
+            id: UUID(uuidString: "10000000-0000-0000-0000-0000000000aa")!,
+            name: "Test", slug: "test", color: .blue,
+            panes: [pane], layout: .leaf(pane.id),
+            focusedPaneID: pane.id, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 9999))
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setPaneStatus(paneID: pane.id, status: .running)) { state in
+            #expect(state.panes[id: pane.id]?.agentStartedAt == firstStart)
+        }
+    }
+
+    /// The `.shell` gate is defended in the reducer, not just the view — so a
+    /// stray dispatch (e.g. a future CLI verb) targeting a markdown / diff /
+    /// web pane is a no-op rather than mutating a pane that never renders
+    /// status.
+    @Test func setPaneStatusOnNonShellPaneIsNoOp() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-0000000000bb")!
+        let pane = Pane(id: paneID, type: .markdown)
+        let workspace = WorkspaceFeature.State(
+            id: UUID(uuidString: "10000000-0000-0000-0000-0000000000bb")!,
+            name: "Test", slug: "test", color: .blue,
+            panes: [pane], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 1000))
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // The reducer guards on pane type, so status stays idle.
+        await store.send(.setPaneStatus(paneID: paneID, status: .running))
+        #expect(store.state.panes[id: paneID]?.status == .idle)
+        #expect(store.state.panes[id: paneID]?.agentStartedAt == nil)
+    }
 }

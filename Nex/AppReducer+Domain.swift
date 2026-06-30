@@ -149,6 +149,7 @@ extension AppReducer {
              .beginRenameActiveWorkspace,
              .setRenamingWorkspaceID,
              .setRenamingPaneID,
+             .setPaneStatus,
              .toggleWorkspaceSelection,
              .rangeSelectWorkspace,
              .clearWorkspaceSelection,

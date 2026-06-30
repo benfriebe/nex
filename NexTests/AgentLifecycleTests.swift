@@ -237,4 +237,64 @@ struct AgentLifecycleTests {
             state.workspaces[id: wsID]?.panes[id: paneID]?.status = .waitingForInput
         }
     }
+
+    // MARK: - Manual status override (issue #183)
+
+    @Test func setPaneStatusRoutesToOwningWorkspace() async {
+        let paneID1 = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let paneID2 = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let wsID1 = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let wsID2 = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
+
+        let ws1 = WorkspaceFeature.State(
+            id: wsID1, name: "WS1", slug: "ws1", color: .blue,
+            panes: [Pane(id: paneID1)], layout: .leaf(paneID1),
+            focusedPaneID: paneID1, createdAt: Date(), lastAccessedAt: Date()
+        )
+        let ws2 = WorkspaceFeature.State(
+            id: wsID2, name: "WS2", slug: "ws2", color: .red,
+            panes: [Pane(id: paneID2)], layout: .leaf(paneID2),
+            focusedPaneID: paneID2, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws1, ws2],
+            activeWorkspaceID: wsID1
+        )
+
+        // Override the status of a pane in the *background* workspace — it
+        // must resolve to WS2 by pane id, not the active workspace.
+        await store.send(.setPaneStatus(paneID: paneID2, status: .running))
+
+        await store.receive(
+            .workspaces(.element(id: wsID2, action: .setPaneStatus(paneID: paneID2, status: .running)))
+        ) { state in
+            state.workspaces[id: wsID2]?.panes[id: paneID2]?.status = .running
+            state.workspaces[id: wsID2]?.panes[id: paneID2]?.agentStartedAt = Date(timeIntervalSince1970: 1000)
+        }
+
+        // The deliberate override refreshes external indicators and persists.
+        await store.receive(.updateExternalIndicators)
+        await store.receive(.persistState)
+    }
+
+    @Test func setPaneStatusForUnknownPaneIsIgnored() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let unknownPaneID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+
+        let ws = WorkspaceFeature.State(
+            id: wsID, name: "WS", slug: "ws", color: .blue,
+            panes: [Pane(id: paneID)], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws],
+            activeWorkspaceID: wsID
+        )
+
+        // No owning workspace — no effects.
+        await store.send(.setPaneStatus(paneID: unknownPaneID, status: .running))
+    }
 }
