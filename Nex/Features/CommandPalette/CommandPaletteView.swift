@@ -11,6 +11,7 @@ struct CommandPaletteView: View {
     let onConfirm: () -> Void
     let onDismiss: () -> Void
 
+    @Environment(\.chromeTheme) private var chromeTheme
     @FocusState private var isFieldFocused: Bool
     @State private var localQuery: String = ""
     @State private var scrollToSelection = false
@@ -81,8 +82,7 @@ struct CommandPaletteView: View {
             }
         }
         .frame(width: 440)
-        .background(.ultraThinMaterial)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.85))
+        .background(chromeTheme.surfaceBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         .onAppear {

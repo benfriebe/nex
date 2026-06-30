@@ -25,6 +25,7 @@ struct NewWorkspaceSheet: View {
     @State private var isRepoPickerPresented = false
     @State private var selectedGroupID: UUID?
     @FocusState private var focusedField: Field?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     init(store: StoreOf<AppReducer>) {
         self.store = store
@@ -150,6 +151,7 @@ struct NewWorkspaceSheet: View {
             }
             .padding(20)
             .frame(width: 360)
+            .background(chromeTheme.surfaceBackground)
             .onAppear {
                 // Dispatching lets the sheet finish presenting before we
                 // steal first responder. Without this, the TextField

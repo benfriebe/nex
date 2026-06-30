@@ -229,12 +229,12 @@ enum DiffHTMLRenderer {
         return luminance < 0.5
     }
 
-    private static func cssBackground(color: NSColor, opacity: Double) -> String {
-        let rgb = color.usingColorSpace(.sRGB) ?? color
-        let r = Int(rgb.redComponent * 255)
-        let g = Int(rgb.greenComponent * 255)
-        let b = Int(rgb.blueComponent * 255)
-        return "background-color: rgba(\(r), \(g), \(b), \(opacity));"
+    private static func cssBackground(color _: NSColor, opacity _: Double) -> String {
+        // Transparent: the pane body's SwiftUI background is the single
+        // ghostty-coloured surface behind this (transparent) web view, matching
+        // the terminal exactly and going transparent at 0% opacity. The colour
+        // is still used by the caller to pick the light/dark text theme.
+        "background-color: transparent;"
     }
 
     private static func wrapInHTMLDocument(
@@ -278,6 +278,12 @@ enum DiffHTMLRenderer {
             overflow-x: hidden;
         }
         .dark body { color: #e6edf3; }
+        /* Thin scrollbar matching the sidebar's overlay scroller. */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, 0.6); }
+        ::-webkit-scrollbar-corner { background: transparent; }
         .diff {
             padding-bottom: 8px;
         }

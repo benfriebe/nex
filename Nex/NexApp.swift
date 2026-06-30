@@ -11,6 +11,12 @@ struct NexApp: App {
     }
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
+    // Holds the loaded ghostty config so the `\.ghosttyConfig` environment
+    // reflects the real terminal background once it's read in `.onAppear`.
+    // Injecting `.liveValue` directly captured the pre-load default
+    // (windowBackgroundColor), so markdown / scratchpad / diff panes rendered a
+    // different background from the terminal surfaces.
+    @State private var ghosttyConfig = GhosttyConfigClient()
     @StateObject private var updaterViewModel = UpdaterViewModel(
         startUpdater: !NexApp.isTestMode
     )
@@ -26,13 +32,19 @@ struct NexApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(store: store)
+            RootChromeView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
-                .environment(\.ghosttyConfig, .liveValue)
+                .environment(\.ghosttyConfig, ghosttyConfig)
                 .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
                 .frame(minWidth: 600, minHeight: 400)
+                // An appearance change updates `liveValue` and posts this; mirror
+                // it into @State so the env re-injects and the non-terminal panes
+                // pick up the new terminal background live.
+                .onReceive(NotificationCenter.default.publisher(for: GhosttyConfigClient.changedNotification)) { _ in
+                    ghosttyConfig = .liveValue
+                }
                 .onAppear {
                     guard !Self.isTestMode else { return }
 
@@ -62,11 +74,22 @@ struct NexApp: App {
                     let statusBar = StatusBarController.liveValue
                     statusBar.setup()
                     statusBar.onSelectPane = { paneID, workspaceID in
-                        store.send(.setActiveWorkspace(workspaceID))
-                        store.send(.workspaces(.element(id: workspaceID, action: .focusPane(paneID))))
+                        // Raise the window FIRST. Making it key restores its
+                        // previous first responder (the previously-focused
+                        // surface), whose `becomeFirstResponder` re-emits
+                        // `paneFocusedNotification` and syncs focus back to the
+                        // OLD pane. Setting the new focus before that lets the
+                        // restoration revert it — which is why selecting a pane
+                        // in the already-active workspace snapped back to the
+                        // old pane (cross-workspace the old surface isn't in
+                        // view, so nothing reverts).
                         NSApp.activate()
-                        if let window = NSApp.windows.first {
-                            window.makeKeyAndOrderFront(nil)
+                        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+                        store.send(.setActiveWorkspace(workspaceID))
+                        // Apply focus after the window has restored its old
+                        // first responder, so our selection is the last word.
+                        DispatchQueue.main.async {
+                            store.send(.workspaces(.element(id: workspaceID, action: .focusPane(paneID))))
                         }
                     }
 
@@ -87,12 +110,23 @@ struct NexApp: App {
                     }
 
                     GhosttyConfigClient.liveValue = config
+                    // Drive the environment so the pane views (markdown /
+                    // scratchpad / diff) pick up the real terminal background.
+                    ghosttyConfig = config
 
                     if let window = NSApp.windows.first {
                         if config.backgroundOpacity < 1 {
                             window.isOpaque = false
                             window.backgroundColor = .white.withAlphaComponent(0.001)
                         }
+                        // NB: do NOT set `isMovableByWindowBackground` — it turns
+                        // the whole window (incl. the sidebar) into a drag handle,
+                        // which hijacks sidebar row/group reordering. With
+                        // `.hiddenTitleBar` the titlebar region the custom title
+                        // bar overlaps is already window-draggable (its
+                        // non-interactive SwiftUI content reports
+                        // mouseDownCanMoveWindow), so the bar still moves the
+                        // window without breaking sidebar drags.
                     }
 
                     // Global hotkey callback — registration happens from the
@@ -142,7 +176,7 @@ struct NexApp: App {
                     shortcutMonitor = monitor
                 }
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updaterViewModel: updaterViewModel)
@@ -152,7 +186,9 @@ struct NexApp: App {
         }
 
         Settings {
-            SettingsView(store: store)
+            ChromeThemed(store: store) {
+                SettingsView(store: store)
+            }
         }
 
         Window("Nex Help", id: "help") {

@@ -8,6 +8,7 @@ extension UUID: @retroactive Identifiable {
 /// Trailing inspector panel showing workspace metadata, repo associations, and pane list.
 struct WorkspaceInspectorView: View {
     let store: StoreOf<AppReducer>
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var isRepoPickerPresented = false
     @State private var isWorktreePickerPresented = false
     @State private var worktreeRepoID: UUID?
@@ -53,7 +54,7 @@ struct WorkspaceInspectorView: View {
                     }
                 }
                 .frame(width: 280)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(chromeTheme.sidebarBackground)
                 .sheet(isPresented: $isRepoPickerPresented) {
                     RepoPickerView(
                         repos: store.repoRegistry,
@@ -439,6 +440,7 @@ struct CreateWorktreeSheet: View {
     var onChangeRepo: (() -> Void)?
 
     @State private var branchEdited = false
+    @Environment(\.chromeTheme) private var chromeTheme
 
     private var isValid: Bool {
         !worktreeName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -500,6 +502,7 @@ struct CreateWorktreeSheet: View {
         }
         .padding(20)
         .frame(width: 320)
+        .background(chromeTheme.surfaceBackground)
     }
 }
 

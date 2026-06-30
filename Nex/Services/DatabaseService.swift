@@ -234,6 +234,17 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v16_workspace_icon") { db in
+            // Guarded like the other ADD COLUMN migrations: a pre-release
+            // DB may already have the column from an earlier build.
+            let columns = try db.columns(in: "workspace").map(\.name)
+            if !columns.contains("icon") {
+                try db.alter(table: "workspace") { t in
+                    t.add(column: "icon", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -253,6 +264,9 @@ struct WorkspaceRecord: Codable, FetchableRecord, PersistableRecord {
     var lastAccessedAt: Double
     var sortOrder: Int
     var labelsJSON: String
+    /// Prefix-qualified `GroupIcon.storageString` (`"system:<name>"` /
+    /// `"emoji:<grapheme>"`); nil falls back to the first-letter avatar.
+    var icon: String?
 }
 
 struct PaneRecord: Codable, FetchableRecord, PersistableRecord {

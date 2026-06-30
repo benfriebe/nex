@@ -1,6 +1,7 @@
 import AppKit
 import ComposableArchitecture
 import Foundation
+import SwiftUI
 import WebKit
 
 @Reducer
@@ -20,6 +21,7 @@ struct AppReducer {
         var groupDeleteConfirmation: GroupDeleteConfirmation?
         var groupBulkCreatePrompt: GroupBulkCreatePrompt?
         var groupCustomEmojiPrompt: GroupCustomEmojiPrompt?
+        var workspaceCustomEmojiPrompt: WorkspaceCustomEmojiPrompt?
         var selectedWorkspaceIDs: Set<UUID> = []
         var lastSelectionAnchor: UUID?
         var bulkDeleteConfirmationIDs: [UUID]?
@@ -56,6 +58,13 @@ struct AppReducer {
         /// to offer canned labels in the inspector and to tint chips whose
         /// text matches a preset name.
         var labelPresets: [LabelPreset] = []
+
+        /// One-time label→preset migration runs once both the workspaces and
+        /// the (UserDefaults) presets have loaded — they load concurrently, so
+        /// each completion sets its flag and triggers the migration when both
+        /// are ready.
+        var didRestoreWorkspaces = false
+        var didLoadLabelPresets = false
 
         /// Color for a workspace label string, or nil when no preset
         /// matches (chip renders in the neutral free-form style). Match is
@@ -115,6 +124,27 @@ struct AppReducer {
                 }
             }
             return ActivitySummary(agentCount: agentCount, workspaceCount: workspaceCount)
+        }
+
+        /// Cross-workspace agent counts for the bottom status bar. Reading
+        /// this inside a tracked view registers a dependency on `workspaces`,
+        /// so the footer re-bodies on any status change (Release-safe when
+        /// read from a distinct child view).
+        var chromeStatusSummary: ChromeStatusSummary {
+            var summary = ChromeStatusSummary()
+            for workspace in workspaces {
+                for pane in workspace.panes {
+                    switch pane.status {
+                    case .running: summary.running += 1
+                    case .waitingForInput: summary.waiting += 1
+                    case .idle:
+                        // An attached-but-idle agent session is "inactive"
+                        // (a resumable agent that isn't running or waiting).
+                        if pane.agentSessionID != nil { summary.inactive += 1 }
+                    }
+                }
+            }
+            return summary
         }
 
         /// Sidebar entry that the active workspace occupies, used as an
@@ -387,6 +417,10 @@ struct AppReducer {
         case requestGroupCustomEmoji(UUID)
         case cancelGroupCustomEmoji
         case confirmGroupCustomEmoji(String)
+        case setWorkspaceIcon(id: UUID, icon: GroupIcon?)
+        case requestWorkspaceCustomEmoji(UUID)
+        case cancelWorkspaceCustomEmoji
+        case confirmWorkspaceCustomEmoji(String)
         case deleteGroup(id: UUID, cascade: Bool)
         case moveWorkspaceToGroup(workspaceID: UUID, groupID: UUID?, index: Int? = nil)
         case beginRenameGroup(UUID)
@@ -526,6 +560,10 @@ struct AppReducer {
         // MARK: - Label presets
 
         case labelPresetsLoaded([LabelPreset])
+        /// Back-fill a preset (default colour) for every existing workspace
+        /// label that predates the presets feature, so they survive being
+        /// unapplied. Runs once both workspaces + presets have loaded.
+        case migrateLabelsToPresets
         /// Add a preset. Name is normalized (trim/clamp); empty or a
         /// case-sensitive duplicate name is ignored.
         case addLabelPreset(name: String, color: LabelColor)
@@ -584,6 +622,7 @@ struct AppReducer {
         case setFocusFollowsMouseDelay(Int)
         case setTCPPort(Int)
         case tcpPortStartFailed(Int)
+        case restartSocketServer
 
         // Global Hotkey
         case setGlobalHotkey(KeyTrigger?)
@@ -3660,6 +3699,38 @@ struct AppReducer {
                 state.groups[id: prompt.groupID]?.icon = .emoji(String(firstGrapheme))
                 return .send(.persistState)
 
+            case .setWorkspaceIcon(let id, let icon):
+                guard state.workspaces[id: id] != nil else { return .none }
+                state.workspaces[id: id]?.icon = icon
+                return .send(.persistState)
+
+            case .requestWorkspaceCustomEmoji(let id):
+                guard let workspace = state.workspaces[id: id] else { return .none }
+                state.workspaceCustomEmojiPrompt = WorkspaceCustomEmojiPrompt(
+                    workspaceID: id,
+                    workspaceName: workspace.name
+                )
+                return .none
+
+            case .cancelWorkspaceCustomEmoji:
+                state.workspaceCustomEmojiPrompt = nil
+                return .none
+
+            case .confirmWorkspaceCustomEmoji(let emoji):
+                // Same server-side "1 emoji grapheme" guard as the group path.
+                let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let prompt = state.workspaceCustomEmojiPrompt,
+                      let firstGrapheme = trimmed.first,
+                      firstGrapheme.isGraphemeEmoji
+                else {
+                    state.workspaceCustomEmojiPrompt = nil
+                    return .none
+                }
+                state.workspaceCustomEmojiPrompt = nil
+                guard state.workspaces[id: prompt.workspaceID] != nil else { return .none }
+                state.workspaces[id: prompt.workspaceID]?.icon = .emoji(String(firstGrapheme))
+                return .send(.persistState)
+
             case .deleteGroup(let id, let cascade):
                 guard let group = state.groups[id: id] else { return .none }
                 let childIDs = group.childOrder
@@ -3904,13 +3975,20 @@ struct AppReducer {
                     // to status / stop / quit-flush.
                     return .merge(
                         .send(.createWorkspace(name: "Default")),
-                        .send(.graft(.onAppLaunched(parentRepoRoots: [])))
+                        .send(.graft(.onAppLaunched(parentRepoRoots: []))),
+                        // A fresh install has no legacy free-form labels to
+                        // migrate. Mark the one-shot label→preset migration done
+                        // now so a later launch (workspaces no longer empty)
+                        // doesn't run it against the user's *new* labels and
+                        // resurrect any preset they deleted in the meantime.
+                        .run { _ in userDefaults.setBool(true, LabelPresetsStorage.migratedKey) }
                     )
                 }
                 state.workspaces = workspaces
                 state.groups = groups
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
                 state.repoRegistry = repoRegistry
+                state.didRestoreWorkspaces = true
 
                 // Use persisted topLevelOrder if present; otherwise synthesize
                 // from the flat workspaces list (legacy DBs predate groups).
@@ -3998,6 +4076,7 @@ struct AppReducer {
                         },
                         .send(.refreshGitStatus),
                         .send(.startGitStatusTimer),
+                        .send(.migrateLabelsToPresets),
                         .send(.graft(.onAppLaunched(parentRepoRoots: parentRepoRoots)))
                     ] + watcherSeeds
                 )
@@ -4094,6 +4173,18 @@ struct AppReducer {
             case .workspaces:
                 // Child workspace actions — persist after mutations
                 return .send(.persistState)
+
+            // Chrome appearance / colour / theme changes recolour the agent
+            // status dots. In-app SwiftUI surfaces re-read them from the chrome
+            // environment automatically, but the AppKit menu-bar icon + popover
+            // are pushed their colours imperatively in `updateExternalIndicators`
+            // — so re-push when the chrome theme changes, otherwise the menu-bar
+            // dot keeps a stale colour until the next agent-status change. This
+            // MUST sit above the catch-all `case .settings:` below, which would
+            // otherwise shadow it (first-match-wins) and return `.none`.
+            case .settings(.setChromeAppearance), .settings(.setChromeColor),
+                 .settings(.resetChromeColors), .settings(.applyStyleTheme):
+                return .send(.updateExternalIndicators)
 
             case .settings:
                 return .none
@@ -4224,7 +4315,31 @@ struct AppReducer {
 
             case .labelPresetsLoaded(let list):
                 state.labelPresets = list
-                return .none
+                state.didLoadLabelPresets = true
+                return .send(.migrateLabelsToPresets)
+
+            case .migrateLabelsToPresets:
+                // Only once both halves have loaded (they load concurrently).
+                guard state.didRestoreWorkspaces, state.didLoadLabelPresets else { return .none }
+                // One-shot: a back-fill that ran every launch would resurrect a
+                // preset the user later deletes (its label can still be applied
+                // to a workspace), reverting their delete + custom colour.
+                guard !userDefaults.boolForKey(LabelPresetsStorage.migratedKey) else { return .none }
+                let markMigrated = Effect<Action>.run { _ in
+                    userDefaults.setBool(true, LabelPresetsStorage.migratedKey)
+                }
+                var seen = Set(state.labelPresets.map(\.name))
+                var added: [LabelPreset] = []
+                for workspace in state.workspaces {
+                    for label in workspace.labels where !seen.contains(label) {
+                        seen.insert(label)
+                        // Default colour; the user can recolour it in Settings.
+                        added.append(LabelPreset(name: label, color: .named(.gray)))
+                    }
+                }
+                guard !added.isEmpty else { return markMigrated }
+                state.labelPresets.append(contentsOf: added)
+                return .merge(persistLabelPresets(state.labelPresets), markMigrated)
 
             case .addLabelPreset(let name, let color):
                 let normalized = WorkspaceFeature.normalizeLabel(name)
@@ -4357,6 +4472,18 @@ struct AppReducer {
                         value: "\(delay)",
                         inFile: path
                     )
+                }
+
+            case .restartSocketServer:
+                // Tear down and rebind the Unix socket (clears /tmp/nex.sock
+                // and any wedged client FDs); bring TCP back if configured.
+                // onMessage is a singleton property, so it survives the cycle.
+                return .run { [tcpPort = state.tcpPort] _ in
+                    socketServer.stop()
+                    socketServer.start()
+                    if tcpPort > 0 {
+                        _ = socketServer.startTCP(port: tcpPort)
+                    }
                 }
 
             case .setTCPPort(let port):
@@ -6244,12 +6371,26 @@ struct AppReducer {
                 let finalWaiting = totalWaiting
                 let finalRunning = totalRunning
                 let finalItems = statusItems
+                let appearance = state.settings.chromeAppearance
+                let colorOverrides = state.settings.chromeColorOverrides
                 return .run { _ in
                     await MainActor.run {
+                        // Resolve the chrome status colours so the menu-bar icon
+                        // + popover match the in-app status colours. The menu bar
+                        // sits in the OS appearance, so resolve against it.
+                        let scheme: ColorScheme = NSApp.effectiveAppearance
+                            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+                        let theme = ChromeTheme.resolve(
+                            appearance: appearance,
+                            system: scheme,
+                            overrides: colorOverrides
+                        )
                         controller.update(
                             waitingCount: finalWaiting,
                             runningCount: finalRunning,
-                            items: finalItems
+                            items: finalItems,
+                            waitingColor: theme.statusWaiting,
+                            runningColor: theme.statusRunning
                         )
                         if finalWaiting > 0 {
                             NSApp.dockTile.badgeLabel = "\(finalWaiting)"

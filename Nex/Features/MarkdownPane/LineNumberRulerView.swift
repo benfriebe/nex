@@ -7,6 +7,12 @@ final class LineNumberRulerView: NSRulerView {
     private let textPadding: CGFloat = 4
     private let minimumThickness: CGFloat = 36
 
+    /// Gutter fill + line-number colour. When `gutterBackgroundColor` is set the
+    /// gutter is painted with it (the pane-header chrome colour) instead of
+    /// letting the transparent editor surface show through.
+    var gutterBackgroundColor: NSColor? { didSet { needsDisplay = true } }
+    var gutterTextColor: NSColor? { didSet { needsDisplay = true } }
+
     /// Cached newline offsets for O(1) line-number lookup during scroll.
     /// Index i holds the string index of the start of line i+1.
     private var lineStarts: [Int] = [0]
@@ -80,6 +86,11 @@ final class LineNumberRulerView: NSRulerView {
     // MARK: - Drawing
 
     override func drawHashMarksAndLabels(in _: NSRect) {
+        if let gutterBackgroundColor {
+            gutterBackgroundColor.setFill()
+            bounds.fill()
+        }
+
         guard let textView = clientView as? NSTextView,
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
@@ -89,7 +100,7 @@ final class LineNumberRulerView: NSRulerView {
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: lineNumberFont,
-            .foregroundColor: NSColor.secondaryLabelColor
+            .foregroundColor: gutterTextColor ?? NSColor.secondaryLabelColor
         ]
 
         let string = textView.string as NSString

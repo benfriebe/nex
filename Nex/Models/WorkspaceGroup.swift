@@ -51,3 +51,10 @@ struct GroupCustomEmojiPrompt: Equatable {
     let groupID: UUID
     let groupName: String
 }
+
+/// Workspace counterpart of `GroupCustomEmojiPrompt`, driving the custom
+/// emoji sheet for a workspace avatar icon.
+struct WorkspaceCustomEmojiPrompt: Equatable {
+    let workspaceID: UUID
+    let workspaceName: String
+}

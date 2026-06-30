@@ -2,6 +2,8 @@ import SwiftUI
 
 struct StatusBarPopoverView: View {
     let items: [StatusBarItem]
+    var waitingColor: Color = .blue
+    var runningColor: Color = .green
     let onSelectPane: (UUID, UUID) -> Void
 
     private var groupedItems: [(workspaceName: String, workspaceColor: WorkspaceColor, panes: [StatusBarItem])] {
@@ -91,17 +93,17 @@ struct StatusBarPopoverView: View {
         switch status {
         case .waitingForInput:
             Circle()
-                .fill(.blue)
+                .fill(waitingColor)
                 .frame(width: 8, height: 8)
                 .overlay(
                     Circle()
-                        .fill(.blue.opacity(0.4))
+                        .fill(waitingColor.opacity(0.4))
                         .frame(width: 12, height: 12)
                         .pulse()
                 )
         case .running:
             Circle()
-                .fill(.green)
+                .fill(runningColor)
                 .frame(width: 8, height: 8)
         case .idle:
             EmptyView()

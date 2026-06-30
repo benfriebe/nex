@@ -21,6 +21,11 @@ final class StatusBarController: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var waitingCount: Int = 0
     private nonisolated(unsafe) var runningCount: Int = 0
     private nonisolated(unsafe) var items: [StatusBarItem] = []
+    // Configurable agent-status colours, resolved from the chrome theme. The
+    // menu-bar dot and the popover use these instead of system blue/green so
+    // they match the in-app status colours.
+    private nonisolated(unsafe) var waitingColor: Color = .blue
+    private nonisolated(unsafe) var runningColor: Color = .green
 
     nonisolated(unsafe) var onSelectPane: ((UUID, UUID) -> Void)?
 
@@ -34,10 +39,18 @@ final class StatusBarController: NSObject, @unchecked Sendable {
     }
 
     @MainActor
-    func update(waitingCount: Int, runningCount: Int, items: [StatusBarItem]) {
+    func update(
+        waitingCount: Int,
+        runningCount: Int,
+        items: [StatusBarItem],
+        waitingColor: Color = .blue,
+        runningColor: Color = .green
+    ) {
         self.waitingCount = waitingCount
         self.runningCount = runningCount
         self.items = items
+        self.waitingColor = waitingColor
+        self.runningColor = runningColor
         updateIcon()
 
         // Update popover content if visible
@@ -54,6 +67,8 @@ final class StatusBarController: NSObject, @unchecked Sendable {
         let size = NSSize(width: 18, height: 18)
         let waiting = waitingCount
         let running = runningCount
+        let waitingFill = waitingColor
+        let runningFill = runningColor
 
         let image = NSImage(size: size, flipped: false) { rect in
             // Draw terminal icon
@@ -77,7 +92,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
                     width: dotSize,
                     height: dotSize
                 )
-                NSColor.systemBlue.setFill()
+                NSColor(waitingFill).setFill()
                 NSBezierPath(ovalIn: dotRect).fill()
             } else if running > 0 {
                 let dotSize: CGFloat = 6
@@ -87,7 +102,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
                     width: dotSize,
                     height: dotSize
                 )
-                NSColor.systemGreen.setFill()
+                NSColor(runningFill).setFill()
                 NSBezierPath(ovalIn: dotRect).fill()
             }
 
@@ -135,7 +150,11 @@ final class StatusBarController: NSObject, @unchecked Sendable {
         let currentItems = items
         let callback = onSelectPane
         let hostingView = NSHostingView(
-            rootView: StatusBarPopoverView(items: currentItems) { paneID, workspaceID in
+            rootView: StatusBarPopoverView(
+                items: currentItems,
+                waitingColor: waitingColor,
+                runningColor: runningColor
+            ) { paneID, workspaceID in
                 callback?(paneID, workspaceID)
                 target?.performClose(nil)
             }

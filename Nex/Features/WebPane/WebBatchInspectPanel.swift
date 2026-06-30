@@ -27,6 +27,7 @@ struct WebBatchInspectPanel: View {
     /// session, or `nil` on the first batch. Seeds the picker.
     var initialSelection: BatchTargetMemory?
 
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var selection: TargetSelection = .unselected
 
     /// `.unselected` blocks Send so the user can't accidentally
@@ -61,7 +62,7 @@ struct WebBatchInspectPanel: View {
             Divider()
             footer
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(chromeTheme.surfaceBackground)
         .overlay(alignment: .top) { Divider() }
         .onAppear { seedSelection() }
         // The WKWebView underneath sets `cursor:crosshair` while the
@@ -284,7 +285,7 @@ struct WebBatchInspectPanel: View {
             .frame(minWidth: 140, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(chromeTheme.headerBackground)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 5)

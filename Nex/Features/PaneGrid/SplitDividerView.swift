@@ -7,6 +7,7 @@ struct SplitDividerView: View {
     let onDrag: (Double) -> Void
     var onDragStateChanged: ((Bool) -> Void)?
 
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var isDragging = false
 
     private var isHorizontal: Bool {
@@ -15,11 +16,11 @@ struct SplitDividerView: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color(nsColor: .windowBackgroundColor))
+            .fill(chromeTheme.divider)
             .overlay(isDragging ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.2))
             .frame(
-                width: isHorizontal ? 4 : nil,
-                height: isHorizontal ? nil : 4
+                width: isHorizontal ? PaneLayout.dividerThickness : nil,
+                height: isHorizontal ? nil : PaneLayout.dividerThickness
             )
             .contentShape(Rectangle().inset(by: -4))
             .onHover { hovering in

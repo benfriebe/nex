@@ -55,6 +55,7 @@ struct RepoPickerView: View {
     /// Last interacted-with row. Drives keyboard nav and shift-click ranges.
     @State private var anchorRepoID: UUID?
     @FocusState private var focusedField: Field?
+    @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         VStack(spacing: 12) {
@@ -98,6 +99,7 @@ struct RepoPickerView: View {
         }
         .padding(16)
         .frame(width: 360, height: 340)
+        .background(chromeTheme.surfaceBackground)
         .onAppear {
             DispatchQueue.main.async {
                 focusedField = .search

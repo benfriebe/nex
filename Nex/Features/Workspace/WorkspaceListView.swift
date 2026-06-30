@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -199,11 +200,25 @@ struct WorkspaceListView: View {
             )) {
                 if let prompt = store.groupCustomEmojiPrompt {
                     GroupCustomEmojiSheet(
-                        groupName: prompt.groupName,
+                        subjectName: prompt.groupName,
                         onConfirm: { emoji in
                             store.send(.confirmGroupCustomEmoji(emoji))
                         },
                         onCancel: { store.send(.cancelGroupCustomEmoji) }
+                    )
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { store.workspaceCustomEmojiPrompt != nil },
+                set: { if !$0 { store.send(.cancelWorkspaceCustomEmoji) } }
+            )) {
+                if let prompt = store.workspaceCustomEmojiPrompt {
+                    GroupCustomEmojiSheet(
+                        subjectName: prompt.workspaceName,
+                        onConfirm: { emoji in
+                            store.send(.confirmWorkspaceCustomEmoji(emoji))
+                        },
+                        onCancel: { store.send(.cancelWorkspaceCustomEmoji) }
                     )
                 }
             }
@@ -257,6 +272,12 @@ struct WorkspaceListView: View {
                         // can drive pixel-perfect scrolling and query
                         // documentVisibleRect for viewport detection.
                         ScrollViewFinder { sv in
+                            // Thin overlay scroller regardless of the system
+                            // "Show scroll bars: Always" setting. Re-asserted on
+                            // every update (ScrollViewFinder.updateNSView)
+                            // because AppKit reverts it to the wide legacy
+                            // scroller as the list re-lays-out.
+                            if sv.scrollerStyle != .overlay { sv.scrollerStyle = .overlay }
                             if hostScrollView !== sv { hostScrollView = sv }
                         }
                         .frame(height: 0)
@@ -338,27 +359,57 @@ struct WorkspaceListView: View {
                 selectionHeader
             }
             .safeAreaInset(edge: .bottom) {
-                Menu {
-                    Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
-                    Button("New Group") {
-                        let placeholder = defaultGroupName(existing: store.groups)
-                        store.send(.createGroup(name: placeholder, autoRename: true))
+                // Left: "+ New Workspace" (primary action) + a chevron menu
+                // for New Workspace / New Group. Right: the ⌘N shortcut hint.
+                // `.menuStyle(.borderlessButton)` flattens a complex custom
+                // label, so the row is composed from a plain Button + a small
+                // single-glyph chevron Menu rather than one Menu label.
+                HStack(spacing: 6) {
+                    Button {
+                        store.send(.showNewWorkspaceSheet())
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus")
+                            Text("New Workspace")
+                        }
+                        .contentShape(Rectangle())
                     }
-                } label: {
-                    Label("New Workspace", systemImage: "plus")
-                        .frame(maxWidth: .infinity)
-                } primaryAction: {
-                    store.send(.showNewWorkspaceSheet())
+                    .buttonStyle(.plain)
+
+                    Menu {
+                        Button("New Workspace") { store.send(.showNewWorkspaceSheet()) }
+                        Button("New Group") {
+                            let placeholder = defaultGroupName(existing: store.groups)
+                            store.send(.createGroup(name: placeholder, autoRename: true))
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    // The borderlessButton style tints its label with the
+                    // accent; force it to the text colour to match the label.
+                    .tint(chromeTheme.textSecondary)
+                    .foregroundStyle(chromeTheme.textSecondary)
+
+                    Spacer()
+
+                    Text("\u{2318}N")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(chromeTheme.textTertiary)
                 }
-                .menuStyle(.borderlessButton)
                 .padding(12)
-                // Opaque fill matching the sidebar root background
-                // (ContentView paints the same colour). `safeAreaInset`
-                // lets the scroll view's rows slide *under* this bar, so
-                // without a solid background the colour pill and pane
-                // count of the row above bleed through behind the button.
+                // Opaque fill matching the sidebar root background. The top
+                // divider separates the footer from the scrolling list.
                 .frame(maxWidth: .infinity)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(chromeTheme.sidebarBackground)
+                .foregroundStyle(chromeTheme.textSecondary)
+                .overlay(alignment: .top) {
+                    chromeTheme.divider.frame(height: 1)
+                }
             }
         }
     }
@@ -387,10 +438,10 @@ struct WorkspaceListView: View {
                   let group = store.groups[id: gid],
                   !group.isCollapsed
             else { return nil }
-            return group.color?.color ?? Color.secondary
+            return group.color?.color ?? chromeTheme.divider
         case .groupEmpty(let groupID):
             guard let group = store.groups[id: groupID] else { return nil }
-            return group.color?.color ?? Color.secondary
+            return group.color?.color ?? chromeTheme.divider
         }
     }
 
@@ -541,14 +592,15 @@ struct WorkspaceListView: View {
     }
 
     private var filterField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundStyle(chromeTheme.textTertiary)
 
             TextField("Filter workspaces or labels", text: $filterText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 11))
+                .font(.system(size: 13))
+                .foregroundStyle(chromeTheme.textPrimary)
                 .focused($isFilterFieldFocused)
                 .accessibilityIdentifier("sidebar.filter.field")
                 .onSubmit {
@@ -575,16 +627,28 @@ struct WorkspaceListView: View {
                     isFilterFieldFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(chromeTheme.textTertiary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar.filter.clear")
             }
         }
+        // Inner padding → the rounded "pill" fill; outer padding → the margin
+        // between the pill and the sidebar edges (matches the mockup).
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(chromeTheme.textPrimary.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(chromeTheme.textPrimary.opacity(0.08), lineWidth: 1)
+                )
+        )
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+        .padding(.vertical, 8)
+        .background(chromeTheme.sidebarBackground)
     }
 
     /// Workspaces whose name OR any label contains `filterText`
@@ -625,6 +689,10 @@ struct WorkspaceListView: View {
                 selectionHeader
 
                 ScrollView {
+                    // Match the main list's thin overlay scroller (re-asserted
+                    // on every update; AppKit reverts it during re-layout).
+                    ScrollViewFinder { if $0.scrollerStyle != .overlay { $0.scrollerStyle = .overlay } }
+                        .frame(height: 0)
                     let ids = filteredWorkspaceIDs
                     if ids.isEmpty {
                         VStack(spacing: 4) {
@@ -665,7 +733,6 @@ struct WorkspaceListView: View {
     @ViewBuilder
     private func filteredWorkspaceRow(workspaceID: UUID) -> some View {
         if let workspaceStore = store.scope(state: \.workspaces[id: workspaceID], action: \.workspaces[id: workspaceID]) {
-            let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
             let waiting = workspaceStore.panes.count(where: { $0.status == .waitingForInput })
             let running = workspaceStore.panes.contains { $0.status == .running }
             let parentGroupName = store.state.groupID(forWorkspace: workspaceID)
@@ -675,9 +742,6 @@ struct WorkspaceListView: View {
                 WorkspaceRowView(
                     name: workspaceStore.name,
                     color: workspaceStore.color,
-                    paneCount: workspaceStore.panes.count,
-                    repoCount: workspaceStore.repoAssociations.count,
-                    gitStatus: aggregateStatus,
                     isActive: workspaceID == store.activeWorkspaceID,
                     // Negative index suppresses the `⌘N` badge in
                     // `WorkspaceRowView` (the badge is gated on `index <
@@ -686,6 +750,7 @@ struct WorkspaceListView: View {
                     // either be wrong or meaningless, so we hide it
                     // wholesale in filtered rows.
                     index: -1,
+                    icon: workspaceStore.icon,
                     waitingPaneCount: waiting,
                     hasRunningPanes: running,
                     isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
@@ -810,6 +875,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
+            workspaceChangeIconMenu(workspaceID: workspaceID)
             labelsMenu(workspaceID: workspaceID, workspaceStore: workspaceStore)
             moveToGroupMenu(workspaceID: workspaceID)
             Divider()
@@ -1037,6 +1103,36 @@ struct WorkspaceListView: View {
         }
     }
 
+    /// Workspace counterpart of `changeIconMenu`, reusing the same symbol /
+    /// emoji palettes. "Reset" returns to the first-letter avatar.
+    private func workspaceChangeIconMenu(workspaceID: UUID) -> some View {
+        Menu("Change Icon") {
+            Menu("Symbol") {
+                ForEach(Self.groupIconSymbolPalette, id: \.systemName) { entry in
+                    Button {
+                        store.send(.setWorkspaceIcon(id: workspaceID, icon: .systemName(entry.systemName)))
+                    } label: {
+                        Label(entry.label, systemImage: entry.systemName)
+                    }
+                }
+            }
+            Menu("Emoji") {
+                ForEach(Self.groupIconEmojiPalette, id: \.self) { emoji in
+                    Button(emoji) {
+                        store.send(.setWorkspaceIcon(id: workspaceID, icon: .emoji(emoji)))
+                    }
+                }
+            }
+            Button("Custom Emoji...") {
+                store.send(.requestWorkspaceCustomEmoji(workspaceID))
+            }
+            Divider()
+            Button("Reset to Letter") {
+                store.send(.setWorkspaceIcon(id: workspaceID, icon: nil))
+            }
+        }
+    }
+
     private func workspaceRow(
         workspaceStore: StoreOf<WorkspaceFeature>,
         depth: Int
@@ -1056,7 +1152,6 @@ struct WorkspaceListView: View {
             // as being consumed by the group rather than flying away.
             let isLanding = landingPreview?.workspaceID == workspaceID
 
-            let aggregateStatus = aggregateGitStatus(for: workspaceStore.state)
             // Show the dragged row nested when the current target is a
             // preview-only group drop (empty group `.intoGroup` or any
             // `.ontoGroupHeader`) so the visual matches where the
@@ -1069,11 +1164,9 @@ struct WorkspaceListView: View {
             WorkspaceRowView(
                 name: workspaceStore.name,
                 color: workspaceStore.color,
-                paneCount: workspaceStore.panes.count,
-                repoCount: workspaceStore.repoAssociations.count,
-                gitStatus: aggregateStatus,
                 isActive: workspaceID == store.activeWorkspaceID,
                 index: flatIndex,
+                icon: workspaceStore.icon,
                 waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
                 hasRunningPanes: workspaceStore.panes.contains { $0.status == .running },
                 isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
@@ -1976,31 +2069,6 @@ struct WorkspaceListView: View {
             ))
         }
     }
-
-    /// Aggregate git status: dirty if any association is dirty, clean if all clean, unknown otherwise.
-    private func aggregateGitStatus(for workspace: WorkspaceFeature.State) -> RepoGitStatus {
-        let statuses = workspace.repoAssociations.map { assoc in
-            store.gitStatuses[assoc.id] ?? .unknown
-        }
-        if statuses.isEmpty { return .unknown }
-        if statuses.contains(where: { if case .dirty = $0 { true } else { false } }) {
-            var totalChanged = 0
-            var totalAdds = 0
-            var totalDels = 0
-            for status in statuses {
-                if case .dirty(let count, let adds, let dels) = status {
-                    totalChanged += count
-                    totalAdds += adds
-                    totalDels += dels
-                }
-            }
-            return .dirty(changedFiles: totalChanged, additions: totalAdds, deletions: totalDels)
-        }
-        if statuses.allSatisfy({ $0 == .clean }) {
-            return .clean
-        }
-        return .unknown
-    }
 }
 
 /// Isolated host for one group header. Because it is a distinct `View`,
@@ -2085,13 +2153,46 @@ private struct ScrollViewFinder: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context _: Context) {
         guard let probe = nsView as? ProbeView else { return }
         probe.onFound = onFound
+        // Re-fire on every SwiftUI update so callers can re-assert state AppKit
+        // resets during re-layout — e.g. the thin overlay scroller style, which
+        // otherwise reverts to the wide legacy scroller as the list navigates.
+        // Dispatched async so `onFound` (which captures @State) never mutates
+        // SwiftUI state synchronously during a view update.
+        DispatchQueue.main.async { [weak probe] in probe?.reportIfAvailable() }
     }
 
     private final class ProbeView: NSView {
         var onFound: ((NSScrollView) -> Void)?
+        /// Registered/removed on the main thread; `nonisolated(unsafe)` so the
+        /// nonisolated deinit can remove the observer.
+        private nonisolated(unsafe) var updateObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let updateObserver {
+                NotificationCenter.default.removeObserver(updateObserver)
+                self.updateObserver = nil
+            }
+            if let window {
+                // AppKit reverts the thin overlay scroller back to the wide
+                // legacy scroller during layout passes that don't re-run this
+                // view's SwiftUI update — e.g. a markdown pane toggling
+                // edit/view, which creates/destroys a WKWebView. The system
+                // `preferredScrollerStyle` never changes (it stays on "always
+                // show"), so there's no scroller notification to hook; instead
+                // the window posts `didUpdate` after each layout pass. Re-assert
+                // the overlay style then — the same path a window resize takes,
+                // which is why resizing the window fixes it manually. The
+                // re-assert in `onFound` is guarded, so this is a cheap no-op
+                // once the style already sticks.
+                updateObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didUpdateNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.reportIfAvailable()
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.reportIfAvailable()
             }
@@ -2100,6 +2201,10 @@ private struct ScrollViewFinder: NSViewRepresentable {
         func reportIfAvailable() {
             guard let sv = enclosingScrollView else { return }
             onFound?(sv)
+        }
+
+        deinit {
+            if let updateObserver { NotificationCenter.default.removeObserver(updateObserver) }
         }
     }
 }

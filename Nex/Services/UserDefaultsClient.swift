@@ -30,7 +30,13 @@ extension UserDefaultsClient: DependencyKey {
         )
     }()
 
-    static let testValue: UserDefaultsClient = {
+    static let testValue = ephemeral()
+
+    /// A fresh in-memory client with its own isolated storage. `testValue` is a
+    /// single shared instance, so its dict leaks across every TestStore in a run
+    /// — tests that assert on persisted flags (e.g. the one-shot label-migration
+    /// marker) must use a private `.ephemeral()` so the flag starts unset.
+    static func ephemeral() -> UserDefaultsClient {
         let storage = NSLock()
         nonisolated(unsafe) var dict: [String: Any] = [:]
         return UserDefaultsClient(
@@ -42,7 +48,7 @@ extension UserDefaultsClient: DependencyKey {
             setDouble: { val, key in storage.withLock { dict[key] = val } },
             setString: { val, key in storage.withLock { dict[key] = val } }
         )
-    }()
+    }
 }
 
 extension DependencyValues {

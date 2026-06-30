@@ -98,6 +98,13 @@ struct MarkdownPaneView: NSViewRepresentable {
         } else if context.coordinator.fontSize != fontSize {
             context.coordinator.fontSize = fontSize
             context.coordinator.renderCurrentContent()
+        } else if context.coordinator.backgroundColor != backgroundColor
+            || context.coordinator.backgroundOpacity != backgroundOpacity {
+            // Appearance changed — the background is baked into the HTML/CSS,
+            // so re-render to match the terminal's new background live.
+            context.coordinator.backgroundColor = backgroundColor
+            context.coordinator.backgroundOpacity = backgroundOpacity
+            context.coordinator.renderCurrentContent()
         }
         // Only claim on a real false→true transition so re-renders caused
         // by unrelated state changes (e.g., the user typing in the command

@@ -72,6 +72,7 @@ struct PaneGridView: View {
     var onOpenFavourite: ((UUID, String) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
+    @Environment(\.chromeTheme) private var chromeTheme
     @Environment(\.surfaceManager) private var surfaceManager
 
     @State private var dragSourcePaneID: UUID?
@@ -326,6 +327,8 @@ struct PaneGridView: View {
             }
         }
         .background {
+            // Non-terminal pane bodies share the terminal panes' Ghostty
+            // background so content panes blend with the terminal theme.
             if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
@@ -333,8 +336,10 @@ struct PaneGridView: View {
         }
         .overlay {
             if pane.id == focusedPaneID {
+                // Full highlight around the focused pane (header + body), in the
+                // dedicated pane-focus colour (separate from the sidebar accent).
                 Rectangle()
-                    .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(chromeTheme.paneFocus, lineWidth: 2)
             }
         }
         .overlay {
@@ -458,6 +463,8 @@ struct PaneGridView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: ghosttyConfig.backgroundColor))
+        // The "No panes" placeholder fills an empty grid (no pane bodies),
+        // so it reads as a window gap → chrome windowBackground.
+        .background(chromeTheme.windowBackground)
     }
 }

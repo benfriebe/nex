@@ -36,6 +36,7 @@ struct PaneHeaderView: View {
     var onToggleSyncExcluded: (() -> Void)?
 
     @State private var isDragging = false
+    @Environment(\.chromeTheme) private var theme
 
     var body: some View {
         HStack(spacing: 4) {
@@ -82,7 +83,7 @@ struct PaneHeaderView: View {
 
             Text(displayPath)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isFocused ? .primary : .secondary)
+                .foregroundStyle(isFocused ? theme.textPrimary : theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
@@ -144,6 +145,10 @@ struct PaneHeaderView: View {
             }
 
             Spacer()
+
+            if pane.type == .shell, pane.agentSessionID != nil {
+                agentBadge
+            }
 
             if let branch = pane.gitBranch {
                 HStack(spacing: 2) {
@@ -256,30 +261,57 @@ struct PaneHeaderView: View {
                     onDragEnded?()
                 }
         )
-        .background {
-            ZStack {
-                Color(nsColor: .windowBackgroundColor)
-                if isFocused {
-                    Color.accentColor.opacity(0.15)
+        // Flat header tone with just the structural divider; focus is shown by
+        // the full pane-focus border (drawn around the whole pane in
+        // PaneGridView), not a header underline.
+        .background(theme.headerBackground)
+        .overlay(alignment: .bottom) {
+            theme.divider.frame(height: 1)
+        }
+    }
+
+    /// Right-aligned agent badge: amber `claude · mm:ss` while running,
+    /// blue `awaiting input` while waiting. Hidden when idle. Only shown
+    /// for shell panes that have an attached agent session.
+    @ViewBuilder
+    private var agentBadge: some View {
+        switch pane.status {
+        case .running:
+            HStack(spacing: 3) {
+                Text("claude")
+                if let started = pane.agentStartedAt {
+                    Text("·")
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(chromeElapsedLabel(from: started, to: context.date))
+                            .monospacedDigit()
+                    }
                 }
             }
-        }
-        .overlay(alignment: .bottom) {
-            if isFocused {
-                Color.accentColor.opacity(0.6)
-                    .frame(height: 2)
-            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(theme.activeAgent)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(theme.activeAgent.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+        case .waitingForInput:
+            Text("awaiting input")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(theme.statusWaiting)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(theme.statusWaiting.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+        case .idle:
+            EmptyView()
         }
     }
 
     private var statusDotColor: Color {
         switch pane.status {
         case .running:
-            .green
+            theme.statusRunning
         case .waitingForInput:
-            .blue
+            theme.statusWaiting
         case .idle:
-            isFocused ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.3)
+            isFocused ? theme.textTertiary : theme.textTertiary.opacity(0.5)
         }
     }
 
@@ -389,12 +421,7 @@ struct PaneHeaderView: View {
                 : (target as NSString).lastPathComponent
             return "diff: \(scope)"
         }
-        let path = pane.title ?? pane.workingDirectory
-        if let home = ProcessInfo.processInfo.environment["HOME"],
-           path.hasPrefix(home) {
-            return "~" + path.dropFirst(home.count)
-        }
-        return path
+        return chromeHomeAbbreviated(pane.title ?? pane.workingDirectory)
     }
 }
 

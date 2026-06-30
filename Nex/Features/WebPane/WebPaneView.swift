@@ -58,6 +58,7 @@ struct WebPaneView: View {
     let onOpenFavourite: (String) -> Void
 
     @Environment(\.webPaneStore) private var webPaneStore
+    @Environment(\.chromeTheme) private var chromeTheme
     @State private var storagePanelVisible: Bool = false
     @State private var displayedURL: String = ""
     /// Title that pairs with `displayedURL`. Updated from the same
@@ -155,7 +156,7 @@ struct WebPaneView: View {
                 )
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(chromeTheme.surfaceBackground)
         .onAppear(perform: refreshState)
         .onChange(of: active?.id) { _, _ in refreshState() }
         .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.stateDidChangeNotification)) { note in
