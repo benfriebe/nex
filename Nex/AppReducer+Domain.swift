@@ -1,0 +1,153 @@
+import ComposableArchitecture
+
+// MARK: - Reduce-block partition harness
+
+extension AppReducer {
+    /// Which per-domain reduce-block owns a given `Action`.
+    ///
+    /// `AppReducer.body` is being decomposed from one giant `switch action`
+    /// into several per-domain reduce-blocks that all run over the shared
+    /// `AppReducer.State`. `domain(of:)` is the single, compiler-checked
+    /// source of truth for that partition: its `switch` is **exhaustive with
+    /// no `default`**, so the compiler forces every present (and every
+    /// future) `Action` case to be consciously assigned to exactly one
+    /// domain. That exhaustiveness is the completeness/exclusivity net for
+    /// the extraction stages — each extracted block guards on
+    /// `Self.domain(of: action) == .<block>` and returns `.none` otherwise,
+    /// while `core` keeps everything still mapped to `.core`.
+    enum ReducerDomain: Equatable {
+        case core
+        case searchNotify
+    }
+
+    static func domain(of action: Action) -> ReducerDomain {
+        switch action {
+        // MARK: SearchNotify
+
+        // Search (libghostty find), cross-workspace surface notifications,
+        // desktop notifications, and the markdown file-open entry points.
+        case .ghosttySearchStarted,
+             .ghosttySearchEnded,
+             .searchTotalUpdated,
+             .searchSelectedUpdated,
+             .surfaceTitleChanged,
+             .surfaceDirectoryChanged,
+             .surfaceProcessExited,
+             .desktopNotification,
+             .openFile,
+             .openFileAtPath:
+            .searchNotify
+
+        // MARK: Core
+
+        // Everything not yet extracted into its own reduce-block.
+        case .appLaunched,
+             .createWorkspace,
+             .deleteWorkspace,
+             .moveWorkspace,
+             .moveGroup,
+             .moveWorkspacesToGroup,
+             .setActiveWorkspace,
+             .switchToWorkspaceByIndex,
+             .switchToNextWorkspace,
+             .switchToPreviousWorkspace,
+             .toggleSidebar,
+             .showNewWorkspaceSheet,
+             .dismissNewWorkspaceSheet,
+             .beginRenameActiveWorkspace,
+             .setRenamingWorkspaceID,
+             .setRenamingPaneID,
+             .toggleWorkspaceSelection,
+             .rangeSelectWorkspace,
+             .clearWorkspaceSelection,
+             .selectAllWorkspaces,
+             .setBulkColor,
+             .requestBulkDelete,
+             .confirmBulkDelete,
+             .cancelBulkDelete,
+             .persistState,
+             .stateLoaded,
+             .toggleGroupCollapse,
+             .createGroup,
+             .renameGroup,
+             .setGroupColor,
+             .setGroupIcon,
+             .requestGroupCustomEmoji,
+             .cancelGroupCustomEmoji,
+             .confirmGroupCustomEmoji,
+             .setWorkspaceIcon,
+             .requestWorkspaceCustomEmoji,
+             .cancelWorkspaceCustomEmoji,
+             .confirmWorkspaceCustomEmoji,
+             .deleteGroup,
+             .moveWorkspaceToGroup,
+             .beginRenameGroup,
+             .setRenamingGroupID,
+             .requestGroupDelete,
+             .cancelGroupDelete,
+             .requestBulkCreateGroup,
+             .cancelBulkCreateGroup,
+             .confirmBulkCreateGroup,
+             .seedTestGroup,
+             .workspaces,
+             .settings,
+             .graft,
+             .socketMessage,
+             .scanForRepos,
+             .scanCompleted,
+             .addRepo,
+             .repoAdded,
+             .removeRepo,
+             .renameRepo,
+             .createWorktree,
+             .worktreeCreated,
+             .worktreeCreationFailed,
+             .removeWorktreeAssociation,
+             .autoLinkRepoForPane,
+             .autoLinkResolved,
+             .autoUnlinkUnusedRepos,
+             .repoRemoteURLResolved,
+             .repoAssociationBranchResolved,
+             .openDiffPath,
+             .openWebPanePath,
+             .webPaneFocusURLBar,
+             .webPaneOpenNewTab,
+             .webPaneTabCycleFocused,
+             .webPaneTabCloseActiveFocused,
+             .webInspectPayloadReceived,
+             .setWebInspectArmedSubmit,
+             .webBatchInspectStart,
+             .webBatchInspectHide,
+             .webBatchInspectShow,
+             .webBatchInspectToggle,
+             .webBatchInspectSend,
+             .webBatchInspectCancel,
+             .webPaneSetPrivate,
+             .webBatchFocusItem,
+             .syncBatchMarkers,
+             .pushBatchCommentToPage,
+             .webBatchDismissPopover,
+             .presets,
+             .migrateLabelsToPresets,
+             .toggleInspector,
+             .refreshGitStatus,
+             .gitStatusUpdated,
+             .startGitStatusTimer,
+             .startHeadWatcher,
+             .stopHeadWatcher,
+             .headChanged,
+             .updateExternalIndicators,
+             .configHotkey,
+             .toggleCommandPalette,
+             .dismissCommandPalette,
+             .commandPaletteQueryChanged,
+             .commandPaletteSelectIndex,
+             .commandPaletteSelectNext,
+             .commandPaletteSelectPrevious,
+             .commandPaletteConfirm,
+             .configLoaded,
+             .restartSocketServer:
+            .core
+        }
+    }
+}

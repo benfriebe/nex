@@ -4295,48 +4295,6 @@ struct AppReducer {
 
             // MARK: - File Opening
 
-            case .openFile:
-                return .run { send in
-                    let path: String? = await MainActor.run {
-                        let panel = NSOpenPanel()
-                        panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-                        panel.allowsMultipleSelection = false
-                        panel.canChooseDirectories = false
-                        panel.message = "Choose a Markdown file to open"
-                        if panel.runModal() == .OK, let url = panel.url {
-                            return url.path
-                        }
-                        return nil
-                    }
-                    if let path {
-                        await send(.openFileAtPath(path, fromPaneID: nil))
-                    }
-                }
-
-            case .openFileAtPath(let path, let fromPaneID):
-                guard let activeID = state.activeWorkspaceID else { return .none }
-                var resolvedPath = path
-                if !path.hasPrefix("/") {
-                    let workspace = state.workspaces[id: activeID]
-                    let cwd: String? = {
-                        if let fromPaneID, let pane = workspace?.panes.first(where: { $0.id == fromPaneID }) {
-                            return pane.workingDirectory
-                        }
-                        if let focusedID = workspace?.focusedPaneID,
-                           let pane = workspace?.panes.first(where: { $0.id == focusedID }) {
-                            return pane.workingDirectory
-                        }
-                        return nil
-                    }()
-                    if let cwd, !cwd.isEmpty {
-                        resolvedPath = (cwd as NSString).appendingPathComponent(path)
-                    }
-                }
-                return .send(.workspaces(.element(
-                    id: activeID,
-                    action: .openMarkdownFile(filePath: resolvedPath)
-                )))
-
             case .openWebPanePath(let url, _):
                 guard let activeID = state.activeWorkspaceID else { return .none }
                 return .send(.workspaces(.element(
@@ -5525,64 +5483,6 @@ struct AppReducer {
                     )
                 }
 
-            // MARK: - Cross-Workspace Surface Notifications
-
-            case .surfaceTitleChanged(let paneID, let title):
-                guard let workspace = state.workspaceContainingPane(paneID)
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .paneTitleChanged(paneID: paneID, title: title)
-                )))
-
-            case .surfaceDirectoryChanged(let paneID, let directory):
-                guard let workspace = state.workspaceContainingPane(paneID)
-                else { return .none }
-                // Refresh any RepoAssociation whose worktree contains the new
-                // pwd. Catches `cd ../other-worktree` instantly, before the
-                // 30s timer or an unrelated HEAD change would otherwise pick
-                // it up.
-                let standardizedPwd = (directory as NSString).standardizingPath
-                let touched = workspace.repoAssociations.filter { assoc in
-                    let root = (assoc.worktreePath as NSString).standardizingPath
-                    return standardizedPwd == root || standardizedPwd.hasPrefix(root + "/")
-                }
-                let workspaceID = workspace.id
-                let pwdRefreshes: [Effect<Action>] = touched.map { assoc in
-                    Effect.send(.headChanged(workspaceID: workspaceID, associationID: assoc.id))
-                }
-                return .merge(
-                    [
-                        .send(.workspaces(.element(
-                            id: workspace.id,
-                            action: .paneDirectoryChanged(paneID: paneID, directory: directory)
-                        )))
-                    ] + pwdRefreshes
-                )
-
-            case .surfaceProcessExited(let paneID):
-                guard let workspace = state.workspaceContainingPane(paneID)
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .paneProcessTerminated(paneID: paneID)
-                )))
-
-            // MARK: - Desktop Notifications (OSC)
-
-            case .desktopNotification(let paneID, let title, let body):
-                // Suppress if this pane is focused and app is active
-                if let workspace = state.workspaceContainingPane(paneID),
-                   state.activeWorkspaceID == workspace.id,
-                   workspace.focusedPaneID == paneID,
-                   MainActor.assumeIsolated({ NSApp.isActive }) {
-                    return .none
-                }
-                let notifService = notificationService
-                return .run { _ in
-                    notifService.post(title: title, body: body, paneID: paneID)
-                }
-
             // MARK: - Repo Registry
 
             case .scanForRepos(let rootPath):
@@ -6023,40 +5923,6 @@ struct AppReducer {
                     cancelInFlight: true
                 )
 
-            // MARK: - Search
-
-            case .ghosttySearchStarted(let paneID, let needle):
-                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .ghosttySearchStarted(paneID: paneID, needle: needle)
-                )))
-
-            case .ghosttySearchEnded(let paneID):
-                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .ghosttySearchEnded(paneID: paneID)
-                )))
-
-            case .searchTotalUpdated(let paneID, let total):
-                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .searchTotalUpdated(paneID: paneID, total: total)
-                )))
-
-            case .searchSelectedUpdated(let paneID, let selected):
-                guard let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
-                else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .searchSelectedUpdated(paneID: paneID, selected: selected)
-                )))
-
             // MARK: - External Indicators
 
             case .updateExternalIndicators:
@@ -6125,11 +5991,19 @@ struct AppReducer {
                         }
                     }
                 }
+
+            // Actions owned by an extracted reduce-block (e.g. SearchNotify)
+            // are handled there; `domain(of:)` is the exhaustive completeness
+            // guarantee, so core's switch carries a plain `default`.
+            default:
+                return .none
             }
         }
-        .forEach(\.workspaces, action: \.workspaces) {
-            WorkspaceFeature()
-        }
+
+        searchNotifyReducer
+            .forEach(\.workspaces, action: \.workspaces) {
+                WorkspaceFeature()
+            }
 
         Scope(state: \.settings, action: \.settings) {
             SettingsFeature()

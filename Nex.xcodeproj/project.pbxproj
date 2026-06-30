@@ -107,6 +107,7 @@
 		8F5D3C9118D51569A13CB473 /* SurfaceContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018EF0FBACD529C982B7811D /* SurfaceContainerView.swift */; };
 		9443792BCB5BEA5B06312F00 /* RecursiveFSWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140051AE1CBF1087B5F289F7 /* RecursiveFSWatcher.swift */; };
 		95D51269B050D359AC3E91D8 /* LabelMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A3FCA7A9AA41A0B3A67A8C7 /* LabelMigrationTests.swift */; };
+		9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */; };
 		9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */; };
 		9E48EBF9E92828BAF42C0932 /* LabelPresetsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D01D7C0300DB8B0987C7F58 /* LabelPresetsSettingsView.swift */; };
 		A0056823B88DEBC5006159A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */; };
@@ -179,6 +180,7 @@
 		EDD3C2388FB932FCF46F3444 /* HelpDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA085FC1EE7D90E88FEF33CB /* HelpDataTests.swift */; };
 		EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */; };
 		EEE8E1F9A5BF3A99FF11CF0D /* MarkdownCodeCopyScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDE8815715F4B6A37D353E8 /* MarkdownCodeCopyScript.swift */; };
+		EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */; };
 		EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */; };
 		EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9EC869803E36C99B3653FF5 /* CLIInstallService.swift */; };
 		F01CDB667AE2A0CF2A825AD3 /* WorkspaceDropTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */; };
@@ -264,6 +266,7 @@
 		3B2687F4D886D153C83D8A60 /* WorkspaceGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroup.swift; sourceTree = "<group>"; };
 		3B4FA41668CB28EB0FFA7911 /* MarkdownFindScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFindScript.swift; sourceTree = "<group>"; };
 		3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftCLIReplyTests.swift; sourceTree = "<group>"; };
+		3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+Domain.swift"; sourceTree = "<group>"; };
 		3EF0C410566DD2211C2A5EE9 /* ChromeStyleThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyleThemeTests.swift; sourceTree = "<group>"; };
 		42A24C1FEC6EA31096603326 /* SurfaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceManager.swift; sourceTree = "<group>"; };
 		439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
@@ -338,6 +341,7 @@
 		B822ABF12B071E574E089BB4 /* GroupIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIconTests.swift; sourceTree = "<group>"; };
 		BB94DA665D3B322A44251454 /* PaneHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneHeaderView.swift; sourceTree = "<group>"; };
 		BEA20CEA0FEF28F3972BCE7D /* NexCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexCommands.swift; sourceTree = "<group>"; };
+		BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+SearchNotify.swift"; sourceTree = "<group>"; };
 		BECB2222837AC350E94222BB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BF16F0C4A6A8BF8151651F53 /* InspectPayloadSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectPayloadSanitiser.swift; sourceTree = "<group>"; };
 		C4D5453E5B7EB4E8E7F11453 /* PaneSendReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSendReplyTests.swift; sourceTree = "<group>"; };
@@ -581,6 +585,8 @@
 			children = (
 				76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */,
 				D9335AE3C92A37DD50A5715A /* AppReducer.swift */,
+				3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */,
+				BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
 				BECB2222837AC350E94222BB /* Info.plist */,
@@ -1009,6 +1015,8 @@
 			files = (
 				759B67A4E8D35868EC6E2295 /* AppActivation.swift in Sources */,
 				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
+				9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */,
+				EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
 				D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */,
 				EFDCA64CD227A833D2801893 /* CLIInstallService.swift in Sources */,
