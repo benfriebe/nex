@@ -14,7 +14,8 @@ Nex gives you named, persistent workspaces with free-form pane splits, multi-rep
 - **Claude Code integration.** Status indicators on every pane, menu-bar counts, dock badge, and desktop notifications when an agent finishes or asks a question.
 - **Multi-repo worktree management.** Register your repos once, then attach one or more worktrees to a workspace. Optional native `graft` mirrors worktree changes back to the parent checkout in real time.
 - **A scriptable companion CLI (`nex`).** Spawn panes, send keystrokes, capture terminal output, open diffs, drive the web pane, and orchestrate multi-agent workflows from anywhere.
-- **Customisable everything.** Keybindings, global hotkey, focus-follows-mouse, theme, background opacity, all editable in Settings or via `~/.config/nex/config`.
+- **Themeable chrome.** A warm light / dark / system app theme, independent of the terminal theme. Recolour any surface, save your look as a shareable `.nextheme` file or code, or pick a built-in preset (Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Solarized). A bottom status bar shows the focused pane's path, branch and git diff stats plus live CPU / memory / load sparklines.
+- **Customisable everything.** Keybindings, global hotkey, focus-follows-mouse, terminal theme, and background opacity, all editable in Settings or via `~/.config/nex/config`.
 - **Persistent.** Workspaces, panes, layouts, and repo associations survive restarts.
 
 ## Install
@@ -68,7 +69,7 @@ Workspaces can live inside named, colour-coded groups (folders, effectively). Dr
 
 ### Labels and the sidebar filter
 
-Tag any workspace with one or more labels from the inspector. The filter input at the top of the sidebar searches workspace names AND labels live, so `Cmd+Shift+S` (sidebar), type, and jump.
+Tag any workspace with one or more labels from the inspector. Labels are managed presets with assigned colours (edit them in **Settings > Labels**) and render as coloured pills in the sidebar. The filter input at the top of the sidebar searches workspace names AND labels live, so `Cmd+Shift+S` (sidebar), type, and jump.
 
 ## Pane types
 
@@ -326,6 +327,19 @@ global-hotkey-hide-on-repress = true
 
 No Accessibility permission is required. Only works while Nex is running.
 
+## Appearance and themes
+
+The app chrome (sidebar, title bar, pane headers, and the bottom status bar) has its own warm palette, separate from your terminal theme. Everything below lives in **Settings > Appearance**:
+
+- **Light / Dark / System.** Force the chrome appearance or follow macOS.
+- **Custom colours.** Recolour every chrome surface, the accent, dividers, and the per-state agent-status dots, independently for light and dark.
+- **Save and share.** Export your styling as a shareable `.nextheme` file or a copy-paste code, and import either back. The recipient's light/dark mode and terminal background are left untouched.
+- **Preset themes.** One-click palettes modelled on popular editor themes: Dracula, Nord, Gruvbox (dark and light), Tokyo Night, Catppuccin Mocha, and Solarized Light.
+
+The **bottom status bar** shows the focused pane's working directory, git branch and diff stats, and the active agent with elapsed time on the left; on the right it shows live CPU / memory / load sparklines (toggle in **Settings > General**) and running / waiting / inactive agent counts, each of which opens a popover to jump straight to that pane.
+
+The **terminal** theme and background are configured separately (see `theme` and background opacity below).
+
 ## Configuration
 
 `~/.config/nex/config` follows Ghostty's `key = value` syntax. General settings:
@@ -343,8 +357,9 @@ Plus any number of `keybind = ...` lines.
 
 **Settings panes:**
 
-- **General.** Worktree base path, focus-follows-mouse delay, new-group placement.
-- **Appearance.** Background opacity and tint.
+- **General.** Worktree base path, focus-follows-mouse delay, new-group placement, and the status-bar system metrics.
+- **Appearance.** Chrome theme (light/dark/system), custom chrome colours, sidebar styling, save / share + preset themes, and the terminal background opacity and tint. See [Appearance and themes](#appearance-and-themes).
+- **Labels.** Manage label presets and their colours.
 - **Repositories.** Repo registry; scan a directory or add one-by-one.
 - **Keybindings.** All actions with conflict detection and per-action reset.
 
