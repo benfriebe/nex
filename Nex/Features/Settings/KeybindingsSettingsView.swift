@@ -22,19 +22,19 @@ struct KeybindingsSettingsView: View {
                         Toggle(
                             "Press again to hide",
                             isOn: Binding(
-                                get: { store.globalHotkeyHideOnRepress },
-                                set: { store.send(.setGlobalHotkeyHideOnRepress($0)) }
+                                get: { store.configHotkey.globalHotkeyHideOnRepress },
+                                set: { store.send(.configHotkey(.setGlobalHotkeyHideOnRepress($0))) }
                             )
                         )
-                        .disabled(store.globalHotkey == nil)
+                        .disabled(store.configHotkey.globalHotkey == nil)
 
-                        if let reason = store.globalHotkeyRegistrationError {
+                        if let reason = store.configHotkey.globalHotkeyRegistrationError {
                             Label(reason, systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }
 
-                        if let conflict = store.globalHotkeyConflictWithInApp {
+                        if let conflict = store.configHotkey.globalHotkeyConflictWithInApp {
                             Label(
                                 "Shadows in-app shortcut: \(conflict.message). The in-app shortcut will not fire while Nex is frontmost.",
                                 systemImage: "exclamationmark.triangle.fill"
@@ -66,7 +66,7 @@ struct KeybindingsSettingsView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Reset All to Defaults") {
-                        store.send(.resetKeybindings)
+                        store.send(.configHotkey(.resetKeybindings))
                     }
                 }
                 .padding(12)
@@ -75,22 +75,22 @@ struct KeybindingsSettingsView: View {
             .sheet(item: recordingActionBinding) { action in
                 KeyRecorderSheet(
                     action: action,
-                    currentMap: store.keybindings,
-                    globalHotkey: store.globalHotkey
+                    currentMap: store.configHotkey.keybindings,
+                    globalHotkey: store.configHotkey.globalHotkey
                 ) { trigger in
                     if let trigger {
-                        store.send(.setKeybinding(trigger, action))
+                        store.send(.configHotkey(.setKeybinding(trigger, action)))
                     }
                     recordingAction = nil
                 }
             }
             .sheet(isPresented: $recordingGlobal) {
                 GlobalKeyRecorderSheet(
-                    currentMap: store.keybindings,
-                    currentGlobalHotkey: store.globalHotkey
+                    currentMap: store.configHotkey.keybindings,
+                    currentGlobalHotkey: store.configHotkey.globalHotkey
                 ) { trigger in
                     if let trigger {
-                        store.send(.setGlobalHotkey(trigger))
+                        store.send(.configHotkey(.setGlobalHotkey(trigger)))
                     }
                     recordingGlobal = false
                 }
@@ -108,7 +108,7 @@ struct KeybindingsSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let trigger = store.globalHotkey {
+            if let trigger = store.configHotkey.globalHotkey {
                 HStack(spacing: 2) {
                     Text(trigger.displayString)
                         .font(.system(.body, design: .rounded))
@@ -120,7 +120,7 @@ struct KeybindingsSettingsView: View {
                         )
 
                     Button {
-                        store.send(.setGlobalHotkey(nil))
+                        store.send(.configHotkey(.setGlobalHotkey(nil)))
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.caption)
@@ -146,7 +146,7 @@ struct KeybindingsSettingsView: View {
 
     @ViewBuilder
     private func keybindingRow(action: NexAction) -> some View {
-        let triggers = store.keybindings.triggers(for: action)
+        let triggers = store.configHotkey.keybindings.triggers(for: action)
         HStack {
             Text(action.displayName)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -169,7 +169,7 @@ struct KeybindingsSettingsView: View {
                                 )
 
                             Button {
-                                store.send(.removeKeybinding(trigger))
+                                store.send(.configHotkey(.removeKeybinding(trigger)))
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.caption)
@@ -190,7 +190,7 @@ struct KeybindingsSettingsView: View {
 
             let hasNonDefaultBinding = triggers != KeyBindingMap.defaults.triggers(for: action)
             Button("Reset") {
-                store.send(.resetBindingsForAction(action))
+                store.send(.configHotkey(.resetBindingsForAction(action)))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

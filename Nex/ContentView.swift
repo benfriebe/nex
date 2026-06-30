@@ -107,8 +107,8 @@ struct ContentView: View {
                                     action: .searchClose
                                 )))
                             },
-                            focusFollowsMouse: store.focusFollowsMouse,
-                            focusFollowsMouseDelay: store.focusFollowsMouseDelay,
+                            focusFollowsMouse: store.configHotkey.focusFollowsMouse,
+                            focusFollowsMouseDelay: store.configHotkey.focusFollowsMouseDelay,
                             otherWorkspaces: store.workspaces
                                 .filter { $0.id != activeID }
                                 .map { (id: $0.id, name: $0.name) },

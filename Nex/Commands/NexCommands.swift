@@ -78,7 +78,7 @@ struct NexCommands: Commands {
         action: NexAction,
         handler: @escaping () -> Void
     ) -> some View {
-        if let shortcut = store.keybindings.triggers(for: action).first?.keyboardShortcut {
+        if let shortcut = store.configHotkey.keybindings.triggers(for: action).first?.keyboardShortcut {
             Button(title, action: handler)
                 .keyboardShortcut(shortcut)
         } else {
@@ -182,7 +182,7 @@ final class PaneShortcutMonitor {
         // normally consumes matching events at the WindowServer level before
         // Cocoa sees them, but this guard keeps behavior consistent even if
         // the dispatcher order ever changes.
-        if store.globalHotkey == trigger { return false }
+        if store.configHotkey.globalHotkey == trigger { return false }
 
         // Web pane priority layer: when the focused pane is a `.web`
         // pane, consult a hard-coded ⌘L / ⌘R / ⌘[ / ⌘] map *before*
@@ -198,7 +198,7 @@ final class PaneShortcutMonitor {
             return consumed
         }
 
-        guard let action = store.keybindings.action(for: trigger) else { return false }
+        guard let action = store.configHotkey.keybindings.action(for: trigger) else { return false }
 
         // Menu bar actions are handled by SwiftUI Commands — don't consume here.
         if action.isMenuBarAction { return false }

@@ -133,7 +133,7 @@ struct NexApp: App {
                     // `.configLoaded` effect so it runs once the user's trigger
                     // has actually been parsed off disk.
                     GlobalHotkeyService.shared.onPressed = {
-                        store.send(.globalHotkeyPressed)
+                        store.send(.configHotkey(.globalHotkeyPressed))
                     }
 
                     store.send(.appLaunched)

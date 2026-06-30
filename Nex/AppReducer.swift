@@ -30,14 +30,7 @@ struct AppReducer {
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
-        var keybindings: KeyBindingMap = .defaults
-        var focusFollowsMouse: Bool = false
-        var focusFollowsMouseDelay: Int = 100
-        var tcpPort: Int = 0
-        var tcpPortError: String?
-        var globalHotkey: KeyTrigger?
-        var globalHotkeyHideOnRepress: Bool = true
-        var globalHotkeyRegistrationError: String?
+        var configHotkey = ConfigHotkeyFeature.State()
 
         /// Per-web-pane monotonic counter used as the URL bar focus
         /// token. The priority key layer bumps this when ⌘L fires on
@@ -72,20 +65,6 @@ struct AppReducer {
         /// labels (trim/clamp only, no lowercasing).
         func colorForLabel(_ label: String) -> LabelColor? {
             labelPresets.color(for: label)
-        }
-
-        /// Collision between the current global hotkey and an in-app
-        /// keybinding. Computed so it always reflects the latest state —
-        /// `keybindings` and `globalHotkey` can land in state in either
-        /// order during `appLaunched`, and either one may change later.
-        var globalHotkeyConflictWithInApp: KeybindingConflict? {
-            guard let trigger = globalHotkey else { return nil }
-            return KeybindingConflict.check(
-                trigger: trigger,
-                in: keybindings,
-                globalHotkey: nil,
-                ignoreGlobalHotkey: true
-            )
         }
 
         // Command Palette
@@ -593,12 +572,9 @@ struct AppReducer {
         case searchTotalUpdated(paneID: UUID, total: Int)
         case searchSelectedUpdated(paneID: UUID, selected: Int)
 
-        // Keybindings
-        case keybindingsLoaded(KeyBindingMap)
-        case setKeybinding(KeyTrigger, NexAction)
-        case removeKeybinding(KeyTrigger)
-        case resetBindingsForAction(NexAction)
-        case resetKeybindings
+        /// Config + hotkey child reducer (keybindings, focus-follows-mouse,
+        /// TCP port, global hotkey). See `ConfigHotkeyFeature`.
+        case configHotkey(ConfigHotkeyFeature.Action)
 
         // Command Palette
         case toggleCommandPalette
@@ -618,18 +594,7 @@ struct AppReducer {
             globalHotkey: KeyTrigger?,
             globalHotkeyHideOnRepress: Bool
         )
-        case setFocusFollowsMouse(Bool)
-        case setFocusFollowsMouseDelay(Int)
-        case setTCPPort(Int)
-        case tcpPortStartFailed(Int)
         case restartSocketServer
-
-        // Global Hotkey
-        case setGlobalHotkey(KeyTrigger?)
-        case setGlobalHotkeyHideOnRepress(Bool)
-        case globalHotkeyPressed
-        case globalHotkeyRegistrationFailed(reason: String)
-        case globalHotkeyRegistrationRejected(revertTo: KeyTrigger?, reason: String)
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -3103,7 +3068,7 @@ struct AppReducer {
                     .send(.settings(.loadSettings)),
                     .run { send in
                         let bindings = KeybindingService.loadFromDisk()
-                        await send(.keybindingsLoaded(bindings))
+                        await send(.configHotkey(.keybindingsLoaded(bindings)))
                     },
                     .run { send in
                         let config = ConfigParser.parseGeneralSettings(
@@ -4384,42 +4349,15 @@ struct AppReducer {
                 state.labelPresets.move(fromOffsets: IndexSet(integer: from), toOffset: to)
                 return persistLabelPresets(state.labelPresets)
 
-            // MARK: - Keybindings
+            // MARK: - Config + Hotkey child reducer
 
-            case .keybindingsLoaded(let bindings):
-                state.keybindings = bindings
+            // Field mutations + per-action persistence live in
+            // `ConfigHotkeyFeature` (wired via the `Scope` below). Core
+            // keeps only the bootstrap coordinator (`configLoaded`) and the
+            // socket-server lifecycle (`restartSocketServer`), which read
+            // the child's `tcpPort`.
+            case .configHotkey:
                 return .none
-
-            case .setKeybinding(let trigger, let action):
-                state.keybindings.setBinding(trigger: trigger, action: action)
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
-                }
-
-            case .removeKeybinding(let trigger):
-                state.keybindings.removeBinding(trigger: trigger)
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
-                }
-
-            case .resetBindingsForAction(let action):
-                state.keybindings.removeAllBindings(for: action)
-                for trigger in KeyBindingMap.defaults.triggers(for: action) {
-                    state.keybindings.setBinding(trigger: trigger, action: action)
-                }
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
-                }
-
-            case .resetKeybindings:
-                state.keybindings = .defaults
-                return .run { _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(.defaults, toFile: path)
-                }
 
             // MARK: - General Config
 
@@ -4431,12 +4369,6 @@ struct AppReducer {
                 let globalHotkey,
                 let globalHotkeyHideOnRepress
             ):
-                state.focusFollowsMouse = focusFollowsMouse
-                state.focusFollowsMouseDelay = focusFollowsMouseDelay
-                state.tcpPort = tcpPort
-                state.globalHotkey = globalHotkey
-                state.globalHotkeyHideOnRepress = globalHotkeyHideOnRepress
-                state.globalHotkeyRegistrationError = nil
                 let themeEffect: Effect<Action> = {
                     if let themeID, let theme = NexTheme.named(themeID) {
                         return .send(.settings(.selectTheme(theme)))
@@ -4447,125 +4379,32 @@ struct AppReducer {
                     do {
                         try await service.register(trigger)
                     } catch {
-                        await send(.globalHotkeyRegistrationFailed(reason: "\(error)"))
+                        await send(.configHotkey(.globalHotkeyRegistrationFailed(reason: "\(error)")))
                     }
                 }
-                return .merge(themeEffect, hotkeyEffect)
-
-            case .setFocusFollowsMouse(let enabled):
-                state.focusFollowsMouse = enabled
-                return .run { _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.setGeneralSetting(
-                        "focus-follows-mouse",
-                        value: enabled ? "true" : "false",
-                        inFile: path
-                    )
-                }
-
-            case .setFocusFollowsMouseDelay(let ms):
-                state.focusFollowsMouseDelay = max(0, ms)
-                return .run { [delay = state.focusFollowsMouseDelay] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.setGeneralSetting(
-                        "focus-follows-mouse-delay",
-                        value: "\(delay)",
-                        inFile: path
-                    )
-                }
+                return .merge(
+                    .send(.configHotkey(.applyLoadedConfig(
+                        focusFollowsMouse: focusFollowsMouse,
+                        focusFollowsMouseDelay: focusFollowsMouseDelay,
+                        tcpPort: tcpPort,
+                        globalHotkey: globalHotkey,
+                        globalHotkeyHideOnRepress: globalHotkeyHideOnRepress
+                    ))),
+                    themeEffect,
+                    hotkeyEffect
+                )
 
             case .restartSocketServer:
                 // Tear down and rebind the Unix socket (clears /tmp/nex.sock
                 // and any wedged client FDs); bring TCP back if configured.
                 // onMessage is a singleton property, so it survives the cycle.
-                return .run { [tcpPort = state.tcpPort] _ in
+                return .run { [tcpPort = state.configHotkey.tcpPort] _ in
                     socketServer.stop()
                     socketServer.start()
                     if tcpPort > 0 {
                         _ = socketServer.startTCP(port: tcpPort)
                     }
                 }
-
-            case .setTCPPort(let port):
-                state.tcpPort = max(0, min(port, 65535))
-                state.tcpPortError = nil
-                return .run { [port = state.tcpPort] send in
-                    socketServer.stopTCP()
-                    if port > 0 {
-                        let started = socketServer.startTCP(port: port)
-                        if !started {
-                            await send(.tcpPortStartFailed(port))
-                            return
-                        }
-                    }
-                    ConfigParser.setGeneralSetting(
-                        "tcp-port",
-                        value: "\(port)",
-                        inFile: KeybindingService.configPath
-                    )
-                }
-
-            case .tcpPortStartFailed(let port):
-                state.tcpPortError = "Port \(port) is unavailable"
-                return .none
-
-            // MARK: - Global Hotkey
-
-            case .setGlobalHotkey(let trigger):
-                // Optimistically update state; if Carbon rejects the new
-                // trigger, `globalHotkeyRegistrationRejected` will roll it
-                // back to `previousTrigger` and the config file is left
-                // untouched. The service keeps the previous registration
-                // alive on failure, so the user's working hotkey is never
-                // silently dropped.
-                let previousTrigger = state.globalHotkey
-                state.globalHotkey = trigger
-                state.globalHotkeyRegistrationError = nil
-                return .run { [trigger, previousTrigger, service = globalHotkeyService] send in
-                    do {
-                        try await service.register(trigger)
-                    } catch {
-                        await send(.globalHotkeyRegistrationRejected(
-                            revertTo: previousTrigger,
-                            reason: "\(error)"
-                        ))
-                        return
-                    }
-                    ConfigParser.setGeneralSetting(
-                        "global-hotkey",
-                        value: trigger?.configString ?? "none",
-                        inFile: KeybindingService.configPath
-                    )
-                }
-
-            case .setGlobalHotkeyHideOnRepress(let hide):
-                state.globalHotkeyHideOnRepress = hide
-                return .run { _ in
-                    ConfigParser.setGeneralSetting(
-                        "global-hotkey-hide-on-repress",
-                        value: hide ? "true" : "false",
-                        inFile: KeybindingService.configPath
-                    )
-                }
-
-            case .globalHotkeyPressed:
-                return .run { [hide = state.globalHotkeyHideOnRepress] _ in
-                    await MainActor.run {
-                        toggleAppFrontmost(hideOnRepress: hide)
-                    }
-                }
-
-            case .globalHotkeyRegistrationFailed(let reason):
-                // Used only by the config-load path — we want state to keep
-                // reflecting what's in the config file so the user can see
-                // and edit the failing value from Settings.
-                state.globalHotkeyRegistrationError = reason
-                return .none
-
-            case .globalHotkeyRegistrationRejected(let revertTo, let reason):
-                state.globalHotkey = revertTo
-                state.globalHotkeyRegistrationError = reason
-                return .none
 
             // MARK: - File Opening
 
@@ -6411,6 +6250,10 @@ struct AppReducer {
 
         Scope(state: \.graft, action: \.graft) {
             GraftFeature()
+        }
+
+        Scope(state: \.configHotkey, action: \.configHotkey) {
+            ConfigHotkeyFeature()
         }
     }
 
