@@ -453,12 +453,23 @@ extension AppReducer {
     /// workspace effect runs and the CLI can print/script against it.
     func handleWebOpen(
         state: State,
-        paneID _: UUID?,
+        paneID: UUID?,
         url: String,
         isPrivate: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        guard let activeID = state.activeWorkspaceID else {
+        // Open in the caller's workspace when NEX_PANE_ID resolves
+        // (mirrors the markdown `.openFile` route), else the active
+        // workspace. Without this the web pane would always land in
+        // the active workspace even when `nex web open` / `nex open
+        // <web-file>` is invoked from a pane in a background one.
+        let targetID: UUID? = if let paneID,
+                                 let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }) {
+            workspace.id
+        } else {
+            state.activeWorkspaceID
+        }
+        guard let activeID = targetID else {
             reply?.send(["ok": false, "error": "no active workspace"])
             reply?.close()
             return .none

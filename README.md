@@ -211,7 +211,8 @@ nex layout cycle | select <name>
 ### Files, diffs, graft
 
 ```bash
-nex open  [--here] <path>     # markdown preview or terminal cd, --here reuses the calling pane
+nex open  [--here] <path>     # routes by file type: .md→markdown preview, .html/.htm/.pdf/.svg + images→web pane
+nex md    [--here] <path>     # always opens a markdown preview pane (--here reuses the calling pane)
 nex diff  [<path>]            # opens a diff pane for the current repo
 nex graft start | stop | status [--json]
 ```
@@ -233,8 +234,8 @@ The web pane exposes a full set of semantic verbs so an agent can drive a real b
 Infrastructure (open / navigate / tabs / capture / private mode / cookies):
 
 ```bash
-nex web open      [--private] <url>              # always creates a NEW pane
-nex web navigate  <url>                          # redirect the active tab in an existing pane
+nex web open      [--private] <url>              # always creates a NEW pane (local file paths → file://)
+nex web navigate  <url>                          # redirect the active tab in an existing pane (local paths → file://)
 nex web url | back | forward
 nex web reload    [--hard]
 nex web capture   [--mode meta|text|screenshot]

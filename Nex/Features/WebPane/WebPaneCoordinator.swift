@@ -295,7 +295,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
             // an empty `failedURL` and the stub renders with an
             // empty href; reload() then has nothing to retry.
             lastAttemptedURL[tab.id] = url.absoluteString
-            webView.load(URLRequest(url: url))
+            load(url, into: webView)
         }
         return webView
     }
@@ -340,8 +340,21 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         let webView = webView(for: tab)
         lastAttemptedURL[tab.id] = url.absoluteString
         showingErrorPage.remove(tab.id)
-        webView.load(URLRequest(url: url))
+        load(url, into: webView)
         return url
+    }
+
+    /// Load `url` into `webView`. `file://` URLs go through
+    /// `loadFileURL(_:allowingReadAccessTo:)` so WKWebView grants read
+    /// access to the file's directory — sibling assets (`./style.css`,
+    /// images) referenced by a local HTML file then resolve. Remote
+    /// URLs use a normal request load.
+    private func load(_ url: URL, into webView: WKWebView) {
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        } else {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     /// Reverse-lookup helper for `WKNavigationDelegate` callbacks —
@@ -435,7 +448,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
            let attempted = lastAttemptedURL[tabID],
            let url = URL(string: attempted) {
             showingErrorPage.remove(tabID)
-            webView.load(URLRequest(url: url))
+            load(url, into: webView)
             return true
         }
         if hard {

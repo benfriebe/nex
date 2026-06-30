@@ -225,6 +225,38 @@ not `claude --resume` a session that has already exited.
 nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray]
 ```
 
+### File Commands
+
+Open a file in the right pane type — handy for surfacing a worker's
+output (a rendered report, a diff, an HTML artifact) to the human
+without leaving Nex. Relative paths resolve against the caller's cwd,
+and the pane lands in the caller's workspace (via `NEX_PANE_ID`).
+
+```bash
+# Generic opener: routes by the file's extension.
+#   .md / .markdown / .mdown / .mkd / ...   → markdown preview pane
+#   .html / .htm / .pdf / .svg / images     → web pane (file:// URL)
+#   anything else                           → usage error, no pane
+# --here reuses the calling pane (markdown route only). Request/response
+# on the web route (prints `open ok: <pane-uuid>`); fire-and-forget on
+# the markdown route.
+nex open [--here] <file>
+
+# Always open a markdown preview pane, whatever the extension. The
+# escape hatch for forcing markdown on a file `nex open` would reject
+# (a .log, a .txt) or render as web (a .html you want to read as source).
+nex md [--here] <file>
+
+# Open a git diff pane for the cwd repo (or scoped to <path>). Refreshes
+# on focus and via the header refresh button.
+nex diff [<path>]
+```
+
+So a worker that just wrote `report.html` can `nex open report.html`
+to render it in a web pane, or `nex open summary.md` to drop a
+live-reloading markdown preview beside the terminal — no manual
+`file://` or pane-type juggling.
+
 ### Web Pane Commands
 
 A `web` pane is a full in-pane browser with URL bar, multi-tab
@@ -249,6 +281,11 @@ lowest layer that solves your problem; `exec` is the escape hatch.
 # Create a new web pane in the active workspace.
 # `web open` always creates a NEW pane; --target / --workspace are rejected.
 # Use `web navigate` to redirect an existing pane, or `web tab-new` for a new tab.
+# `open`, `navigate`, and `tab-new` resolve LOCAL FILE PATHS: an explicit path
+# (./x, ../x, /x, ~/x) or a bare name matching a file-with-extension in the cwd
+# becomes a file:// URL, so `nex web open report.html` works without hand-building
+# file://. Bare hostnames (example.com) and single-label hosts (app, api) stay
+# URLs — use ./name to force a local path.
 nex web open [--private] <url>
 
 # Redirect the active tab of an existing web pane to <url>
