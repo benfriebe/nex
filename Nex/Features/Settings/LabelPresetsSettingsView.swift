@@ -29,46 +29,46 @@ struct LabelPresetsSettingsView: View {
 
                 Divider()
 
-                if store.labelPresets.isEmpty {
+                if store.presets.labelPresets.isEmpty {
                     emptyState
                 } else {
                     List {
-                        ForEach(store.labelPresets) { preset in
+                        ForEach(store.presets.labelPresets) { preset in
                             LabelPresetRow(
                                 preset: preset,
                                 isNameAvailable: { candidate in
                                     candidate == preset.name
-                                        || !store.labelPresets.contains { $0.name == candidate }
+                                        || !store.presets.labelPresets.contains { $0.name == candidate }
                                 },
                                 onRename: { name in
-                                    store.send(.updateLabelPreset(
+                                    store.send(.presets(.updateLabelPreset(
                                         id: preset.id,
                                         name: name,
                                         color: preset.color
-                                    ))
+                                    )))
                                 },
                                 onRecolor: { color in
-                                    store.send(.updateLabelPreset(
+                                    store.send(.presets(.updateLabelPreset(
                                         id: preset.id,
                                         name: preset.name,
                                         color: color
-                                    ))
+                                    )))
                                 },
                                 onSetTextColor: { textColor in
-                                    store.send(.setLabelPresetTextColor(
+                                    store.send(.presets(.setLabelPresetTextColor(
                                         id: preset.id,
                                         textColor: textColor
-                                    ))
+                                    )))
                                 },
                                 onRemove: {
-                                    store.send(.removeLabelPreset(id: preset.id))
+                                    store.send(.presets(.removeLabelPreset(id: preset.id)))
                                 }
                             )
                             .tag(preset.id)
                         }
                         .onMove { source, destination in
                             guard let from = source.first else { return }
-                            store.send(.moveLabelPreset(fromIndex: from, toIndex: destination))
+                            store.send(.presets(.moveLabelPreset(fromIndex: from, toIndex: destination)))
                         }
                     }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
@@ -137,10 +137,10 @@ struct LabelPresetsSettingsView: View {
         // preset — otherwise the addLabelPreset no-ops on a duplicate name
         // but setLabelPresetTextColor would still recolour the *existing*
         // preset with this id.
-        let isNew = !store.labelPresets.contains { $0.name == normalized }
-        store.send(.addLabelPreset(name: trimmedNewName, color: newColor))
+        let isNew = !store.presets.labelPresets.contains { $0.name == normalized }
+        store.send(.presets(.addLabelPreset(name: trimmedNewName, color: newColor)))
         if isNew, let textColor = newTextColor {
-            store.send(.setLabelPresetTextColor(id: normalized, textColor: textColor))
+            store.send(.presets(.setLabelPresetTextColor(id: normalized, textColor: textColor)))
         }
         newName = ""
         newTextColor = nil

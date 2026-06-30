@@ -1017,8 +1017,9 @@ struct AppReducerTests {
             tcpPort: 19400,
             globalHotkey: nil,
             globalHotkeyHideOnRepress: true
-        )) { state in
-            #expect(state.tcpPort == 19400)
+        ))
+        await store.receive(\.configHotkey.applyLoadedConfig) { state in
+            #expect(state.configHotkey.tcpPort == 19400)
         }
     }
 
@@ -1032,10 +1033,11 @@ struct AppReducerTests {
             tcpPort: 0,
             globalHotkey: nil,
             globalHotkeyHideOnRepress: true
-        )) { state in
-            #expect(state.tcpPort == 0)
-            #expect(state.focusFollowsMouse == true)
-            #expect(state.focusFollowsMouseDelay == 200)
+        ))
+        await store.receive(\.configHotkey.applyLoadedConfig) { state in
+            #expect(state.configHotkey.tcpPort == 0)
+            #expect(state.configHotkey.focusFollowsMouse == true)
+            #expect(state.configHotkey.focusFollowsMouseDelay == 200)
         }
     }
 
@@ -1092,9 +1094,10 @@ struct AppReducerTests {
             tcpPort: 0,
             globalHotkey: trigger,
             globalHotkeyHideOnRepress: false
-        )) { state in
-            state.globalHotkey = trigger
-            state.globalHotkeyHideOnRepress = false
+        ))
+        await store.receive(\.configHotkey.applyLoadedConfig) { state in
+            state.configHotkey.globalHotkey = trigger
+            state.configHotkey.globalHotkeyHideOnRepress = false
         }
         await store.finish()
         #expect(await recorder.calls() == [trigger])
@@ -1114,9 +1117,9 @@ struct AppReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         let trigger = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
-        await store.send(.setGlobalHotkey(trigger)) { state in
-            state.globalHotkey = trigger
-            state.globalHotkeyRegistrationError = nil
+        await store.send(.configHotkey(.setGlobalHotkey(trigger))) { state in
+            state.configHotkey.globalHotkey = trigger
+            state.configHotkey.globalHotkeyRegistrationError = nil
         }
         await store.finish()
         #expect(await recorder.calls() == [trigger])
@@ -1124,8 +1127,8 @@ struct AppReducerTests {
 
     @Test func setGlobalHotkeyNilClearsState() async {
         var appState = AppReducer.State()
-        appState.globalHotkey = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
-        appState.globalHotkeyRegistrationError = "stale"
+        appState.configHotkey.globalHotkey = KeyTrigger(keyCode: 17, modifiers: [.command, .shift])
+        appState.configHotkey.globalHotkeyRegistrationError = "stale"
 
         let recorder = RecordingGlobalHotkeyService()
         let store = TestStore(initialState: appState) {
@@ -1139,9 +1142,9 @@ struct AppReducerTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.setGlobalHotkey(nil)) { state in
-            state.globalHotkey = nil
-            state.globalHotkeyRegistrationError = nil
+        await store.send(.configHotkey(.setGlobalHotkey(nil))) { state in
+            state.configHotkey.globalHotkey = nil
+            state.configHotkey.globalHotkeyRegistrationError = nil
         }
         await store.finish()
         #expect(await recorder.calls() == [KeyTrigger?.none])
@@ -1150,16 +1153,16 @@ struct AppReducerTests {
     @Test func setGlobalHotkeyHideOnRepressUpdatesState() async {
         let store = makeStore()
 
-        await store.send(.setGlobalHotkeyHideOnRepress(false)) { state in
-            state.globalHotkeyHideOnRepress = false
+        await store.send(.configHotkey(.setGlobalHotkeyHideOnRepress(false))) { state in
+            state.configHotkey.globalHotkeyHideOnRepress = false
         }
     }
 
     @Test func globalHotkeyRegistrationFailedSetsError() async {
         let store = makeStore()
 
-        await store.send(.globalHotkeyRegistrationFailed(reason: "eventHotKeyExistsErr")) { state in
-            state.globalHotkeyRegistrationError = "eventHotKeyExistsErr"
+        await store.send(.configHotkey(.globalHotkeyRegistrationFailed(reason: "eventHotKeyExistsErr"))) { state in
+            state.configHotkey.globalHotkeyRegistrationError = "eventHotKeyExistsErr"
         }
     }
 
@@ -1169,7 +1172,7 @@ struct AppReducerTests {
         let attempted = KeyTrigger(keyCode: 2, modifiers: .command) // ⌘D (collides, say)
 
         var appState = AppReducer.State()
-        appState.globalHotkey = previous
+        appState.configHotkey.globalHotkey = previous
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -1183,31 +1186,31 @@ struct AppReducerTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         // Optimistic update to the attempted trigger.
-        await store.send(.setGlobalHotkey(attempted)) { state in
-            state.globalHotkey = attempted
-            state.globalHotkeyRegistrationError = nil
+        await store.send(.configHotkey(.setGlobalHotkey(attempted))) { state in
+            state.configHotkey.globalHotkey = attempted
+            state.configHotkey.globalHotkeyRegistrationError = nil
         }
         // Rollback action fires and restores `previous`.
         await store.receive(
-            .globalHotkeyRegistrationRejected(
+            .configHotkey(.globalHotkeyRegistrationRejected(
                 revertTo: previous,
                 reason: "simulated registration failure"
-            )
+            ))
         ) { state in
-            state.globalHotkey = previous
-            state.globalHotkeyRegistrationError = "simulated registration failure"
+            state.configHotkey.globalHotkey = previous
+            state.configHotkey.globalHotkeyRegistrationError = "simulated registration failure"
         }
     }
 
     @Test func globalHotkeyConflictWithInAppIsComputed() {
-        var state = AppReducer.State()
+        var state = ConfigHotkeyFeature.State()
         state.keybindings = .defaults
         state.globalHotkey = KeyTrigger(keyCode: 2, modifiers: .command) // ⌘D → splitRight
         #expect(state.globalHotkeyConflictWithInApp == .action(.splitRight))
     }
 
     @Test func globalHotkeyNoConflictWhenUnbound() {
-        var state = AppReducer.State()
+        var state = ConfigHotkeyFeature.State()
         state.keybindings = .defaults
         // ⌃⌥L — not in defaults.
         state.globalHotkey = KeyTrigger(keyCode: 37, modifiers: [.control, .option])
@@ -1215,7 +1218,7 @@ struct AppReducerTests {
     }
 
     @Test func globalHotkeyConflictNilWhenNoHotkey() {
-        var state = AppReducer.State()
+        var state = ConfigHotkeyFeature.State()
         state.keybindings = .defaults
         state.globalHotkey = nil
         #expect(state.globalHotkeyConflictWithInApp == nil)
@@ -1226,30 +1229,30 @@ struct AppReducerTests {
     @Test func setTCPPortUpdatesState() async {
         let store = makeStore()
 
-        await store.send(.setTCPPort(19400)) { state in
-            #expect(state.tcpPort == 19400)
+        await store.send(.configHotkey(.setTCPPort(19400))) { state in
+            #expect(state.configHotkey.tcpPort == 19400)
         }
     }
 
     @Test func setTCPPortClampsToValidRange() async {
         let store = makeStore()
 
-        await store.send(.setTCPPort(99999)) { state in
-            #expect(state.tcpPort == 65535)
+        await store.send(.configHotkey(.setTCPPort(99999))) { state in
+            #expect(state.configHotkey.tcpPort == 65535)
         }
     }
 
     @Test func setTCPPortNegativeClampsToZero() async {
         let store = makeStore()
 
-        await store.send(.setTCPPort(-1)) { state in
-            #expect(state.tcpPort == 0)
+        await store.send(.configHotkey(.setTCPPort(-1))) { state in
+            #expect(state.configHotkey.tcpPort == 0)
         }
     }
 
     @Test func setTCPPortClearsError() async {
         var appState = AppReducer.State()
-        appState.tcpPortError = "Port 19400 is unavailable"
+        appState.configHotkey.tcpPortError = "Port 19400 is unavailable"
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -1261,15 +1264,15 @@ struct AppReducerTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.setTCPPort(19401)) { state in
-            #expect(state.tcpPortError == nil)
-            #expect(state.tcpPort == 19401)
+        await store.send(.configHotkey(.setTCPPort(19401))) { state in
+            #expect(state.configHotkey.tcpPortError == nil)
+            #expect(state.configHotkey.tcpPort == 19401)
         }
     }
 
     @Test func setTCPPortToZeroDisables() async {
         var appState = AppReducer.State()
-        appState.tcpPort = 19400
+        appState.configHotkey.tcpPort = 19400
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -1281,8 +1284,8 @@ struct AppReducerTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.setTCPPort(0)) { state in
-            #expect(state.tcpPort == 0)
+        await store.send(.configHotkey(.setTCPPort(0))) { state in
+            #expect(state.configHotkey.tcpPort == 0)
         }
     }
 
@@ -1291,25 +1294,25 @@ struct AppReducerTests {
     @Test func tcpPortStartFailedSetsError() async {
         let store = makeStore()
 
-        await store.send(.setTCPPort(19400)) { state in
-            state.tcpPort = 19400
+        await store.send(.configHotkey(.setTCPPort(19400))) { state in
+            state.configHotkey.tcpPort = 19400
         }
 
-        await store.send(.tcpPortStartFailed(19400)) { state in
-            #expect(state.tcpPortError == "Port 19400 is unavailable")
+        await store.send(.configHotkey(.tcpPortStartFailed(19400))) { state in
+            #expect(state.configHotkey.tcpPortError == "Port 19400 is unavailable")
         }
     }
 
     @Test func tcpPortStartFailedPreservesPort() async {
         let store = makeStore()
 
-        await store.send(.setTCPPort(8080)) { state in
-            state.tcpPort = 8080
+        await store.send(.configHotkey(.setTCPPort(8080))) { state in
+            state.configHotkey.tcpPort = 8080
         }
 
-        await store.send(.tcpPortStartFailed(8080)) { state in
-            #expect(state.tcpPortError == "Port 8080 is unavailable")
-            #expect(state.tcpPort == 8080)
+        await store.send(.configHotkey(.tcpPortStartFailed(8080))) { state in
+            #expect(state.configHotkey.tcpPortError == "Port 8080 is unavailable")
+            #expect(state.configHotkey.tcpPort == 8080)
         }
     }
 

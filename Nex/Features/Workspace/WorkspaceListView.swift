@@ -725,7 +725,7 @@ struct WorkspaceListView: View {
     /// duplicate name (the reducer already prevents duplicates).
     private var labelPresetStyles: [String: ResolvedLabelStyle] {
         Dictionary(
-            store.labelPresets.map { ($0.name, $0.resolvedStyle) },
+            store.presets.labelPresets.map { ($0.name, $0.resolvedStyle) },
             uniquingKeysWith: { _, last in last }
         )
     }
@@ -932,7 +932,7 @@ struct WorkspaceListView: View {
     /// toggled off too. "Manage Labels…" opens Settings → Labels.
     private func labelsMenu(workspaceID: UUID, workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
         Menu("Labels") {
-            ForEach(store.labelPresets) { preset in
+            ForEach(store.presets.labelPresets) { preset in
                 let applied = workspaceStore.labels.contains(preset.name)
                 Button {
                     store.send(.workspaces(.element(
@@ -950,7 +950,7 @@ struct WorkspaceListView: View {
             // Applied labels that aren't presets — surfaced so they can
             // be toggled off even though they're not in the preset list.
             let freeform = workspaceStore.labels.filter { label in
-                !store.labelPresets.contains { $0.name == label }
+                !store.presets.labelPresets.contains { $0.name == label }
             }
             if !freeform.isEmpty {
                 Divider()

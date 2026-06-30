@@ -107,8 +107,8 @@ struct ContentView: View {
                                     action: .searchClose
                                 )))
                             },
-                            focusFollowsMouse: store.focusFollowsMouse,
-                            focusFollowsMouseDelay: store.focusFollowsMouseDelay,
+                            focusFollowsMouse: store.configHotkey.focusFollowsMouse,
+                            focusFollowsMouseDelay: store.configHotkey.focusFollowsMouseDelay,
                             otherWorkspaces: store.workspaces
                                 .filter { $0.id != activeID }
                                 .map { (id: $0.id, name: $0.name) },
@@ -214,9 +214,9 @@ struct ContentView: View {
                             onWebTogglePrivate: { paneID in
                                 store.send(.webPaneSetPrivate(paneID: paneID, enabled: nil))
                             },
-                            favourites: store.favourites,
+                            favourites: store.presets.favourites,
                             onToggleFavourite: { url, title in
-                                store.send(.toggleFavourite(url: url, title: title))
+                                store.send(.presets(.toggleFavourite(url: url, title: title)))
                             },
                             onOpenFavourite: { paneID, url in
                                 store.send(.workspaces(.element(

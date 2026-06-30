@@ -180,25 +180,25 @@ private struct GeneralSettingsView: View {
 
                 Section("Panes") {
                     Toggle("Focus follows mouse", isOn: Binding(
-                        get: { appStore.focusFollowsMouse },
-                        set: { appStore.send(.setFocusFollowsMouse($0)) }
+                        get: { appStore.configHotkey.focusFollowsMouse },
+                        set: { appStore.send(.configHotkey(.setFocusFollowsMouse($0))) }
                     ))
                     Text("Automatically focus a pane when the mouse moves over it")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if appStore.focusFollowsMouse {
+                    if appStore.configHotkey.focusFollowsMouse {
                         HStack {
                             Text("Delay")
                             Slider(
                                 value: Binding(
-                                    get: { Double(appStore.focusFollowsMouseDelay) },
-                                    set: { appStore.send(.setFocusFollowsMouseDelay(Int($0))) }
+                                    get: { Double(appStore.configHotkey.focusFollowsMouseDelay) },
+                                    set: { appStore.send(.configHotkey(.setFocusFollowsMouseDelay(Int($0)))) }
                                 ),
                                 in: 0 ... 500,
                                 step: 25
                             )
-                            Text("\(appStore.focusFollowsMouseDelay) ms")
+                            Text("\(appStore.configHotkey.focusFollowsMouseDelay) ms")
                                 .monospacedDigit()
                                 .frame(width: 55, alignment: .trailing)
                         }
@@ -267,13 +267,13 @@ private struct GeneralSettingsView: View {
 
                 Section("Network") {
                     Toggle("TCP listener", isOn: Binding(
-                        get: { appStore.tcpPort > 0 },
+                        get: { appStore.configHotkey.tcpPort > 0 },
                         set: { enabled in
                             if enabled {
                                 tcpPortText = "19400"
-                                appStore.send(.setTCPPort(19400))
+                                appStore.send(.configHotkey(.setTCPPort(19400)))
                             } else {
-                                appStore.send(.setTCPPort(0))
+                                appStore.send(.configHotkey(.setTCPPort(0)))
                             }
                         }
                     ))
@@ -281,30 +281,30 @@ private struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if appStore.tcpPort > 0 {
+                    if appStore.configHotkey.tcpPort > 0 {
                         HStack {
                             Text("Port")
                             TextField("", text: $tcpPortText)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 80)
                                 .multilineTextAlignment(.trailing)
-                            if Int(tcpPortText) != appStore.tcpPort {
+                            if Int(tcpPortText) != appStore.configHotkey.tcpPort {
                                 Button("Apply") {
-                                    appStore.send(.setTCPPort(Int(tcpPortText) ?? 19400))
+                                    appStore.send(.configHotkey(.setTCPPort(Int(tcpPortText) ?? 19400)))
                                 }
                             }
                         }
                     }
 
-                    if let error = appStore.tcpPortError {
+                    if let error = appStore.configHotkey.tcpPortError {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 }
                 .onAppear {
-                    if appStore.tcpPort > 0 {
-                        tcpPortText = "\(appStore.tcpPort)"
+                    if appStore.configHotkey.tcpPort > 0 {
+                        tcpPortText = "\(appStore.configHotkey.tcpPort)"
                     }
                 }
             }
@@ -688,7 +688,7 @@ private struct WebFavouritesSettingsView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
-                if store.favourites.isEmpty {
+                if store.presets.favourites.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "star")
                             .font(.system(size: 28))
@@ -704,21 +704,21 @@ private struct WebFavouritesSettingsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selection) {
-                        ForEach(store.favourites) { fav in
+                        ForEach(store.presets.favourites) { fav in
                             FavouriteRow(
                                 favourite: fav,
                                 onRename: { newTitle in
-                                    store.send(.renameFavourite(id: fav.id, title: newTitle))
+                                    store.send(.presets(.renameFavourite(id: fav.id, title: newTitle)))
                                 },
                                 onRemove: {
-                                    store.send(.removeFavourite(id: fav.id))
+                                    store.send(.presets(.removeFavourite(id: fav.id)))
                                 }
                             )
                             .tag(fav.id)
                         }
                         .onMove { source, destination in
                             guard let from = source.first else { return }
-                            store.send(.moveFavourite(fromIndex: from, toIndex: destination))
+                            store.send(.presets(.moveFavourite(fromIndex: from, toIndex: destination)))
                         }
                     }
                     .listStyle(.inset)
