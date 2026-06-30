@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import Foundation
+import SwiftUI // Array.move(fromOffsets:toOffset:) is a SwiftUI extension
 
 /// Child reducer owning the two flat, UserDefaults-backed preset lists that
 /// no other domain writes: web favourites and workspace label presets.
