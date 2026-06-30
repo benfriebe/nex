@@ -262,6 +262,7 @@ struct WorkspaceFeature {
         case agentStarted(paneID: UUID)
         case agentStopped(paneID: UUID)
         case agentError(paneID: UUID)
+        case setPaneStatus(paneID: UUID, status: PaneStatus)
         case sessionStarted(paneID: UUID, sessionID: String)
         case sessionEnded(paneID: UUID, sessionID: String)
         case clearPaneStatus(UUID)
@@ -1282,6 +1283,22 @@ struct WorkspaceFeature {
 
             case .agentError(let paneID):
                 state.mutatePane(id: paneID) { $0.status = .waitingForInput }
+                return .none
+
+            case .setPaneStatus(let paneID, let status):
+                // Manual status override from the pane context menu. Guard to
+                // shell panes (defense-in-depth — the menu is already
+                // shell-only, mirroring .toggleMarkdownEdit's type guard);
+                // status is a shell-only concept. Mirror .agentStarted: start
+                // the elapsed clock on a fresh transition into .running so the
+                // "claude · mm:ss" badge ticks from now.
+                guard state.pane(id: paneID)?.type == .shell else { return .none }
+                state.mutatePane(id: paneID) {
+                    if status == .running, $0.status != .running {
+                        $0.agentStartedAt = now
+                    }
+                    $0.status = status
+                }
                 return .none
 
             case .sessionStarted(let paneID, let sessionID):

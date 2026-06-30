@@ -23,6 +23,10 @@ struct PaneHeaderView: View {
     var otherWorkspaces: [(id: UUID, name: String)] = []
     var onRename: (() -> Void)?
     var onMoveToWorkspace: ((UUID) -> Void)?
+    /// Manually override the pane's agent status from the context menu
+    /// (issue #183). Nil for non-shell panes and when the host hasn't
+    /// wired it (tests, previews).
+    var onSetStatus: ((PaneStatus) -> Void)?
     /// True when sync is on for the workspace but this pane has been
     /// opted out. Used to render the "Include in sync" context menu
     /// entry and the dimmed `SYNC OFF` badge.
@@ -324,6 +328,14 @@ struct PaneHeaderView: View {
         Divider()
         Button("Split Right") { onSplitHorizontal() }
         Button("Split Down") { onSplitVertical() }
+        if let onSetStatus {
+            Divider()
+            Menu("Status") {
+                statusMenuButton("Idle", .idle, onSetStatus)
+                statusMenuButton("Running", .running, onSetStatus)
+                statusMenuButton("Awaiting Input", .waitingForInput, onSetStatus)
+            }
+        }
         if !otherWorkspaces.isEmpty, let onMoveToWorkspace {
             Divider()
             Menu("Move to Workspace") {
@@ -341,6 +353,22 @@ struct PaneHeaderView: View {
         Divider()
         Button("Open in Finder") { openInFinder() }
         Button("Copy Working Directory") { copyWorkingDirectory() }
+    }
+
+    /// A single entry in the Status submenu. The current status is marked
+    /// with a leading checkmark; the others render as plain text.
+    private func statusMenuButton(
+        _ title: String,
+        _ status: PaneStatus,
+        _ onSetStatus: @escaping (PaneStatus) -> Void
+    ) -> some View {
+        Button { onSetStatus(status) } label: {
+            if pane.status == status {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 
     private func openInFinder() {

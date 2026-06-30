@@ -356,6 +356,7 @@ struct AppReducer {
         case beginRenameActiveWorkspace
         case setRenamingWorkspaceID(UUID?)
         case setRenamingPaneID(UUID?)
+        case setPaneStatus(paneID: UUID, status: PaneStatus)
         case toggleWorkspaceSelection(UUID)
         case rangeSelectWorkspace(UUID)
         case clearWorkspaceSelection
@@ -1306,6 +1307,30 @@ struct AppReducer {
             case .setRenamingPaneID(let id):
                 state.renamingPaneID = id
                 return .none
+
+            case .setPaneStatus(let paneID, let status):
+                // Manual status override from the pane context menu. Resolve the
+                // owning workspace (the menu only wires this for shell panes;
+                // guard here too so a stray dispatch can't flip a non-shell
+                // pane). The child `.setPaneStatus` falls through to the
+                // `case .workspaces` catch-all, which already persists, so we
+                // only additionally refresh the menu-bar / dock badge here
+                // (pushed imperatively in updateExternalIndicators, which the
+                // catch-all does not emit). Note: a manual override does not
+                // survive a relaunch — `stateLoaded` resets every non-idle
+                // status to `.idle` (issue #129).
+                guard let workspace = state.workspaceContainingPane(paneID),
+                      workspace.pane(id: paneID)?.type == .shell
+                else {
+                    return .none
+                }
+                return .merge(
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .setPaneStatus(paneID: paneID, status: status)
+                    ))),
+                    .send(.updateExternalIndicators)
+                )
 
             case .toggleWorkspaceSelection(let id):
                 guard state.workspaces[id: id] != nil else { return .none }
