@@ -19,6 +19,7 @@
 		0D060C5B2588E0B6913B74BB /* AppReducer+WebPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */; };
 		0D23E37D86270E1BAADFF549 /* MarkdownCheckboxRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CCB57D9C4E2AC2014127FC8 /* MarkdownCheckboxRenderingTests.swift */; };
 		0D7D8E5C230B6C98E7693D66 /* PaneListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */; };
+		0D8D12A90757F908D4AE6298 /* AppReducer+Socket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D7A81416F44B73B7DA0AC2 /* AppReducer+Socket.swift */; };
 		0EAFF0FDB683293F95D8AB47 /* RenameWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */; };
 		0EC37EE951CB883BC4DD5E9E /* GroupIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B822ABF12B071E574E089BB4 /* GroupIconTests.swift */; };
 		131F8A6071A7ADF25504AD4E /* InspectPayloadSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF16F0C4A6A8BF8151651F53 /* InspectPayloadSanitiser.swift */; };
@@ -290,6 +291,7 @@
 		6762B22A5CA7CC5867025DA2 /* RootChromeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootChromeView.swift; sourceTree = "<group>"; };
 		67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameWorkspaceSheet.swift; sourceTree = "<group>"; };
 		684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLabelViews.swift; sourceTree = "<group>"; };
+		68D7A81416F44B73B7DA0AC2 /* AppReducer+Socket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+Socket.swift"; sourceTree = "<group>"; };
 		6B4B95F852C737F18989F8FA /* WorkspaceColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceColor.swift; sourceTree = "<group>"; };
 		6BB526BDDE50E6C7948EE832 /* NexTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexTheme.swift; sourceTree = "<group>"; };
 		6BB83805BDFAC2F7DB8FF064 /* GroupHeaderRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupHeaderRow.swift; sourceTree = "<group>"; };
@@ -592,6 +594,7 @@
 				3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */,
 				99B5AF5D84F229813EF7478C /* AppReducer+RepoGit.swift */,
 				BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */,
+				68D7A81416F44B73B7DA0AC2 /* AppReducer+Socket.swift */,
 				3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
@@ -1024,6 +1027,7 @@
 				9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */,
 				B57A14A09524336D06A1860D /* AppReducer+RepoGit.swift in Sources */,
 				EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */,
+				0D8D12A90757F908D4AE6298 /* AppReducer+Socket.swift in Sources */,
 				0D060C5B2588E0B6913B74BB /* AppReducer+WebPane.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,
 				D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */,

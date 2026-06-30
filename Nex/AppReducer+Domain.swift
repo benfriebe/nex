@@ -20,6 +20,7 @@ extension AppReducer {
         case searchNotify
         case webPane
         case repoGit
+        case socket
     }
 
     static func domain(of action: Action) -> ReducerDomain {
@@ -99,6 +100,15 @@ extension AppReducer {
              .headChanged:
             .repoGit
 
+        // MARK: Socket
+
+        // The single request/response socket entry point. `.socketMessage`
+        // owns the `reply` FD handle, so it must map to exactly one domain
+        // (and only `socketReducer` guards on it) — a second match would
+        // hand the CLI a doubled JSON line or a premature EOF.
+        case .socketMessage:
+            .socket
+
         // MARK: Core
 
         // Everything not yet extracted into its own reduce-block.
@@ -153,7 +163,6 @@ extension AppReducer {
              .workspaces,
              .settings,
              .graft,
-             .socketMessage,
              .openDiffPath,
              .presets,
              .migrateLabelsToPresets,
