@@ -39,6 +39,7 @@ struct MarkdownPaneView: NSViewRepresentable {
         config.userContentController.add(handler, name: "scrollHandler")
         config.userContentController.add(handler, name: "nexFind")
         config.userContentController.add(handler, name: "copyCodeBlock")
+        config.userContentController.add(handler, name: "mermaidRendered")
         config.userContentController.addUserScript(WKUserScript(
             source: """
             window.addEventListener('scroll', function() {
@@ -153,6 +154,20 @@ struct MarkdownPaneView: NSViewRepresentable {
         /// the async `window.scrollY` round-trip to drop stale reloads when
         /// the user holds Cmd+= / Cmd+- and multiple renders are in flight.
         private var renderToken: UInt64 = 0
+        /// True when the most recent render emitted a mermaid block, so
+        /// `didFinish` knows to inject the mermaid library and defer the
+        /// scroll restore until the diagrams are laid out.
+        private var currentHasMermaid: Bool = false
+        /// Highest render token that has already had its scroll restored.
+        /// Monotonic, so the message / fallback-timer / error triggers for
+        /// a given mermaid render restore at most once, and stale triggers
+        /// from a superseded render are dropped.
+        private var highestRestoredToken: UInt64 = 0
+        /// Scroll fraction snapshot taken in `didFinish` *before* mermaid
+        /// changes the layout. The scroll listener pollutes the shared
+        /// store as the SVGs resize the page, so the deferred restore uses
+        /// this captured value rather than re-reading the store.
+        private var pendingMermaidFraction: CGFloat?
         var pendingScrollFraction: CGFloat?
         nonisolated(unsafe) var fileWatcher: DispatchSourceFileSystemObject?
         nonisolated(unsafe) var fileDescriptor: Int32 = -1
@@ -191,12 +206,14 @@ struct MarkdownPaneView: NSViewRepresentable {
         private func renderAndReload(content: String) {
             renderToken &+= 1
             let token = renderToken
-            let html = MarkdownRenderer.renderToHTML(
+            let rendered = MarkdownRenderer.render(
                 content,
                 backgroundColor: backgroundColor,
                 backgroundOpacity: backgroundOpacity,
                 baseFontSize: fontSize
             )
+            let html = rendered.html
+            currentHasMermaid = rendered.containsMermaid
             let baseURL = URL(fileURLWithPath: filePath).deletingLastPathComponent()
 
             // Save scroll position, reload, then restore. Drop the load if a
@@ -207,7 +224,12 @@ struct MarkdownPaneView: NSViewRepresentable {
                 guard let self, token == renderToken else { return }
                 let scrollY = result as? Double ?? 0
                 webView?.loadHTMLString(html, baseURL: baseURL)
-                if scrollY > 0 {
+                // For mermaid docs the page is still short here (diagrams are
+                // only `min-height` until their SVGs render), so an absolute
+                // scrollTo would land wrong and — by firing the scroll
+                // listener — pollute the saved fraction that didFinish's
+                // deferred restore reads. Let that fraction path own scroll.
+                if scrollY > 0, !currentHasMermaid {
                     pendingScrollFraction = nil
                     webView?.evaluateJavaScript("window.scrollTo(0, \(scrollY))")
                 }
@@ -240,6 +262,13 @@ struct MarkdownPaneView: NSViewRepresentable {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
+            case "mermaidRendered":
+                // Drop messages without a parseable token rather than
+                // defaulting to the current renderToken (which would defeat
+                // the staleness guard). The 5s fallback timer still restores.
+                guard let token = (message.body as? [String: Any])?["token"] as? NSNumber
+                else { return }
+                restoreScrollState(expecting: token.uint64Value)
             default:
                 break
             }
@@ -268,9 +297,44 @@ struct MarkdownPaneView: NSViewRepresentable {
 
         @preconcurrency
         func webView(_: WKWebView, didFinish _: WKNavigation!) {
-            // Restore scroll fraction from shared store (e.g. after switching from edit mode)
             guard let paneID else { return }
-            let fraction = pendingScrollFraction ?? PaneFocusView.scrollFraction(for: paneID)
+            let token = renderToken
+            if currentHasMermaid {
+                // Snapshot the target scroll fraction now, before mermaid
+                // resizes the page — the scroll listener would otherwise
+                // overwrite the shared store with a transient value mid-render.
+                // Restore happens once the diagrams have settled.
+                pendingMermaidFraction = pendingScrollFraction
+                    ?? PaneFocusView.scrollFraction(for: paneID)
+                pendingScrollFraction = nil
+                injectMermaid(token: token)
+                // Safety net for a hung render (mermaid never signals): same
+                // asyncAfter(.main)/[weak self] shape as startWatching so the
+                // closure inherits @MainActor isolation (Release strict OK).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                    self?.restoreScrollState(expecting: token)
+                }
+            } else {
+                restoreScrollState(expecting: token)
+            }
+        }
+
+        /// Restore the saved scroll position and re-apply find marks for the
+        /// render identified by `token`. Dropped if a newer render has begun
+        /// (`token != renderToken`) or this render was already restored
+        /// (`token <= highestRestoredToken`), so the mermaid message, the
+        /// fallback timer, and the error path together restore exactly once.
+        private func restoreScrollState(expecting token: UInt64) {
+            guard token == renderToken, token > highestRestoredToken else { return }
+            highestRestoredToken = token
+            guard let paneID else { return }
+            let fraction: CGFloat?
+            if currentHasMermaid {
+                fraction = pendingMermaidFraction
+                pendingMermaidFraction = nil
+            } else {
+                fraction = pendingScrollFraction ?? PaneFocusView.scrollFraction(for: paneID)
+            }
             if let fraction, fraction > 0 {
                 pendingScrollFraction = nil
                 webView?.evaluateJavaScript(
@@ -279,6 +343,23 @@ struct MarkdownPaneView: NSViewRepresentable {
             }
             // The reload wiped any active find marks. Re-apply if a needle is still set.
             MarkdownFindController.shared.reapply(paneID: paneID)
+        }
+
+        /// Inject the mermaid library, then the render script. `runSource`
+        /// posts `mermaidRendered` once the diagrams settle (which drives the
+        /// scroll restore); on a script error we restore immediately instead
+        /// of waiting. The library eval error is ignored on purpose — the
+        /// render script detects a missing `mermaid` and reveals the source
+        /// as a plain code block.
+        private func injectMermaid(token: UInt64) {
+            guard let webView else { return }
+            webView.evaluateJavaScript(MarkdownMermaidScript.librarySource) { [weak self] _, _ in
+                guard let self, let webView = self.webView, token == renderToken else { return }
+                webView.evaluateJavaScript(MarkdownMermaidScript.runSource(token: token)) { [weak self] _, error in
+                    guard let self, error != nil else { return }
+                    restoreScrollState(expecting: token)
+                }
+            }
         }
 
         func startWatching() {
@@ -411,7 +492,7 @@ struct MarkdownPaneView: NSViewRepresentable {
                 if (!content) { return document.body.innerHTML; }
                 var clone = content.cloneNode(true);
                 var fm = clone.querySelectorAll(
-                    '.frontmatter, .frontmatter-raw, .frontmatter-nested'
+                    '.frontmatter, .frontmatter-raw, .frontmatter-nested, .mermaid-source'
                 );
                 for (var i = 0; i < fm.length; i++) {
                     fm[i].parentNode.removeChild(fm[i]);
