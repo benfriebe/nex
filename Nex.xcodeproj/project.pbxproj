@@ -134,6 +134,7 @@
 		B2498EB9F42EA84196516DAE /* GroupHeaderRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB83805BDFAC2F7DB8FF064 /* GroupHeaderRow.swift */; };
 		B3FBC9276113E015DA08D41A /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA17E3004A004E6B4DDDBF6 /* PersistenceTests.swift */; };
 		B4846A1AC5C67E51AFA9C846 /* WorkspaceDropTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C975C89EC3EAA135F52A7AD /* WorkspaceDropTarget.swift */; };
+		B57A14A09524336D06A1860D /* AppReducer+RepoGit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99B5AF5D84F229813EF7478C /* AppReducer+RepoGit.swift */; };
 		B5B3A5F0C2FA6509D37FA74A /* RepoRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C625959E287CE9896D5BA4D /* RepoRegistryTests.swift */; };
 		B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */; };
 		B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */; };
@@ -323,6 +324,7 @@
 		96AD7A8D7E6592B90FBB7D24 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
 		98A97924791DAA26F0E4B0BA /* WebPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneView.swift; sourceTree = "<group>"; };
 		998480F19F798025639D20A7 /* WebBatchInspectPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebBatchInspectPanel.swift; sourceTree = "<group>"; };
+		99B5AF5D84F229813EF7478C /* AppReducer+RepoGit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+RepoGit.swift"; sourceTree = "<group>"; };
 		9AA64A9054515A57ED6B2ECA /* WebPaneActuatorActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneActuatorActionTests.swift; sourceTree = "<group>"; };
 		9D01D7C0300DB8B0987C7F58 /* LabelPresetsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPresetsSettingsView.swift; sourceTree = "<group>"; };
 		9D96CD47FF756C95404DF4F6 /* Pane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pane.swift; sourceTree = "<group>"; };
@@ -588,6 +590,7 @@
 				76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */,
 				D9335AE3C92A37DD50A5715A /* AppReducer.swift */,
 				3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */,
+				99B5AF5D84F229813EF7478C /* AppReducer+RepoGit.swift */,
 				BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */,
 				3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
@@ -1019,6 +1022,7 @@
 				759B67A4E8D35868EC6E2295 /* AppActivation.swift in Sources */,
 				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
 				9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */,
+				B57A14A09524336D06A1860D /* AppReducer+RepoGit.swift in Sources */,
 				EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */,
 				0D060C5B2588E0B6913B74BB /* AppReducer+WebPane.swift in Sources */,
 				EC6971D2E311C8903C373778 /* AppReducer.swift in Sources */,

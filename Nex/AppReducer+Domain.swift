@@ -19,6 +19,7 @@ extension AppReducer {
         case core
         case searchNotify
         case webPane
+        case repoGit
     }
 
     static func domain(of action: Action) -> ReducerDomain {
@@ -66,6 +67,37 @@ extension AppReducer {
              .pushBatchCommentToPage,
              .webBatchDismissPopover:
             .webPane
+
+        // MARK: RepoGit
+
+        // Repo registry (scan / add / remove / rename), worktree
+        // operations, auto-detected repo associations (auto-link /
+        // auto-unlink / branch + remote-URL resolution), and the
+        // inspector + git-status surface (toggle, refresh, status
+        // timer, and the HEAD-watcher lifecycle).
+        case .scanForRepos,
+             .scanCompleted,
+             .addRepo,
+             .repoAdded,
+             .removeRepo,
+             .renameRepo,
+             .createWorktree,
+             .worktreeCreated,
+             .worktreeCreationFailed,
+             .removeWorktreeAssociation,
+             .autoLinkRepoForPane,
+             .autoLinkResolved,
+             .autoUnlinkUnusedRepos,
+             .repoRemoteURLResolved,
+             .repoAssociationBranchResolved,
+             .toggleInspector,
+             .refreshGitStatus,
+             .gitStatusUpdated,
+             .startGitStatusTimer,
+             .startHeadWatcher,
+             .stopHeadWatcher,
+             .headChanged:
+            .repoGit
 
         // MARK: Core
 
@@ -122,31 +154,9 @@ extension AppReducer {
              .settings,
              .graft,
              .socketMessage,
-             .scanForRepos,
-             .scanCompleted,
-             .addRepo,
-             .repoAdded,
-             .removeRepo,
-             .renameRepo,
-             .createWorktree,
-             .worktreeCreated,
-             .worktreeCreationFailed,
-             .removeWorktreeAssociation,
-             .autoLinkRepoForPane,
-             .autoLinkResolved,
-             .autoUnlinkUnusedRepos,
-             .repoRemoteURLResolved,
-             .repoAssociationBranchResolved,
              .openDiffPath,
              .presets,
              .migrateLabelsToPresets,
-             .toggleInspector,
-             .refreshGitStatus,
-             .gitStatusUpdated,
-             .startGitStatusTimer,
-             .startHeadWatcher,
-             .stopHeadWatcher,
-             .headChanged,
              .updateExternalIndicators,
              .configHotkey,
              .toggleCommandPalette,
