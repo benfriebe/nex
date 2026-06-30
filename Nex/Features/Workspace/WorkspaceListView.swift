@@ -2190,7 +2190,12 @@ private struct ScrollViewFinder: NSViewRepresentable {
                     object: window,
                     queue: .main
                 ) { [weak self] _ in
-                    self?.reportIfAvailable()
+                    // `queue: .main` runs this on the main thread, so it is safe
+                    // to assume main-actor isolation. Required because the
+                    // observer closure is a nonisolated context: a bare call to
+                    // the @MainActor `reportIfAvailable()` builds in Debug but
+                    // fails the Release archive under Swift 6 strict concurrency.
+                    MainActor.assumeIsolated { self?.reportIfAvailable() }
                 }
             }
             DispatchQueue.main.async { [weak self] in
