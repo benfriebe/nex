@@ -26,7 +26,8 @@
 //   nex group delete <name-or-id> [--cascade]
 //   nex layout cycle
 //   nex layout select <name>
-//   nex open [--here] <filepath>
+//   nex open [--here] <filepath>   (routes by file type: markdown / web pane)
+//   nex md [--here] <filepath>
 //   nex diff [<path>]
 //   nex doctor [--json]
 //
@@ -210,7 +211,8 @@ func printUsage() {
       nex group delete <name-or-id> [--cascade]
       nex layout cycle
       nex layout select <name>
-      nex open [--here] <filepath>
+      nex open [--here] <filepath>   # routes by file type: .md→markdown, .html/.pdf/images→web pane
+      nex md [--here] <filepath>     # always opens a markdown preview pane
       nex diff [<path>]
       nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
@@ -1386,6 +1388,13 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
     bounds how long the CLI waits for a reply (default 30s, since
     `nex.wait` alone can run for 10s).
 
+    `open`, `navigate`, and `tab-new` resolve local file paths: an
+    explicit path (./x, ../x, /x, ~/x), or a bare name that matches a
+    file with an extension in the current directory, is converted to
+    a `file://` URL — so `nex web open foo.html` just works. Bare
+    hostnames (example.com) and single-label hosts (app, api) stay
+    URLs; use ./name to force a local path.
+
     When invoked from outside a Nex pane, --target must be a UUID
     or --workspace <name-or-id> must be passed (label resolution
     needs an explicit workspace scope).
@@ -1437,6 +1446,66 @@ private func attachWebTargetScope(
     }
 }
 
+/// If `arg` denotes a local filesystem path (rather than a URL,
+/// opaque scheme, or bare hostname), return a percent-encoded
+/// `file://` URL resolved against the current directory (expanding
+/// `~`). Otherwise return nil so the caller forwards the raw input
+/// and the app treats it as a hostname / URL.
+///
+/// A path is recognised when it is clearly path-shaped (`/`, `./`,
+/// `../`, or `~` prefix), or when a *bare* argument names a regular
+/// file **with an extension** that exists in the current directory —
+/// so `nex web open foo.html` opens the local file, while
+/// `nex web open example.com` (no such file) and `nex web open app`
+/// (a directory, or a single-label internal hostname) stay hostnames
+/// (issue #177). Bare extensionless names are never treated as files,
+/// so dev hostnames like `app` / `web` / `api` that collide with cwd
+/// directories aren't hijacked — use `./app` to force a local path.
+func localFileURL(forWebArg arg: String) -> String? {
+    let trimmed = arg.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return nil }
+    // Already a full URL (http://, https://, file://, ...).
+    if trimmed.contains("://") { return nil }
+    // Opaque scheme without `://` (data:, mailto:, about:, tel:, ...).
+    // A letter-led token followed by a colon whose next char isn't a
+    // digit is a scheme, not a `host:port`. Path-like inputs never
+    // start with letter+colon, so they fall through to the path check.
+    if let colonIdx = trimmed.firstIndex(of: ":"),
+       let first = trimmed.first, first.isLetter {
+        let scheme = trimmed[..<colonIdx]
+        let schemeChars = scheme.allSatisfy { $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }
+        let afterColon = trimmed[trimmed.index(after: colonIdx)...]
+        let looksLikePort = afterColon.first?.isNumber == true
+        if schemeChars, !looksLikePort { return nil }
+    }
+
+    let looksLikePath = trimmed.hasPrefix("/")
+        || trimmed.hasPrefix("./")
+        || trimmed.hasPrefix("../")
+        || trimmed.hasPrefix("~")
+    var path = trimmed
+    if path.hasPrefix("~") {
+        path = (path as NSString).expandingTildeInPath
+    }
+    let cwd = FileManager.default.currentDirectoryPath
+    let absolute = URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: cwd))
+        .standardizedFileURL
+
+    // An explicit path is always a file. A bare argument is only a
+    // file when a regular file with that name *and* a file extension
+    // exists in the cwd — so directories and extensionless single-label
+    // hostnames pass through to the app as hosts (see doc comment).
+    if looksLikePath {
+        return absolute.absoluteString
+    }
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: absolute.path, isDirectory: &isDirectory)
+    if exists, !isDirectory.boolValue, !absolute.pathExtension.isEmpty {
+        return absolute.absoluteString
+    }
+    return nil
+}
+
 func handleWeb(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
         printWebUsage(stream: stderr)
@@ -1467,7 +1536,7 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         }
         var payload: [String: Any] = [
             "command": "web-open",
-            "url": url
+            "url": localFileURL(forWebArg: url) ?? url
         ]
         if isPrivate {
             payload["private"] = true
@@ -1491,7 +1560,7 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         }
         var payload: [String: Any] = [
             "command": "web-navigate",
-            "url": url
+            "url": localFileURL(forWebArg: url) ?? url
         ]
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "navigate")
         sendWebReplyAndPrintBasic(payload, command: "navigate")
@@ -1558,7 +1627,7 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         let url = args.popFirst() ?? ""
         var payload: [String: Any] = [
             "command": "web-tab-new",
-            "url": url,
+            "url": url.isEmpty ? url : (localFileURL(forWebArg: url) ?? url),
             "make_active": !noFocus
         ]
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "tab-new")
@@ -2759,15 +2828,82 @@ func handleLayout(_ args: inout ArraySlice<String>) {
     }
 }
 
-func handleOpen(_ args: inout ArraySlice<String>) {
+private func isHelpToken(_ token: String) -> Bool {
+    token == "-h" || token == "--help" || token == "help"
+}
+
+/// File extensions that route to a markdown preview pane.
+private let markdownOpenExtensions: Set<String> = [
+    "md", "markdown", "mdown", "mkd", "mkdn", "mdwn", "markdn"
+]
+
+/// File extensions that route to a web pane (WKWebView renders these
+/// natively) as a `file://` URL.
+private let webOpenExtensions: Set<String> = [
+    "html", "htm", "pdf", "svg", "png", "jpg", "jpeg", "gif", "webp"
+]
+
+/// `nex md [--here] <file>` — dedicated markdown command. Opens (or
+/// reuses, with `--here`) a markdown preview pane regardless of the
+/// file's extension, so it doubles as the escape hatch for forcing a
+/// markdown pane on a file `nex open` wouldn't route there.
+func handleMarkdown(_ args: inout ArraySlice<String>) {
+    if let first = args.first, isHelpToken(first) {
+        print("Usage: nex md [--here] <filepath>")
+        exit(0)
+    }
     let reuse = popSwitch("--here", from: &args)
-    guard let filePath = args.popFirst() else {
+    guard let filePath = args.popFirst(), !filePath.hasPrefix("-") else {
+        fputs("Usage: nex md [--here] <filepath>\n", stderr)
+        exit(1)
+    }
+    let absolutePath = URL(fileURLWithPath: filePath).standardizedFileURL.path
+    sendMarkdownOpen(absolutePath: absolutePath, reuse: reuse)
+}
+
+/// `nex open [--here] <file>` — generic file opener. Routes by the
+/// file's extension to the matching pane type:
+///   - markdown (.md, ...)        → markdown preview pane
+///   - web (.html, .pdf, images)  → web pane via a `file://` URL
+///   - anything else              → usage error (use `nex md` or
+///                                  `nex web open` explicitly)
+func handleOpen(_ args: inout ArraySlice<String>) {
+    if let first = args.first, isHelpToken(first) {
+        print("Usage: nex open [--here] <filepath>")
+        print("Routes by file type: .md/.markdown → markdown pane;")
+        print(".html/.htm/.pdf/.svg and images (.png/.jpg/.gif/.webp) → web pane.")
+        exit(0)
+    }
+    let reuse = popSwitch("--here", from: &args)
+    guard let filePath = args.popFirst(), !filePath.hasPrefix("-") else {
         fputs("Usage: nex open [--here] <filepath>\n", stderr)
         exit(1)
     }
 
-    let absolutePath = URL(fileURLWithPath: filePath).standardizedFileURL.path
+    let absoluteURL = URL(fileURLWithPath: filePath).standardizedFileURL
+    let absolutePath = absoluteURL.path
+    let ext = absoluteURL.pathExtension.lowercased()
 
+    if markdownOpenExtensions.contains(ext) {
+        sendMarkdownOpen(absolutePath: absolutePath, reuse: reuse)
+    } else if webOpenExtensions.contains(ext) {
+        if reuse {
+            fputs("nex open: --here is ignored for web files (web panes always open in a new pane)\n", stderr)
+        }
+        sendWebOpenForFile(fileURL: absoluteURL.absoluteString)
+    } else {
+        let shown = ext.isEmpty ? "files without an extension" : "'.\(ext)' files"
+        fputs("nex open: don't know how to open \(shown)\n", stderr)
+        fputs("       Markdown (.md, .markdown) opens a preview pane; .html/.htm/.pdf/.svg and\n", stderr)
+        fputs("       images (.png/.jpg/.gif/.webp) open a web pane.\n", stderr)
+        fputs("       Use `nex md <file>` to force a markdown pane, or `nex web open <url>`.\n", stderr)
+        exit(1)
+    }
+}
+
+/// Shared markdown-open send used by both `nex md` and `nex open`'s
+/// markdown route. Fire-and-forget `open` wire command.
+private func sendMarkdownOpen(absolutePath: String, reuse: Bool) {
     var payload: [String: Any] = [
         "command": "open",
         "path": absolutePath
@@ -2782,6 +2918,21 @@ func handleOpen(_ args: inout ArraySlice<String>) {
     }
 
     sendJSONAny(payload)
+}
+
+/// `nex open`'s web route. Opens a new web pane on the `file://` URL
+/// via the same `web-open` request/response path as `nex web open`,
+/// so it prints `open ok: <pane-uuid>`.
+private func sendWebOpenForFile(fileURL: String) {
+    var payload: [String: Any] = [
+        "command": "web-open",
+        "url": fileURL
+    ]
+    if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+       !originPaneID.isEmpty {
+        payload["pane_id"] = originPaneID
+    }
+    sendWebReplyAndPrintBasic(payload, command: "open")
 }
 
 func handleDiff(_ args: inout ArraySlice<String>) {
@@ -3322,6 +3473,8 @@ case "layout":
     handleLayout(&args)
 case "open":
     handleOpen(&args)
+case "md":
+    handleMarkdown(&args)
 case "diff":
     handleDiff(&args)
 case "graft":
