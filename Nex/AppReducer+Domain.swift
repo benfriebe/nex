@@ -21,6 +21,7 @@ extension AppReducer {
         case webPane
         case repoGit
         case socket
+        case commandPalette
     }
 
     static func domain(of action: Action) -> ReducerDomain {
@@ -109,6 +110,26 @@ extension AppReducer {
         case .socketMessage:
             .socket
 
+        // MARK: CommandPalette
+
+        // The command-palette overlay: open/close (with focus-handoff
+        // scheduling), query filtering, selection movement, and confirm
+        // (which switches the active workspace + focuses a pane). The
+        // three UI fields (`isCommandPaletteVisible`, `commandPaletteQuery`,
+        // `commandPaletteSelectedIndex`) and the computed `commandPaletteItems`
+        // stay on `AppReducer.State` — the handlers compute selection over
+        // `workspaces` and `commandPaletteConfirm` writes `activeWorkspaceID`
+        // directly — so this is a reduce-block over the shared state, not a
+        // child reducer with its own slice.
+        case .toggleCommandPalette,
+             .dismissCommandPalette,
+             .commandPaletteQueryChanged,
+             .commandPaletteSelectIndex,
+             .commandPaletteSelectNext,
+             .commandPaletteSelectPrevious,
+             .commandPaletteConfirm:
+            .commandPalette
+
         // MARK: Core
 
         // Everything not yet extracted into its own reduce-block.
@@ -168,13 +189,6 @@ extension AppReducer {
              .migrateLabelsToPresets,
              .updateExternalIndicators,
              .configHotkey,
-             .toggleCommandPalette,
-             .dismissCommandPalette,
-             .commandPaletteQueryChanged,
-             .commandPaletteSelectIndex,
-             .commandPaletteSelectNext,
-             .commandPaletteSelectPrevious,
-             .commandPaletteConfirm,
              .configLoaded,
              .restartSocketServer:
             .core

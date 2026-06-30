@@ -71,6 +71,7 @@
 		5A9607BD6AD03E15B0124B88 /* RingBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D792DEC74448D403CE1A96D /* RingBuffer.swift */; };
 		5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */; };
 		5CFC8C5F96B371044A5ABE91 /* QuitConfirmationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD202733564AC92AEC00A0C /* QuitConfirmationTests.swift */; };
+		5EA817AD794D8B685956D8B7 /* AppReducer+CommandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AAF933D52196D3736881E9 /* AppReducer+CommandPalette.swift */; };
 		62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E820170ADF2ADB58B8079 /* GitServiceTests.swift */; };
 		62BC1CC522515C8E6A99F508 /* GitHeadWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */; };
 		630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B04ED477C0C51A44953A8C /* WebPaneState.swift */; };
@@ -289,6 +290,7 @@
 		5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingTests.swift; sourceTree = "<group>"; };
 		61D6AE6635332105A3C18A03 /* VibrancyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibrancyView.swift; sourceTree = "<group>"; };
 		6762B22A5CA7CC5867025DA2 /* RootChromeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootChromeView.swift; sourceTree = "<group>"; };
+		67AAF933D52196D3736881E9 /* AppReducer+CommandPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+CommandPalette.swift"; sourceTree = "<group>"; };
 		67E67BC5275DEF2EED8D21D2 /* RenameWorkspaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameWorkspaceSheet.swift; sourceTree = "<group>"; };
 		684EF74D8EC3F295B22944AB /* WorkspaceLabelViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLabelViews.swift; sourceTree = "<group>"; };
 		68D7A81416F44B73B7DA0AC2 /* AppReducer+Socket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+Socket.swift"; sourceTree = "<group>"; };
@@ -591,6 +593,7 @@
 			children = (
 				76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */,
 				D9335AE3C92A37DD50A5715A /* AppReducer.swift */,
+				67AAF933D52196D3736881E9 /* AppReducer+CommandPalette.swift */,
 				3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */,
 				99B5AF5D84F229813EF7478C /* AppReducer+RepoGit.swift */,
 				BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */,
@@ -1024,6 +1027,7 @@
 			files = (
 				759B67A4E8D35868EC6E2295 /* AppActivation.swift in Sources */,
 				1397C2AF47888F6A056F5970 /* AppDelegate.swift in Sources */,
+				5EA817AD794D8B685956D8B7 /* AppReducer+CommandPalette.swift in Sources */,
 				9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */,
 				B57A14A09524336D06A1860D /* AppReducer+RepoGit.swift in Sources */,
 				EF04C05B3A92672C8846DB71 /* AppReducer+SearchNotify.swift in Sources */,

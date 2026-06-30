@@ -583,31 +583,6 @@ struct AppReducer {
     @Dependency(\.continuousClock) var clock
     @Dependency(\.userDefaults) var userDefaults
 
-    private enum PaletteFocusID: Hashable { case pending }
-
-    /// Delay after the palette triggers a focus change before we claim
-    /// first responder for the destination surface. Matches the palette
-    /// overlay's fade-out (`ContentView` uses 0.15s) with a small margin
-    /// so the palette's TextField has fully released its field editor.
-    static let paletteFocusHandoffDelay: Duration = .milliseconds(200)
-
-    /// Focus the surface for the currently-active workspace's focused
-    /// pane after the palette's dismiss transition completes. Emitted by
-    /// every palette-close path (confirm, dismiss, escape) so keyboard
-    /// focus always lands back on a terminal pane. Cancellable via
-    /// `PaletteFocusID.pending` so a subsequent palette interaction
-    /// within the delay window supersedes any earlier pending focus.
-    private func scheduleFocusAfterPaletteClose(
-        paneID: UUID?
-    ) -> Effect<Action> {
-        guard let paneID else { return .none }
-        return .run { [surfaceManager, clock] _ in
-            try await clock.sleep(for: Self.paletteFocusHandoffDelay)
-            await surfaceManager.focus(paneID: paneID)
-        }
-        .cancellable(id: PaletteFocusID.pending, cancelInFlight: true)
-    }
-
     // MARK: - Socket command helpers
 
     /// Result of `resolvePaneTarget`. The error case carries a
@@ -2097,89 +2072,6 @@ struct AppReducer {
                 // Handled by the GraftFeature Scope below.
                 return .none
 
-            // MARK: - Command Palette
-
-            case .toggleCommandPalette:
-                state.isCommandPaletteVisible.toggle()
-                if state.isCommandPaletteVisible {
-                    state.commandPaletteQuery = ""
-                    state.commandPaletteSelectedIndex = 0
-                    // Reopening within the handoff window supersedes any
-                    // pending focus grab scheduled by the prior close.
-                    return .cancel(id: PaletteFocusID.pending)
-                }
-                let activePane = state.activeWorkspaceID.flatMap { state.workspaces[id: $0]?.focusedPaneID }
-                return scheduleFocusAfterPaletteClose(paneID: activePane)
-
-            case .dismissCommandPalette:
-                state.isCommandPaletteVisible = false
-                state.commandPaletteQuery = ""
-                let activePane = state.activeWorkspaceID.flatMap { state.workspaces[id: $0]?.focusedPaneID }
-                return scheduleFocusAfterPaletteClose(paneID: activePane)
-
-            case .commandPaletteQueryChanged(let query):
-                state.commandPaletteQuery = query
-                state.commandPaletteSelectedIndex = 0
-                return .none
-
-            case .commandPaletteSelectIndex(let index):
-                let count = state.commandPaletteItems.count
-                if count > 0 {
-                    state.commandPaletteSelectedIndex = min(max(index, 0), count - 1)
-                }
-                return .none
-
-            case .commandPaletteSelectNext:
-                let count = state.commandPaletteItems.count
-                if count > 0 {
-                    state.commandPaletteSelectedIndex = min(
-                        state.commandPaletteSelectedIndex + 1, count - 1
-                    )
-                }
-                return .none
-
-            case .commandPaletteSelectPrevious:
-                state.commandPaletteSelectedIndex = max(
-                    state.commandPaletteSelectedIndex - 1, 0
-                )
-                return .none
-
-            case .commandPaletteConfirm:
-                let items = state.commandPaletteItems
-                guard state.commandPaletteSelectedIndex < items.count else {
-                    // Confirm with no items still closes the palette;
-                    // focus the active pane so the window isn't left
-                    // without keyboard focus.
-                    state.isCommandPaletteVisible = false
-                    let activePane = state.activeWorkspaceID.flatMap { state.workspaces[id: $0]?.focusedPaneID }
-                    return scheduleFocusAfterPaletteClose(paneID: activePane)
-                }
-                let item = items[state.commandPaletteSelectedIndex]
-                state.isCommandPaletteVisible = false
-                state.commandPaletteQuery = ""
-
-                // Set workspace directly to avoid effect indirection
-                state.activeWorkspaceID = item.workspaceID
-                state.workspaces[id: item.workspaceID]?.lastAccessedAt = Date()
-
-                var effects: [Effect<Action>] = [
-                    .send(.persistState),
-                    .send(.refreshGitStatus)
-                ]
-                if let paneID = item.paneID {
-                    effects.append(.send(.workspaces(.element(
-                        id: item.workspaceID, action: .focusPane(paneID)
-                    ))))
-                }
-                // Claim first responder for the destination pane once the
-                // palette's fade-out completes. SurfaceContainerView's
-                // passive focus grab bails while the palette's TextField
-                // editor still holds first responder.
-                let targetPaneID = item.paneID
-                    ?? state.workspaces[id: item.workspaceID]?.focusedPaneID
-                effects.append(scheduleFocusAfterPaletteClose(paneID: targetPaneID))
-                return .merge(effects)
-
             // MARK: - Presets child reducer (web favourites + label presets)
 
             // Field mutations + persistence live in `PresetsFeature` (wired
@@ -2396,6 +2288,8 @@ struct AppReducer {
         repoGitReducer
 
         socketReducer
+
+        commandPaletteReducer
             .forEach(\.workspaces, action: \.workspaces) {
                 WorkspaceFeature()
             }
