@@ -33,11 +33,12 @@ struct WindowTitleBar: View {
             ZStack {
                 // Match the bottom status bar's background (sidebar/footer
                 // tone). `WindowDragRegion` lets empty parts of the bar drag
-                // the window (via `performDrag`) — scoped to the bar so it
-                // doesn't make the sidebar a drag handle the way
-                // `isMovableByWindowBackground` did. The interactive controls
-                // are a native titlebar accessory (see the type doc), not
-                // content here, so the drag region can span the full width.
+                // the window (single click) and zoom/minimise it (double
+                // click) — scoped to the bar so it doesn't make the sidebar a
+                // drag handle the way `isMovableByWindowBackground` did. The
+                // interactive controls are a native titlebar accessory (see the
+                // type doc), not content here, so the drag region can span the
+                // full width.
                 theme.footerBackground
                 WindowDragRegion()
                 identityCluster(workspace)
@@ -87,6 +88,11 @@ struct WindowTitleBar: View {
         // narrow window.
         .padding(.leading, 80)
         .padding(.trailing, 86)
+        // The identity is purely decorative; let clicks fall through to the
+        // `WindowDragRegion` behind it so dragging and double-click zoom work
+        // when the pointer is over the workspace name, matching native title
+        // bars (issue #199).
+        .allowsHitTesting(false)
     }
 
     private var separator: some View {
@@ -105,6 +111,26 @@ struct WindowTitleBar: View {
     }
 }
 
+/// The window action bound to a title-bar double-click, mirroring the macOS
+/// "Double-click a window's title bar to" setting (System Settings → Desktop &
+/// Dock). A pure value type so the preference→action mapping is unit-testable
+/// without a live window.
+enum TitlebarDoubleClickAction {
+    case zoom
+    case minimize
+    case doNothing
+
+    /// Resolve from the `AppleActionOnDoubleClick` value in `NSGlobalDomain`.
+    /// Unset or unrecognised falls back to `.zoom` (the macOS factory default).
+    static func resolve(from raw: String?) -> TitlebarDoubleClickAction {
+        switch raw {
+        case "Minimize": .minimize
+        case "None": .doNothing
+        default: .zoom // "Maximize" or unset/unknown
+        }
+    }
+}
+
 /// A transparent, hit-testable backing view that lets the window be dragged
 /// from the non-interactive parts of the custom title bar. Scoped to the
 /// title bar (not the whole window) so it doesn't hijack sidebar drag-to-
@@ -118,11 +144,79 @@ private struct WindowDragRegion: NSViewRepresentable {
     func updateNSView(_: NSView, context _: Context) {}
 
     private final class DragView: NSView {
-        /// `mouseDownCanMoveWindow` is unreliable for a SwiftUI-embedded view,
-        /// so initiate the drag explicitly. `performDrag` also handles the
-        /// double-click-to-zoom/minimise titlebar conventions.
+        /// Drag the window from empty title-bar regions. `performDrag` is only
+        /// initiated on a single click; a double-click is left untouched so the
+        /// `TitlebarDoubleClickMonitor` (and macOS) can act on it. Note that
+        /// under `.hiddenTitleBar` the native transparent titlebar usually wins
+        /// the top strip's events and moves the window itself, so this is a
+        /// belt-and-braces drag path rather than the sole one.
         override func mouseDown(with event: NSEvent) {
-            window?.performDrag(with: event)
+            if event.clickCount == 1 {
+                window?.performDrag(with: event)
+            }
+        }
+    }
+}
+
+/// Restores macOS double-click-to-zoom on the hidden titlebar (issue #199).
+///
+/// Under `.windowStyle(.hiddenTitleBar)` the window is draggable from the
+/// title-bar strip (the transparent native titlebar / movable-background owns
+/// those events), but the *double-click* titlebar convention is lost: a
+/// content view placed there never receives the click, and a
+/// movable-background region drags without zooming. Rather than fight the
+/// event routing, a local `NSEvent` monitor observes `leftMouseDown` before
+/// the window dispatches it, and on a double-click in the empty title-bar
+/// region performs the action from the user's `AppleActionOnDoubleClick`
+/// preference (Zoom / Minimise / Do Nothing), matching a native title bar.
+@MainActor
+final class TitlebarDoubleClickMonitor {
+    private var monitor: Any?
+
+    /// Height of the custom title bar (`WindowTitleBar`), in points.
+    private static let titleBarHeight: CGFloat = 32
+    /// Leading inset that clears the traffic lights.
+    private static let leadingInset: CGFloat = 80
+    /// Trailing inset that clears the ••• menu / sidebar-toggle accessory.
+    private static let trailingInset: CGFloat = 86
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            Self.handle(event)
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    private static func handle(_ event: NSEvent) {
+        guard event.clickCount == 2, let window = event.window else { return }
+        // Only the main window uses `.hiddenTitleBar` (transparent titlebar +
+        // full-size content view); Settings / Help keep a native titlebar that
+        // already zooms, so leave those alone.
+        guard window.titlebarAppearsTransparent,
+              window.styleMask.contains(.fullSizeContentView)
+        else { return }
+
+        let loc = event.locationInWindow
+        let height = window.contentView?.bounds.height ?? window.frame.height
+        let width = window.frame.width
+        // Top `titleBarHeight` strip, excluding the traffic-light and trailing
+        // control gutters so double-clicking a control never zooms.
+        guard loc.y >= height - titleBarHeight,
+              loc.x >= leadingInset,
+              loc.x <= width - trailingInset
+        else { return }
+
+        let raw = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")
+        switch TitlebarDoubleClickAction.resolve(from: raw) {
+        case .zoom: window.performZoom(nil)
+        case .minimize: window.performMiniaturize(nil)
+        case .doNothing: break
         }
     }
 }

@@ -147,6 +147,7 @@
 		BAEEBBBC67C9969D0553D084 /* ChromeIndicatorRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */; };
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
 		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
+		C0741544E700ECB9D719CB64 /* TitlebarDoubleClickActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA151EED6939BCA9792BBF1 /* TitlebarDoubleClickActionTests.swift */; };
 		C0DDF7284D01523225E5EEE7 /* GhosttyConfigClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */; };
 		C14C8EEDD9146F537341D02E /* SocketParsingOutsideNexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */; };
 		C1FC2BD79FF0D9DC86910028 /* WebPaneInspectorScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2BAD220346CCE551765FCD9 /* WebPaneInspectorScript.swift */; };
@@ -378,6 +379,7 @@
 		DC371B0DE7B02828E9EDFE8E /* ClipboardImageHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardImageHelper.swift; sourceTree = "<group>"; };
 		DDD03468B083223FF50F68E0 /* GhosttySurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttySurface.swift; sourceTree = "<group>"; };
 		DE56BB11F5C7C34821411297 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		DEA151EED6939BCA9792BBF1 /* TitlebarDoubleClickActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitlebarDoubleClickActionTests.swift; sourceTree = "<group>"; };
 		E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDropTargetTests.swift; sourceTree = "<group>"; };
 		E0625B2E7935BDDF63DC5D19 /* RingBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingBufferTests.swift; sourceTree = "<group>"; };
 		E08D39F8F87D7505CD32D25D /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
@@ -546,6 +548,7 @@
 				AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */,
 				1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */,
 				09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */,
+				DEA151EED6939BCA9792BBF1 /* TitlebarDoubleClickActionTests.swift */,
 				9AA64A9054515A57ED6B2ECA /* WebPaneActuatorActionTests.swift */,
 				9F338E618A147E5BAAFF5FE5 /* WebPaneActuatorSelectorTests.swift */,
 				12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */,
@@ -1003,6 +1006,7 @@
 				2B4533964D77117EE6D98690 /* SocketParsingTests.swift in Sources */,
 				EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */,
 				ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */,
+				C0741544E700ECB9D719CB64 /* TitlebarDoubleClickActionTests.swift in Sources */,
 				04A463E95398A50F5AD5AA2B /* WebPaneActuatorActionTests.swift in Sources */,
 				E5D6BDD247E0BE03F097B4A2 /* WebPaneActuatorSelectorTests.swift in Sources */,
 				B0FA5E756635F6DFC402CD7C /* WebPaneActuatorWaitTests.swift in Sources */,
