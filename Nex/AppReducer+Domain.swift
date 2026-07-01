@@ -155,6 +155,7 @@ extension AppReducer {
              .clearWorkspaceSelection,
              .selectAllWorkspaces,
              .setBulkColor,
+             .setBulkLabel,
              .requestBulkDelete,
              .confirmBulkDelete,
              .cancelBulkDelete,

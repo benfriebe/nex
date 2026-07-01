@@ -851,6 +851,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
+            bulkLabelsMenu(selection: selection)
             Button("Group \(selection.count) Workspaces...") {
                 store.send(.requestBulkCreateGroup)
             }
@@ -924,6 +925,96 @@ struct WorkspaceListView: View {
                 }
             }
         }
+    }
+
+    /// Bulk "Label ▸" submenu shown when 2+ workspaces are selected. Each
+    /// preset renders its all/some/none state across the whole selection
+    /// (checkmark / dash / plain); clicking applies-to-all when not every
+    /// selected workspace carries it, otherwise removes-from-all. Free-form
+    /// labels present on any selected workspace are surfaced below a divider
+    /// so they can be toggled too. "Manage Labels…" opens Settings → Labels.
+    ///
+    /// Counts are computed over the full selection — including workspaces
+    /// hidden inside a collapsed group, which are absent from the sidebar
+    /// order — so the menu stays consistent with `.setBulkLabel`, which
+    /// mutates every live `selectedWorkspaceIDs` entry.
+    private func bulkLabelsMenu(selection: Set<UUID>) -> some View {
+        // Selected workspaces in sidebar order, with any live members hidden
+        // from the sidebar (e.g. collapsed-group children) appended so the
+        // free-form gather and the counts cover the whole selection.
+        let visible = workspaceIDs(sortedBySidebar: selection)
+        let hidden = selection.subtracting(visible)
+            .filter { store.workspaces[id: $0] != nil }
+            .sorted { $0.uuidString < $1.uuidString }
+        let orderedSelection = visible + hidden
+        let total = orderedSelection.count
+
+        func appliedCount(_ label: String) -> Int {
+            orderedSelection.reduce(0) {
+                $0 + ((store.workspaces[id: $1]?.labels.contains(label) ?? false) ? 1 : 0)
+            }
+        }
+
+        // Free-form (non-preset) labels present on any selected workspace,
+        // deduped in sidebar order.
+        let presetNames = Set(store.presets.labelPresets.map(\.name))
+        var seen = Set<String>()
+        var freeform: [String] = []
+        for id in orderedSelection {
+            for label in store.workspaces[id: id]?.labels ?? [] where !presetNames.contains(label) {
+                if seen.insert(label).inserted { freeform.append(label) }
+            }
+        }
+
+        return Menu("Label \(selection.count) Workspaces") {
+            ForEach(store.presets.labelPresets) { preset in
+                let count = appliedCount(preset.name)
+                let all = total > 0 && count == total
+                let isMixed = count > 0 && count < total
+                Button {
+                    store.send(.setBulkLabel(label: preset.name, apply: !all))
+                } label: {
+                    Label {
+                        Text(preset.name)
+                    } icon: {
+                        preset.color.color.menuSwatch(checked: all, mixed: isMixed)
+                    }
+                }
+                .accessibilityValue(Text(bulkLabelStateDescription(all: all, mixed: isMixed)))
+            }
+            if !freeform.isEmpty {
+                Divider()
+                ForEach(freeform, id: \.self) { label in
+                    // Free-form labels are gathered from the selection, so
+                    // they're always on ≥1 workspace: "all" or mixed, never none.
+                    let all = total > 0 && appliedCount(label) == total
+                    Button {
+                        store.send(.setBulkLabel(label: label, apply: !all))
+                    } label: {
+                        Label(label, systemImage: all ? "checkmark" : "minus")
+                    }
+                    .accessibilityValue(Text(bulkLabelStateDescription(all: all, mixed: !all)))
+                }
+            }
+            Divider()
+            Button("Manage Labels\u{2026}") {
+                WebPaneChrome.pendingSettingsTab = .labels
+                openSettings()
+                NotificationCenter.default.post(
+                    name: WebPaneChrome.openSettingsTabNotification,
+                    object: SettingsTab.labels
+                )
+            }
+        }
+    }
+
+    /// VoiceOver value for a bulk-label row: the checked/mixed state lives in
+    /// the swatch/symbol image, which carries no text of its own, so surface
+    /// it here for assistive tech.
+    private func bulkLabelStateDescription(all: Bool, mixed: Bool) -> String {
+        if all { return "Applied to all" }
+        if mixed { return "Applied to some" }
+        return "Not applied"
     }
 
     /// "Labels ▸" submenu attached to a workspace row's context menu.

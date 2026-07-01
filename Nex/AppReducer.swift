@@ -362,6 +362,7 @@ struct AppReducer {
         case clearWorkspaceSelection
         case selectAllWorkspaces
         case setBulkColor(WorkspaceColor)
+        case setBulkLabel(label: String, apply: Bool)
         case requestBulkDelete
         case confirmBulkDelete
         case cancelBulkDelete
@@ -1373,6 +1374,21 @@ struct AppReducer {
             case .setBulkColor(let color):
                 for id in state.selectedWorkspaceIDs {
                     state.workspaces[id: id]?.color = color
+                }
+                return .send(.persistState)
+
+            case .setBulkLabel(let label, let apply):
+                let normalized = WorkspaceFeature.normalizeLabel(label)
+                guard !normalized.isEmpty else { return .none }
+                for id in state.selectedWorkspaceIDs {
+                    guard state.workspaces[id: id] != nil else { continue }
+                    if apply {
+                        if !(state.workspaces[id: id]?.labels.contains(normalized) ?? false) {
+                            state.workspaces[id: id]?.labels.append(normalized)
+                        }
+                    } else {
+                        state.workspaces[id: id]?.labels.removeAll { $0 == normalized }
+                    }
                 }
                 return .send(.persistState)
 
