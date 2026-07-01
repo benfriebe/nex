@@ -119,8 +119,13 @@ struct LabelPresetsSettingsView: View {
                 .opacity(trimmedNewName.isEmpty ? 0.5 : 1)
                 .frame(width: LabelCol.preview, alignment: .leading)
 
+            // A bordered text button needs its intrinsic width; pinning it
+            // to the narrow `action` column (sized for the preset rows' trash
+            // icon) clips "Add" to "A...". Let it size to content, but keep
+            // the column at least action-wide so it still lines up.
             Button("Add", action: commitNew)
-                .frame(width: LabelCol.action, alignment: .trailing)
+                .fixedSize()
+                .frame(minWidth: LabelCol.action, alignment: .trailing)
                 .disabled(trimmedNewName.isEmpty)
         }
         .padding(12)
