@@ -11,6 +11,7 @@ struct NexApp: App {
     }
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
+    @State private var titlebarZoomMonitor: TitlebarDoubleClickMonitor?
     // Holds the loaded ghostty config so the `\.ghosttyConfig` environment
     // reflects the real terminal background once it's read in `.onAppear`.
     // Injecting `.liveValue` directly captured the pre-load default
@@ -122,11 +123,11 @@ struct NexApp: App {
                         // NB: do NOT set `isMovableByWindowBackground` — it turns
                         // the whole window (incl. the sidebar) into a drag handle,
                         // which hijacks sidebar row/group reordering. With
-                        // `.hiddenTitleBar` the titlebar region the custom title
-                        // bar overlaps is already window-draggable (its
-                        // non-interactive SwiftUI content reports
-                        // mouseDownCanMoveWindow), so the bar still moves the
-                        // window without breaking sidebar drags.
+                        // `.hiddenTitleBar` the custom title bar's
+                        // `WindowDragRegion` drives both window dragging and
+                        // double-click zoom/minimise explicitly (see
+                        // `WindowTitleBar.swift`), scoped to the bar so the
+                        // sidebar drags stay intact.
                     }
 
                     // Global hotkey callback — registration happens from the
@@ -174,6 +175,11 @@ struct NexApp: App {
                     let monitor = PaneShortcutMonitor(store: store)
                     monitor.start()
                     shortcutMonitor = monitor
+
+                    // Restore double-click-to-zoom on the hidden titlebar (#199).
+                    let zoomMonitor = TitlebarDoubleClickMonitor()
+                    zoomMonitor.start()
+                    titlebarZoomMonitor = zoomMonitor
                 }
         }
         .windowStyle(.hiddenTitleBar)
