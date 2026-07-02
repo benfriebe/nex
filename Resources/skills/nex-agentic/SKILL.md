@@ -233,14 +233,21 @@ without leaving Nex. Relative paths resolve against the caller's cwd,
 and the pane lands in the caller's workspace (via `NEX_PANE_ID`).
 
 ```bash
-# Generic opener: routes by the file's extension.
+# Generic opener: a URL/hostname opens a web pane; otherwise routes a
+# local file by its extension.
+#   URL / hostname                          → web pane
+#     (scheme://, host:port, localhost[:port], IPv4, or a bare dotted
+#      host with a known TLD: google.com, https://x.com, localhost:3000)
 #   .md / .markdown / .mdown / .mkd / ...   → markdown preview pane
 #   .html / .htm / .pdf / .svg / images     → web pane (file:// URL)
 #   anything else                           → usage error, no pane
+# Explicit paths (./x, /x, ~/x) and existing files stay local, so
+# `./google.com` is a file; a bare word (README) or an unknown/file-type
+# TLD (notes.txt, foo.museum) is NOT a host — use `nex web open` for those.
 # --here reuses the calling pane (markdown route only). Request/response
-# on the web route (prints `open ok: <pane-uuid>`); fire-and-forget on
-# the markdown route.
-nex open [--here] <file>
+# on the web/URL route (prints `open ok: <pane-uuid>`); fire-and-forget
+# on the markdown route.
+nex open [--here] <path-or-url>
 
 # Always open a markdown preview pane, whatever the extension. The
 # escape hatch for forcing markdown on a file `nex open` would reject
@@ -255,7 +262,9 @@ nex diff [<path>]
 So a worker that just wrote `report.html` can `nex open report.html`
 to render it in a web pane, or `nex open summary.md` to drop a
 live-reloading markdown preview beside the terminal — no manual
-`file://` or pane-type juggling.
+`file://` or pane-type juggling. The same command also opens a live
+site: `nex open localhost:3000` or `nex open example.com` drops the
+app into a web pane without reaching for the longer `nex web open`.
 
 ### Web Pane Commands
 
