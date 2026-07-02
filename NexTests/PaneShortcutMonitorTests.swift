@@ -157,6 +157,23 @@ struct PaneShortcutMonitorTests {
         #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
     }
 
+    // MARK: - Open web pane (menu bar action)
+
+    @Test func cmdShiftOIsNotConsumedByMonitor() {
+        // ⌘⇧O opens a web pane (issue #206), but `openWebPane` is a
+        // menu bar action — SwiftUI Commands owns its dispatch. The
+        // NSEvent monitor must defer (return false) so the shortcut
+        // fires exactly once and never double-dispatches.
+        let ws = Self.makeWorkspace()
+        let (_, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID
+        )
+
+        let event = keyEvent(keyCode: 31, modifierFlags: [.command, .shift])
+        #expect(monitor.handleKeyEvent(event) == false)
+    }
+
     // MARK: - Split pane
 
     @Test func cmdDSplitsHorizontal() {

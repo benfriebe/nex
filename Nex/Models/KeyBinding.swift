@@ -249,10 +249,13 @@ enum NexAction: String, CaseIterable {
     case openDiff = "open_diff"
     case toggleSyncInput = "toggle_sync_input"
 
-    // Web pane actions. All ship unbound; the priority layer in
-    // `PaneShortcutMonitor` dispatches them directly when the focused
-    // pane is a web pane, so the global ⌘L / ⌘R / ⌘[ / ⌘] / ⌘T /
-    // ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every other pane type.
+    // Web pane actions. `openWebPane` is the app-level entry point:
+    // it ships bound to ⌘⇧O and is a menu bar action, so it opens a
+    // fresh web pane from anywhere. The rest ship unbound; the
+    // priority layer in `PaneShortcutMonitor` dispatches them directly
+    // when the focused pane is a web pane, so the global ⌘L / ⌘R /
+    // ⌘[ / ⌘] / ⌘T / ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every
+    // other pane type.
     case openWebPane = "open_web_pane"
     case webFocusURLBar = "web_focus_url_bar"
     case webBack = "web_back"
@@ -269,7 +272,7 @@ enum NexAction: String, CaseIterable {
     /// The NSEvent monitor should not consume events for these.
     var isMenuBarAction: Bool {
         switch self {
-        case .newWorkspace, .openFile, .newGroup,
+        case .newWorkspace, .openFile, .openWebPane, .newGroup,
              .switchToWorkspace1, .switchToWorkspace2, .switchToWorkspace3,
              .switchToWorkspace4, .switchToWorkspace5, .switchToWorkspace6,
              .switchToWorkspace7, .switchToWorkspace8, .switchToWorkspace9,
@@ -340,7 +343,12 @@ enum NexAction: String, CaseIterable {
         switch self {
         case .splitRight, .splitDown, .closePane, .reopenClosedPane, .toggleZoom, .cycleLayout,
              .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, .createScratchpad,
-             .toggleSyncInput:
+             .toggleSyncInput, .openWebPane:
+            // `openWebPane` lives here (not the web-pane group) because
+            // it's a real map-driven, app-wide bindable action shipping
+            // with a ⌘⇧O default — it must appear in Settings so users
+            // can discover/rebind it. The web-pane group below is
+            // hidden (priority-layer driven, not meaningfully rebindable).
             "Pane Management"
         case .focusNextPane, .focusPreviousPane, .commandPalette:
             "Navigation"
@@ -354,7 +362,7 @@ enum NexAction: String, CaseIterable {
         case .openFile, .toggleMarkdownEdit, .increaseMarkdownFontSize, .decreaseMarkdownFontSize,
              .resetMarkdownFontSize, .openDiff:
             "Files"
-        case .openWebPane, .webFocusURLBar, .webBack, .webForward, .webReload,
+        case .webFocusURLBar, .webBack, .webForward, .webReload,
              .webTabNew, .webTabClose, .webTabPrev, .webTabNext:
             "Web Pane (active when web pane focused)"
         case .toggleSearch, .closeSearch:
@@ -489,6 +497,7 @@ struct KeyBindingMap: Equatable {
         // Menu bar actions (Layer 1)
         bindings[KeyTrigger(keyCode: 45, modifiers: .command)] = .newWorkspace // ⌘N
         bindings[KeyTrigger(keyCode: 31, modifiers: .command)] = .openFile // ⌘O
+        bindings[KeyTrigger(keyCode: 31, modifiers: [.command, .shift])] = .openWebPane // ⌘⇧O
         bindings[KeyTrigger(keyCode: 18, modifiers: .command)] = .switchToWorkspace1 // ⌘1
         bindings[KeyTrigger(keyCode: 19, modifiers: .command)] = .switchToWorkspace2 // ⌘2
         bindings[KeyTrigger(keyCode: 20, modifiers: .command)] = .switchToWorkspace3 // ⌘3

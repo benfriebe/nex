@@ -27,6 +27,9 @@ struct PaneHeaderView: View {
     /// (issue #183). Nil for non-shell panes and when the host hasn't
     /// wired it (tests, previews).
     var onSetStatus: ((PaneStatus) -> Void)?
+    /// Open a fresh web pane in this pane's workspace (issue #206).
+    /// Nil when the host hasn't wired it (tests, previews).
+    var onOpenWebPane: (() -> Void)?
     /// True when sync is on for the workspace but this pane has been
     /// opted out. Used to render the "Include in sync" context menu
     /// entry and the dimmed `SYNC OFF` badge.
@@ -328,6 +331,9 @@ struct PaneHeaderView: View {
         Divider()
         Button("Split Right") { onSplitHorizontal() }
         Button("Split Down") { onSplitVertical() }
+        if let onOpenWebPane {
+            Button("New Web Pane") { onOpenWebPane() }
+        }
         if let onSetStatus {
             Divider()
             Menu("Status") {

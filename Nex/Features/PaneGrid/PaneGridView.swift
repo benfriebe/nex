@@ -33,6 +33,11 @@ struct PaneGridView: View {
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
     var onSetPaneStatus: ((UUID, PaneStatus) -> Void)?
+    /// Open a fresh web pane from a pane-header context menu (issue
+    /// #206). Wired by `ContentView`. No source pane is threaded: the
+    /// reducer opens in the active workspace (which is always the one
+    /// on screen), matching the menu-bar "New Web Pane" item.
+    var onOpenWebPane: (() -> Void)?
     /// Issue #121 sync-input state. `isSyncInputActive` flips the
     /// workspace toggle (drives the per-pane SYNC badge for every
     /// non-excluded pane); `syncInputExcluded` lists panes opted out.
@@ -190,6 +195,7 @@ struct PaneGridView: View {
                 onSetStatus: pane.type == .shell
                     ? onSetPaneStatus.map { handler in { status in handler(pane.id, status) } }
                     : nil,
+                onOpenWebPane: onOpenWebPane,
                 isSyncExcluded: syncInputExcluded.contains(pane.id),
                 workspaceSyncActive: isSyncInputActive,
                 onToggleSyncExcluded: onToggleSyncExcluded.map { handler in
