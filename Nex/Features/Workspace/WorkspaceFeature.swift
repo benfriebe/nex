@@ -281,7 +281,12 @@ struct WorkspaceFeature {
             tabID: UUID,
             url: String,
             reusePaneID: UUID? = nil,
-            isPrivate: Bool = false
+            isPrivate: Bool = false,
+            // Pane to split off (issue #206 header button / context
+            // menu). Nil → split the focused pane. `direction` picks
+            // right (.horizontal) vs down (.vertical).
+            sourcePaneID: UUID? = nil,
+            direction: PaneLayout.SplitDirection = .horizontal
         )
         /// Tell the coordinator to navigate the active tab. The
         /// coordinator updates the WebView; the URL bar follows via
@@ -681,7 +686,7 @@ struct WorkspaceFeature {
                 state.currentLayoutIndex = nil
                 return branchEffect
 
-            case .openWebPane(let newPaneID, let tabID, let url, let reusePaneID, let isPrivate):
+            case .openWebPane(let newPaneID, let tabID, let url, let reusePaneID, let isPrivate, let sourcePaneID, let direction):
                 let normalized = WebPaneCoordinator.normalizeURLInput(url)
                 let tab = WebTab(id: tabID, url: normalized)
                 let newPane = Pane(
@@ -722,7 +727,10 @@ struct WorkspaceFeature {
                     return .none
                 }
 
-                if let sourceID = state.focusedPaneID {
+                // Split off the caller-supplied pane (header button /
+                // context menu, issue #206) when given, else the focused
+                // pane; `direction` picks right vs down.
+                if let sourceID = sourcePaneID ?? state.focusedPaneID {
                     if let saved = state.savedLayout {
                         state.layout = saved
                         state.zoomedPaneID = nil
@@ -730,7 +738,7 @@ struct WorkspaceFeature {
                     }
                     let (newLayout, _) = state.layout.splitting(
                         paneID: sourceID,
-                        direction: .horizontal,
+                        direction: direction,
                         newPaneID: newPaneID
                     )
                     state.layout = newLayout

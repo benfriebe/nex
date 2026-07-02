@@ -442,8 +442,10 @@ struct AppReducer {
         case openFile
         case openFileAtPath(String, fromPaneID: UUID?)
         case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
-        /// Open a web pane in the active workspace.
-        case openWebPanePath(url: String, fromPaneID: UUID?)
+        /// Open a web pane in the active workspace. `fromPaneID` is the
+        /// pane to split off (header button / context menu, issue #206);
+        /// nil splits the focused pane. `direction` picks right vs down.
+        case openWebPanePath(url: String, fromPaneID: UUID?, direction: PaneLayout.SplitDirection = .horizontal)
         /// Bump the URL bar focus token for a web pane (⌘L).
         case webPaneFocusURLBar(paneID: UUID)
         /// Open a new tab in an existing web pane. `url == nil` →

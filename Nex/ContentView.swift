@@ -128,8 +128,10 @@ struct ContentView: View {
                             onSetPaneStatus: { paneID, status in
                                 store.send(.setPaneStatus(paneID: paneID, status: status))
                             },
-                            onOpenWebPane: {
-                                store.send(.openWebPanePath(url: "", fromPaneID: nil))
+                            onOpenWebPane: { paneID, direction in
+                                store.send(.openWebPanePath(
+                                    url: "", fromPaneID: paneID, direction: direction
+                                ))
                             },
                             isSyncInputActive: workspace.isSyncInputActive,
                             syncInputExcluded: workspace.syncInputExcluded,

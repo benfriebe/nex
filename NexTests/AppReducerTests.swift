@@ -84,6 +84,30 @@ struct AppReducerTests {
         }
     }
 
+    @Test func openWebPanePathSplitsSourcePaneInGivenDirection() async {
+        // The header globe button / context menu split off a SPECIFIC
+        // pane (issue #206): `fromPaneID` is the split source and
+        // `direction` picks right (.horizontal) vs down (.vertical).
+        // ⇧-click the globe → a vertical split off that pane.
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "Test", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.openWebPanePath(
+            url: "", fromPaneID: Self.paneID1, direction: .vertical
+        ))
+        await store.skipReceivedActions()
+
+        let workspace = store.state.workspaces[id: Self.wsID1]
+        let webPanes = workspace?.panes.filter { $0.type == .web } ?? []
+        #expect(webPanes.count == 1)
+        // The source pane was split vertically (down), not right.
+        if case .split(let dir, _, _, _) = workspace?.layout {
+            #expect(dir == .vertical)
+        } else {
+            Issue.record("Expected a vertical split layout after ⇧-click open")
+        }
+    }
+
     // MARK: - createWorkspace
 
     @Test func createWorkspaceAddsWorkspaceAndActivates() async {

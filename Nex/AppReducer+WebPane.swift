@@ -28,7 +28,7 @@ extension AppReducer {
         Reduce { state, action in
             guard Self.domain(of: action) == .webPane else { return .none }
             switch action {
-            case .openWebPanePath(let url, _):
+            case .openWebPanePath(let url, let fromPaneID, let direction):
                 guard let activeID = state.activeWorkspaceID else { return .none }
                 let newPaneID = uuid()
                 // Blank URL → focus the fresh pane's URL bar so the user
@@ -48,7 +48,12 @@ extension AppReducer {
                         tabID: uuid(),
                         url: url,
                         reusePaneID: nil,
-                        isPrivate: false
+                        isPrivate: false,
+                        // fromPaneID = the pane whose header button /
+                        // context menu was used; nil (menu bar / ⌘⇧O)
+                        // splits the focused pane.
+                        sourcePaneID: fromPaneID,
+                        direction: direction
                     )
                 )))
 
