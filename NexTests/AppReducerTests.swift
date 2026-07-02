@@ -1528,6 +1528,83 @@ struct AppReducerTests {
         }
     }
 
+    @Test func setBulkLabelAppliesToAllSelectedWithoutDuplicating() async {
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        ws1.labels = ["urgent"] // already carries it — must not be duplicated
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.selectedWorkspaceIDs = [Self.wsID1, Self.wsID2]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setBulkLabel(label: "urgent", apply: true)) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.labels == ["urgent"])
+            #expect(state.workspaces[id: Self.wsID2]?.labels == ["urgent"])
+        }
+    }
+
+    @Test func setBulkLabelRemovesFromAllSelected() async {
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        ws1.labels = ["urgent", "keep"]
+        var ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        ws2.labels = ["urgent"]
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.selectedWorkspaceIDs = [Self.wsID1, Self.wsID2]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.setBulkLabel(label: "urgent", apply: false)) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.labels == ["keep"])
+            #expect(state.workspaces[id: Self.wsID2]?.labels == [])
+        }
+    }
+
+    @Test func setBulkLabelIgnoresBlankLabel() async {
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        ws1.labels = ["urgent"]
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+        var appState = AppReducer.State()
+        appState.workspaces = [ws1, ws2]
+        appState.activeWorkspaceID = Self.wsID1
+        appState.selectedWorkspaceIDs = [Self.wsID1, Self.wsID2]
+
+        let store = TestStore(initialState: appState) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Whitespace-only label normalizes to empty and is a no-op.
+        await store.send(.setBulkLabel(label: "   ", apply: true))
+    }
+
     @Test func requestBulkDeletePresentsConfirmation() async {
         let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
         let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)

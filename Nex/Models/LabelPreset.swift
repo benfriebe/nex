@@ -176,8 +176,11 @@ extension Color {
     /// A non-template swatch image for showing a real colour inside a macOS
     /// `Menu`: SF Symbols are templated (monochrome) in menus, so a coloured
     /// dot drawn as a non-template `NSImage` is the reliable way to show
-    /// true colours. Draws a white/black checkmark when `checked`.
-    func menuSwatch(diameter: CGFloat = 11, checked: Bool = false) -> Image {
+    /// true colours. Draws a white/black checkmark when `checked`, or a dash
+    /// when `mixed` (indeterminate) — used by the bulk-label menu when only
+    /// some of the selected workspaces carry the label. `checked` wins if both
+    /// are set.
+    func menuSwatch(diameter: CGFloat = 11, checked: Bool = false, mixed: Bool = false) -> Image {
         let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
         // Pull out Sendable components so the drawing closure captures no
         // non-Sendable NSColor (Swift 6 strict concurrency).
@@ -199,6 +202,14 @@ extension Color {
                 mark.lineWidth = 1.5
                 mark.lineCapStyle = .round
                 mark.lineJoinStyle = .round
+                NSColor(white: dark ? 0 : 1, alpha: 1).setStroke()
+                mark.stroke()
+            } else if mixed {
+                let mark = NSBezierPath()
+                mark.move(to: NSPoint(x: rect.width * 0.30, y: rect.height * 0.50))
+                mark.line(to: NSPoint(x: rect.width * 0.70, y: rect.height * 0.50))
+                mark.lineWidth = 1.5
+                mark.lineCapStyle = .round
                 NSColor(white: dark ? 0 : 1, alpha: 1).setStroke()
                 mark.stroke()
             }
