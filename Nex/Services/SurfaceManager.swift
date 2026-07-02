@@ -47,6 +47,21 @@ final class SurfaceManager: Sendable {
         }
     }
 
+    /// Resolve the live `SurfaceView` whose libghostty surface matches
+    /// `rawSurface`, by pointer identity against the registered views —
+    /// mirrors `paneID(for:)` and, crucially, never dereferences
+    /// `rawSurface` itself. Used by the `GHOSTTY_ACTION_RENDER` handler
+    /// (issue #194): a render draining for a surface being freed off the
+    /// main thread (issue #136 teardown) simply finds no match and is
+    /// dropped, avoiding a use-after-free of the C surface struct.
+    func surfaceView(forRawSurface rawSurface: ghostty_surface_t) -> SurfaceView? {
+        lock.withLock {
+            surfaces.first { _, view in
+                view.ghosttySurface?.surface == rawSurface
+            }?.value
+        }
+    }
+
     @MainActor
     func destroySurface(paneID: UUID) {
         let surfaceView = lock.withLock {
@@ -71,6 +86,20 @@ final class SurfaceManager: Sendable {
         for (_, surfaceView) in all {
             guard let rawSurface = surfaceView.detachForTeardown() else { continue }
             GhosttyApp.shared.freeSurfaceAsync(rawSurface, retaining: surfaceView)
+        }
+    }
+
+    /// Re-sync every live surface's size and request a redraw (issue #194).
+    /// Called on app reactivation so panes spawned while Nex was
+    /// background/occluded — which can miss their one output-/layout-driven
+    /// draw and come up with a blank body — repaint. Each surface no-ops
+    /// itself when detached (nil window / zero bounds), so this only touches
+    /// panes currently visible in a window.
+    @MainActor
+    func resyncVisibleSurfaces() {
+        let all = lock.withLock { Array(surfaces.values) }
+        for surface in all {
+            surface.resyncForRedraw()
         }
     }
 
