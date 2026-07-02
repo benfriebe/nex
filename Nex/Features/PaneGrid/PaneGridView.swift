@@ -33,6 +33,11 @@ struct PaneGridView: View {
     var onRenamePane: ((UUID) -> Void)?
     var onMovePaneToWorkspace: ((UUID, UUID) -> Void)?
     var onSetPaneStatus: ((UUID, PaneStatus) -> Void)?
+    /// Open a fresh web pane split off a specific pane (issue #206) —
+    /// the header globe button and the "New Web Pane" context-menu
+    /// entry. Args: source pane id + split direction (`.horizontal` =
+    /// right, `.vertical` = down). Wired by `ContentView`.
+    var onOpenWebPane: ((UUID, PaneLayout.SplitDirection) -> Void)?
     /// Issue #121 sync-input state. `isSyncInputActive` flips the
     /// workspace toggle (drives the per-pane SYNC badge for every
     /// non-excluded pane); `syncInputExcluded` lists panes opted out.
@@ -190,6 +195,7 @@ struct PaneGridView: View {
                 onSetStatus: pane.type == .shell
                     ? onSetPaneStatus.map { handler in { status in handler(pane.id, status) } }
                     : nil,
+                onOpenWebPane: onOpenWebPane.map { handler in { direction in handler(pane.id, direction) } },
                 isSyncExcluded: syncInputExcluded.contains(pane.id),
                 workspaceSyncActive: isSyncInputActive,
                 onToggleSyncExcluded: onToggleSyncExcluded.map { handler in

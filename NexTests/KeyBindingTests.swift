@@ -159,7 +159,7 @@ struct NexActionTests {
 
     @Test func menuBarActionsAreCorrect() {
         let menuActions: [NexAction] = [
-            .newWorkspace, .openFile,
+            .newWorkspace, .openFile, .openWebPane,
             .switchToWorkspace1, .switchToWorkspace2, .switchToWorkspace3,
             .switchToWorkspace4, .switchToWorkspace5, .switchToWorkspace6,
             .switchToWorkspace7, .switchToWorkspace8, .switchToWorkspace9,
@@ -207,6 +207,12 @@ struct KeyBindingMapTests {
 
         let escape = KeyTrigger(keyCode: 53)
         #expect(map.action(for: escape) == .closeSearch)
+
+        // ⌘⇧O opens a web pane (issue #206); ⌘O stays markdown.
+        let cmdShiftO = KeyTrigger(keyCode: 31, modifiers: [.command, .shift])
+        #expect(map.action(for: cmdShiftO) == .openWebPane)
+        let cmdO = KeyTrigger(keyCode: 31, modifiers: .command)
+        #expect(map.action(for: cmdO) == .openFile)
     }
 
     @Test func defaultsHaveDualBindingsForFocusNext() {

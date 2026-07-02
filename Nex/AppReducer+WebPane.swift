@@ -28,16 +28,32 @@ extension AppReducer {
         Reduce { state, action in
             guard Self.domain(of: action) == .webPane else { return .none }
             switch action {
-            case .openWebPanePath(let url, _):
+            case .openWebPanePath(let url, let fromPaneID, let direction):
                 guard let activeID = state.activeWorkspaceID else { return .none }
+                let newPaneID = uuid()
+                // Blank URL → focus the fresh pane's URL bar so the user
+                // can type immediately (mirrors `webPaneOpenNewTab` for
+                // blank tabs). A preset URL is loading content, so leave
+                // focus to the WKWebView. The webview's
+                // `claimFirstResponder` yields whenever the URL field is
+                // already first responder, so this token bump wins the
+                // focus race regardless of async ordering.
+                if url.isEmpty {
+                    state.webPaneURLFocusTokens[newPaneID, default: 0] &+= 1
+                }
                 return .send(.workspaces(.element(
                     id: activeID,
                     action: .openWebPane(
-                        paneID: uuid(),
+                        paneID: newPaneID,
                         tabID: uuid(),
                         url: url,
                         reusePaneID: nil,
-                        isPrivate: false
+                        isPrivate: false,
+                        // fromPaneID = the pane whose header button /
+                        // context menu was used; nil (menu bar / ⌘⇧O)
+                        // splits the focused pane.
+                        sourcePaneID: fromPaneID,
+                        direction: direction
                     )
                 )))
 

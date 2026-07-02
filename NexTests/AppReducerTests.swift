@@ -58,6 +58,56 @@ struct AppReducerTests {
         )
     }
 
+    // MARK: - openWebPanePath (⌘⇧O / menu / context-menu entry point)
+
+    @Test func openWebPanePathAddsWebPaneAndFocusesURLBar() async {
+        // All three GUI entry points from issue #206 (the ⌘⇧O binding,
+        // the "New Web Pane" menu item, and the pane-header context
+        // menu) converge on `.openWebPanePath(url: "", fromPaneID: nil)`.
+        // Verify it opens a `.web` pane in the active workspace and
+        // bumps the URL-bar focus token for the blank tab.
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "Test", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.openWebPanePath(url: "", fromPaneID: nil))
+        // Drain the forwarded `.workspaces(.openWebPane(...))` action.
+        await store.skipReceivedActions()
+
+        let webPanes = store.state.workspaces[id: Self.wsID1]?
+            .panes.filter { $0.type == .web } ?? []
+        #expect(webPanes.count == 1)
+        // Blank URL → the fresh pane's URL bar is focused (token bumped).
+        if let webPaneID = webPanes.first?.id {
+            #expect(store.state.webPaneURLFocusTokens[webPaneID] == 1)
+        } else {
+            Issue.record("Expected a web pane after openWebPanePath")
+        }
+    }
+
+    @Test func openWebPanePathSplitsSourcePaneInGivenDirection() async {
+        // The header globe button / context menu split off a SPECIFIC
+        // pane (issue #206): `fromPaneID` is the split source and
+        // `direction` picks right (.horizontal) vs down (.vertical).
+        // ⇧-click the globe → a vertical split off that pane.
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "Test", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.openWebPanePath(
+            url: "", fromPaneID: Self.paneID1, direction: .vertical
+        ))
+        await store.skipReceivedActions()
+
+        let workspace = store.state.workspaces[id: Self.wsID1]
+        let webPanes = workspace?.panes.filter { $0.type == .web } ?? []
+        #expect(webPanes.count == 1)
+        // The source pane was split vertically (down), not right.
+        if case .split(let dir, _, _, _) = workspace?.layout {
+            #expect(dir == .vertical)
+        } else {
+            Issue.record("Expected a vertical split layout after ⇧-click open")
+        }
+    }
+
     // MARK: - createWorkspace
 
     @Test func createWorkspaceAddsWorkspaceAndActivates() async {

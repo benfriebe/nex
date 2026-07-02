@@ -23,6 +23,12 @@ struct NexCommands: Commands {
                 store.send(.openFile)
             }
 
+            menuButton("New Web Pane", action: .openWebPane) {
+                // Fresh web pane on a blank URL with the URL bar
+                // focused — same reducer path as the ⌘⇧O keybinding.
+                store.send(.openWebPanePath(url: "", fromPaneID: nil))
+            }
+
             menuButton("Command Palette", action: .commandPalette) {
                 store.send(.toggleCommandPalette)
             }

@@ -27,6 +27,12 @@ struct PaneHeaderView: View {
     /// (issue #183). Nil for non-shell panes and when the host hasn't
     /// wired it (tests, previews).
     var onSetStatus: ((PaneStatus) -> Void)?
+    /// Open a fresh web pane split off THIS pane (issue #206). The
+    /// argument is the split direction: `.horizontal` = right,
+    /// `.vertical` = down. Used by the header globe button (click vs
+    /// ⇧-click) and the "New Web Pane" context-menu entry. Nil when the
+    /// host hasn't wired it (tests, previews).
+    var onOpenWebPane: ((PaneLayout.SplitDirection) -> Void)?
     /// True when sync is on for the workspace but this pane has been
     /// opted out. Used to render the "Include in sync" context menu
     /// entry and the dimmed `SYNC OFF` badge.
@@ -235,6 +241,25 @@ struct PaneHeaderView: View {
             .opacity(0.6)
             .help("Split down (⌘⇧D)")
 
+            if let onOpenWebPane {
+                Button {
+                    // Click → split right; ⇧-click → split down. Read
+                    // the modifier from the click event that drives this
+                    // action (reliable at NSButton action time).
+                    let down = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+                    onOpenWebPane(down ? .vertical : .horizontal)
+                } label: {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(0.6)
+                .help("New web pane (⇧-click splits down)")
+            }
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .semibold))
@@ -328,6 +353,9 @@ struct PaneHeaderView: View {
         Divider()
         Button("Split Right") { onSplitHorizontal() }
         Button("Split Down") { onSplitVertical() }
+        if let onOpenWebPane {
+            Button("New Web Pane") { onOpenWebPane(.horizontal) }
+        }
         if let onSetStatus {
             Divider()
             Menu("Status") {
