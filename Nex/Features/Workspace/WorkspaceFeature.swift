@@ -605,7 +605,12 @@ struct WorkspaceFeature {
                     return branchEffect
                 }
 
-                if let sourceID = state.focusedPaneID {
+                // Split the focused pane; fall back to any existing pane when
+                // focus is unset (e.g. a workspace restored with a nil
+                // focusedPaneID) so we never discard a populated layout. Only a
+                // genuinely empty layout becomes a bare leaf. Guards the
+                // cold-launch drain (#197) from clobbering restored panes.
+                if let sourceID = state.focusedPaneID ?? state.layout.allPaneIDs.first {
                     let (newLayout, _) = state.layout.splitting(
                         paneID: sourceID,
                         direction: .horizontal,

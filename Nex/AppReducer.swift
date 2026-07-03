@@ -53,6 +53,15 @@ struct AppReducer {
         /// back-fill once both are ready.
         var didRestoreWorkspaces = false
 
+        /// Markdown files handed to us by Finder's "Open With" during a
+        /// cold launch, before the async persistence load has set
+        /// `activeWorkspaceID`. `.openFileAtPath` parks paths here when
+        /// no workspace exists yet; `.stateLoaded` drains them via
+        /// `.flushPendingFileOpens` once a workspace is live (issue #197).
+        /// Transient launch state — deliberately excluded from
+        /// `PersistenceSnapshot`.
+        var pendingFileOpens: [String] = []
+
         // Command Palette
         var isCommandPaletteVisible: Bool = false
         var commandPaletteQuery: String = ""
@@ -441,6 +450,9 @@ struct AppReducer {
         // File Opening
         case openFile
         case openFileAtPath(String, fromPaneID: UUID?)
+        /// Replay markdown files parked in `pendingFileOpens` during a
+        /// cold launch, once a workspace is live (issue #197).
+        case flushPendingFileOpens
         case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
         /// Open a web pane in the active workspace. `fromPaneID` is the
         /// pane to split off (header button / context menu, issue #206);
@@ -1897,6 +1909,11 @@ struct AppReducer {
                     // to status / stop / quit-flush.
                     return .merge(
                         .send(.createWorkspace(name: "Default")),
+                        // Drain any Finder "Open With" files parked during cold
+                        // launch. `createWorkspace` sets `activeWorkspaceID`
+                        // synchronously and TCA reduces merged `.send`s in order,
+                        // so the flush sees a live workspace (issue #197).
+                        .send(.flushPendingFileOpens),
                         .send(.graft(.onAppLaunched(parentRepoRoots: []))),
                         // A fresh install has no legacy free-form labels to
                         // migrate. Mark the one-shot label→preset migration done
@@ -1999,6 +2016,9 @@ struct AppReducer {
                         .send(.refreshGitStatus),
                         .send(.startGitStatusTimer),
                         .send(.migrateLabelsToPresets),
+                        // Drain Finder "Open With" files parked during cold
+                        // launch; `activeWorkspaceID` was set just above (#197).
+                        .send(.flushPendingFileOpens),
                         .send(.graft(.onAppLaunched(parentRepoRoots: parentRepoRoots)))
                     ] + watcherSeeds
                 )

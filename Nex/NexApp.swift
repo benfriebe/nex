@@ -12,6 +12,12 @@ struct NexApp: App {
 
     @State private var shortcutMonitor: PaneShortcutMonitor?
     @State private var titlebarZoomMonitor: TitlebarDoubleClickMonitor?
+    /// One-shot guard so the heavy `.onAppear` bootstrap (store launch,
+    /// socket server, ghostty start, monitors) runs exactly once for the
+    /// app, not per WindowGroup window. Without this, any second window
+    /// re-runs `.appLaunched`, reloading persistence and clobbering live
+    /// state — e.g. wiping a just-opened markdown pane (#197).
+    @State private var didBootstrap = false
     // Holds the loaded ghostty config so the `\.ghosttyConfig` environment
     // reflects the real terminal background once it's read in `.onAppear`.
     // Injecting `.liveValue` directly captured the pre-load default
@@ -39,6 +45,7 @@ struct NexApp: App {
                 .environment(\.ghosttyConfig, ghosttyConfig)
                 .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
+                .background(DuplicateMainWindowCloser())
                 .frame(minWidth: 600, minHeight: 400)
                 // An appearance change updates `liveValue` and posts this; mirror
                 // it into @State so the env re-injects and the non-terminal panes
@@ -48,6 +55,9 @@ struct NexApp: App {
                 }
                 .onAppear {
                     guard !Self.isTestMode else { return }
+                    // Bootstrap once per app, never per window (see didBootstrap).
+                    guard !didBootstrap else { return }
+                    didBootstrap = true
 
                     // Keep the global /usr/local/bin/nex symlink and installed
                     // nex-agentic skill in sync with the running bundle after
@@ -138,6 +148,16 @@ struct NexApp: App {
                     }
 
                     store.send(.appLaunched)
+
+                    // Wire the Finder "Open With" bridge: NexAppDelegate
+                    // hands opened markdown files to FileOpenGate, which we
+                    // forward into the same reducer path as drag-and-drop.
+                    // Any file that arrived during cold launch (before this
+                    // ran) is replayed now; the reducer queues it further if
+                    // the async state load hasn't set a workspace yet (#197).
+                    FileOpenGate.shared.connect { path in
+                        store.send(.openFileAtPath(path, fromPaneID: nil))
+                    }
 
                     // Wire the quit-confirmation summary + the markdown save
                     // flush. NexAppDelegate's applicationShouldTerminate calls
@@ -235,5 +255,45 @@ private final class SpacesBindingView: NSView {
         guard !didApply, let window else { return }
         didApply = true
         WindowSpacesBinding.applyIfNeeded(to: window)
+    }
+}
+
+/// Nex is a single-window app, but SwiftUI's `WindowGroup` spawns an
+/// extra window when the already-running app is handed a document to open
+/// (Finder "Open With" → the `openDocuments` Apple event). Our
+/// `NexAppDelegate.application(_:open:)` already routes the opened file
+/// into the existing window's active workspace, so that spawned window is
+/// a redundant duplicate of the current session. This attacher records
+/// the first main window and closes any later one, keeping the app
+/// single-window (#197). Only the main `WindowGroup` content embeds it —
+/// Settings and the Help window are separate scenes and never get it.
+private struct DuplicateMainWindowCloser: NSViewRepresentable {
+    func makeNSView(context _: Context) -> DuplicateMainWindowCloserView {
+        DuplicateMainWindowCloserView()
+    }
+
+    func updateNSView(_: DuplicateMainWindowCloserView, context _: Context) {}
+}
+
+@MainActor
+private enum MainWindowRegistry {
+    weak static var primary: NSWindow?
+}
+
+private final class DuplicateMainWindowCloserView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        // The first main window (cold launch / normal) becomes the primary.
+        if MainWindowRegistry.primary == nil || MainWindowRegistry.primary === window {
+            MainWindowRegistry.primary = window
+            return
+        }
+        // A second main window — SwiftUI spawned it for a file-open on the
+        // already-running app. Close it; the file was already routed into
+        // the primary window's workspace by NexAppDelegate.
+        DispatchQueue.main.async { [weak window] in
+            window?.close()
+        }
     }
 }

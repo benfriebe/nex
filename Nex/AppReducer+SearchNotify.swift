@@ -99,7 +99,14 @@ extension AppReducer {
                 }
 
             case .openFileAtPath(let path, let fromPaneID):
-                guard let activeID = state.activeWorkspaceID else { return .none }
+                // No workspace yet — a Finder "Open With" during cold launch
+                // beat the async persistence load. Park the path; `.stateLoaded`
+                // drains it via `.flushPendingFileOpens` once a workspace is
+                // live, rather than dropping the open (issue #197).
+                guard let activeID = state.activeWorkspaceID else {
+                    state.pendingFileOpens.append(path)
+                    return .none
+                }
                 var resolvedPath = path
                 if !path.hasPrefix("/") {
                     let workspace = state.workspaces[id: activeID]
@@ -121,6 +128,15 @@ extension AppReducer {
                     id: activeID,
                     action: .openMarkdownFile(filePath: resolvedPath)
                 )))
+
+            case .flushPendingFileOpens:
+                guard !state.pendingFileOpens.isEmpty else { return .none }
+                // Snapshot and clear before re-dispatching. `openMarkdownFile`
+                // has no dedup, so leaving the queue populated would let a
+                // later `createWorkspace` replay stale paths as phantom panes.
+                let queued = state.pendingFileOpens
+                state.pendingFileOpens = []
+                return .merge(queued.map { .send(.openFileAtPath($0, fromPaneID: nil)) })
 
             // MARK: - Search
 
