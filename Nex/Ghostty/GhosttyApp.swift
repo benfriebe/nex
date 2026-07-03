@@ -376,7 +376,27 @@ final class GhosttyApp {
             return false
 
         case GHOSTTY_ACTION_RENDER:
-            return false
+            // libghostty processed new PTY output and wants the host to
+            // present a frame. Nex's draw is host-pumped (updateLayer ->
+            // ghostty_surface_draw), so we must re-arm needsDisplay or the
+            // pane never repaints (issue #194): a surface created while its
+            // window was zero-bounds / occluded gets its one and only draw
+            // from AppKit layout callbacks, so without this incoming output
+            // is silently dropped and the body stays blank until focus or
+            // resize. Capture the raw surface pointer as an opaque token and
+            // resolve it to a live SurfaceView on main by pointer identity
+            // (like every other action handler, via SurfaceManager) — never
+            // dereference the incoming pointer in this possibly-off-main
+            // callback, so a RENDER draining for a surface being freed off
+            // the main thread (issue #136 teardown) finds no match and is
+            // safely dropped instead of touching freed memory. AppKit
+            // coalesces repeated needsDisplay into one draw per display cycle.
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            guard let surface else { return false }
+            DispatchQueue.main.async {
+                SurfaceManager.liveValue.surfaceView(forRawSurface: surface)?.needsDisplay = true
+            }
+            return true
 
         default:
             return false

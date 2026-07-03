@@ -19,6 +19,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     /// drag resize) into a single set_size so the shell only gets one SIGWINCH.
     private var resizeWorkItem: DispatchWorkItem?
 
+    /// One-shot latch for the initial-size rescue in `layout()` (issue #194).
+    /// Flips true the first time the view lays out with a live window and
+    /// non-zero bounds, at which point we force a `setSize` + draw. Guards
+    /// against re-sizing on every subsequent layout pass (ongoing resizes go
+    /// through `setFrameSize`'s debounce as before).
+    private var hasSyncedInitialSize = false
+
     private static let dropTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
         .URL,
@@ -164,6 +171,24 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     override func layout() {
         super.layout()
         syncSublayerFrames()
+
+        // Initial-size rescue (issue #194). A surface created while its window
+        // was zero-bounds or occluded never gets a non-zero setSize or a draw:
+        // the viewDidMoveToWindow async and setFrameSize debounce both
+        // silently no-op on zero bounds / nil window, with no retry queued.
+        // layout() fires when AppKit finally resolves real bounds, so seize
+        // that first non-zero pass to size the surface and request a draw.
+        // Latched so ongoing resizes still flow through setFrameSize's debounce.
+        if !hasSyncedInitialSize, let window, bounds.width > 0, bounds.height > 0 {
+            let scale = window.backingScaleFactor
+            let w = UInt32(bounds.width * scale)
+            let h = UInt32(bounds.height * scale)
+            if w > 0, h > 0 {
+                hasSyncedInitialSize = true
+                ghosttySurface?.setSize(width: w, height: h)
+                needsDisplay = true
+            }
+        }
     }
 
     /// Resize ghostty's Metal sublayer to match the view bounds.
@@ -181,6 +206,25 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
             sublayer.frame = bounds
         }
         CATransaction.commit()
+    }
+
+    /// Force a size + draw re-sync for a surface that is currently in a live
+    /// window (issue #194). Called when the app reactivates / a window becomes
+    /// key so panes created while Nex was background/occluded — which may have
+    /// missed their output-driven and layout-driven draw — repaint. No-op for
+    /// detached surfaces (nil window, e.g. a pane in an inactive workspace);
+    /// those re-sync via viewDidMoveToWindow when reattached.
+    func resyncForRedraw() {
+        guard let window, bounds.width > 0, bounds.height > 0 else { return }
+        syncSublayerFrames()
+        let scale = window.backingScaleFactor
+        let w = UInt32(bounds.width * scale)
+        let h = UInt32(bounds.height * scale)
+        if w > 0, h > 0 {
+            ghosttySurface?.setSize(width: w, height: h)
+        }
+        ghosttySurface?.refresh()
+        needsDisplay = true
     }
 
     // MARK: - NSView overrides

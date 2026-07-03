@@ -346,6 +346,10 @@ struct ContentView: View {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     NSApp.dockTile.badgeLabel = nil
                     store.send(.updateExternalIndicators)
+                    // Repaint any pane that came up blank while Nex was
+                    // background/occluded (issue #194) — e.g. panes spawned via
+                    // `nex pane create` from an unattended agent.
+                    surfaceManager.resyncVisibleSurfaces()
                     guard let activeID = store.activeWorkspaceID,
                           let workspace = store.workspaces[id: activeID],
                           let focusedID = workspace.focusedPaneID else { return }
