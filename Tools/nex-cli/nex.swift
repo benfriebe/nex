@@ -2843,6 +2843,29 @@ private let webOpenExtensions: Set<String> = [
     "html", "htm", "pdf", "svg", "png", "jpg", "jpeg", "gif", "webp"
 ]
 
+/// Recognised top-level domains that let `nex open` route a *bare*
+/// dotted argument (`google.com`, `example.co.uk`) to a web pane. A
+/// bare host with a TLD outside this set falls through to the file
+/// router (use `nex web open` for obscure TLDs). Deliberately excludes
+/// TLDs that collide with common file extensions (`.sh`, `.ai`,
+/// `.app`, `.pl`, `.rs`, `.so`, `.cc`, `.zip`, `.mov`, `.md`, ...) so
+/// `nex open run.sh` / `nex open notes.md` keep routing by file type.
+/// Note: this gate applies only to the *bare dotted* case — an
+/// explicit `scheme://`, a `host:port`, `localhost`, and IPv4 literals
+/// route to the web regardless of TLD.
+private let webOpenCommonTLDs: Set<String> = [
+    // Generic
+    "com", "org", "net", "edu", "gov", "mil", "int", "info", "biz",
+    "name", "pro", "io", "co", "dev", "xyz", "tech", "online", "site",
+    "store", "blog", "cloud", "page", "wiki", "news", "email", "me",
+    // Country / regional (common, low file-extension collision).
+    // Deliberately omit `.pt` (collides with PyTorch checkpoints).
+    "us", "uk", "ca", "au", "nz", "de", "fr", "es", "it", "nl", "se",
+    "no", "fi", "dk", "ie", "eu", "jp", "cn", "kr", "in", "br", "mx",
+    "ru", "ch", "at", "be", "za", "tv", "fm", "gg", "to", "ly",
+    "id", "sg", "hk"
+]
+
 /// `nex md [--here] <file>` — dedicated markdown command. Opens (or
 /// reuses, with `--here`) a markdown preview pane regardless of the
 /// file's extension, so it doubles as the escape hatch for forcing a
@@ -2861,26 +2884,105 @@ func handleMarkdown(_ args: inout ArraySlice<String>) {
     sendMarkdownOpen(absolutePath: absolutePath, reuse: reuse)
 }
 
-/// `nex open [--here] <file>` — generic file opener. Routes by the
-/// file's extension to the matching pane type:
+/// Decides whether a `nex open` argument is a URL / hostname that
+/// should open in a **web pane** rather than routing by file
+/// extension. Returns the string to hand to `web-open` (the server
+/// normalises a bare host to `https://…`), or `nil` to fall through to
+/// local-file routing.
+///
+/// This is the mirror image of `localFileURL(forWebArg:)`: explicit
+/// paths (`/`, `./`, `../`, `~`) and existing local files stay local,
+/// while a real `scheme://` URL, a `host:port`, `localhost`, an IPv4
+/// literal, or a bare dotted hostname whose final label is a
+/// recognised TLD (`webOpenCommonTLDs`) route to the web. A bare word
+/// (`README`, `app`), a numeric-suffixed name (`backup.1`), or a
+/// dotted name with an unrecognised/file-type TLD (`notes.txt`,
+/// `foo.museum`) stays local — `nex web open` remains the escape hatch.
+func webTargetForOpenArg(_ arg: String) -> String? {
+    let trimmed = arg.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return nil }
+
+    // An explicit path or an existing local file is never a web target.
+    // `localFileURL` returns non-nil for exactly those cases (and nil
+    // for scheme://, host:port, localhost, and bare/dotted names).
+    if localFileURL(forWebArg: trimmed) != nil { return nil }
+
+    // Real URL with a scheme (http://, https://, file://, ...).
+    if trimmed.contains("://") { return trimmed }
+
+    // Authority = everything before the first path / query / fragment.
+    let authority = trimmed.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+    if authority.isEmpty { return nil }
+
+    // Peel off an optional ":port" (all-digit tail).
+    var host = String(authority)
+    var hasPort = false
+    if let colon = host.lastIndex(of: ":") {
+        let port = host[host.index(after: colon)...]
+        if !port.isEmpty, port.allSatisfy(\.isNumber) {
+            hasPort = true
+            host = String(host[..<colon])
+        }
+    }
+    if host.isEmpty { return nil }
+
+    let lowerHost = host.lowercased()
+
+    // localhost / localhost:port.
+    if lowerHost == "localhost" { return trimmed }
+
+    // IPv4 literal (1.2.3.4), any port already peeled off above.
+    let octets = lowerHost.split(separator: ".", omittingEmptySubsequences: false)
+    if octets.count == 4, octets.allSatisfy({ !$0.isEmpty && UInt8($0) != nil }) {
+        return trimmed
+    }
+
+    // Any explicit host:port is a web target (a file never carries a
+    // numeric port suffix).
+    if hasPort { return trimmed }
+
+    // Bare dotted hostname: route to the web only when the final label
+    // is a recognised TLD. Everything else (bare words, unrecognised or
+    // file-type TLDs) falls through to the file router.
+    let labels = lowerHost.split(separator: ".", omittingEmptySubsequences: false)
+    guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }),
+          let tld = labels.last, webOpenCommonTLDs.contains(String(tld)) else {
+        return nil
+    }
+    return trimmed
+}
+
+/// `nex open [--here] <path-or-url>` — generic opener. A URL or
+/// hostname routes to a web pane (same path as `nex web open`);
+/// otherwise it routes a local file by extension:
 ///   - markdown (.md, ...)        → markdown preview pane
 ///   - web (.html, .pdf, images)  → web pane via a `file://` URL
 ///   - anything else              → usage error (use `nex md` or
 ///                                  `nex web open` explicitly)
 func handleOpen(_ args: inout ArraySlice<String>) {
     if let first = args.first, isHelpToken(first) {
-        print("Usage: nex open [--here] <filepath>")
-        print("Routes by file type: .md/.markdown → markdown pane;")
+        print("Usage: nex open [--here] <path-or-url>")
+        print("URLs & hostnames (google.com, https://…, localhost:3000) → web pane.")
+        print("Local files route by type: .md/.markdown → markdown pane;")
         print(".html/.htm/.pdf/.svg and images (.png/.jpg/.gif/.webp) → web pane.")
         exit(0)
     }
     let reuse = popSwitch("--here", from: &args)
-    guard let filePath = args.popFirst(), !filePath.hasPrefix("-") else {
-        fputs("Usage: nex open [--here] <filepath>\n", stderr)
+    guard let arg = args.popFirst(), !arg.hasPrefix("-") else {
+        fputs("Usage: nex open [--here] <path-or-url>\n", stderr)
         exit(1)
     }
 
-    let absoluteURL = URL(fileURLWithPath: filePath).standardizedFileURL
+    // A URL or bare hostname → web pane, same as `nex web open`.
+    if let webURL = webTargetForOpenArg(arg) {
+        if reuse {
+            fputs("nex open: --here is ignored for URLs (web panes always open in a new pane)\n", stderr)
+        }
+        sendWebOpen(url: webURL)
+        return
+    }
+
+    let absoluteURL = URL(fileURLWithPath: arg).standardizedFileURL
     let absolutePath = absoluteURL.path
     let ext = absoluteURL.pathExtension.lowercased()
 
@@ -2890,10 +2992,11 @@ func handleOpen(_ args: inout ArraySlice<String>) {
         if reuse {
             fputs("nex open: --here is ignored for web files (web panes always open in a new pane)\n", stderr)
         }
-        sendWebOpenForFile(fileURL: absoluteURL.absoluteString)
+        sendWebOpen(url: absoluteURL.absoluteString)
     } else {
         let shown = ext.isEmpty ? "files without an extension" : "'.\(ext)' files"
         fputs("nex open: don't know how to open \(shown)\n", stderr)
+        fputs("       URLs & hostnames (e.g. google.com) open a web pane;\n", stderr)
         fputs("       Markdown (.md, .markdown) opens a preview pane; .html/.htm/.pdf/.svg and\n", stderr)
         fputs("       images (.png/.jpg/.gif/.webp) open a web pane.\n", stderr)
         fputs("       Use `nex md <file>` to force a markdown pane, or `nex web open <url>`.\n", stderr)
@@ -2920,13 +3023,14 @@ private func sendMarkdownOpen(absolutePath: String, reuse: Bool) {
     sendJSONAny(payload)
 }
 
-/// `nex open`'s web route. Opens a new web pane on the `file://` URL
-/// via the same `web-open` request/response path as `nex web open`,
-/// so it prints `open ok: <pane-uuid>`.
-private func sendWebOpenForFile(fileURL: String) {
+/// `nex open`'s web route — shared by the URL/hostname branch and the
+/// local web-file (`file://`) branch. Opens a new web pane via the
+/// same `web-open` request/response path as `nex web open`, so it
+/// prints `open ok: <pane-uuid>`.
+private func sendWebOpen(url: String) {
     var payload: [String: Any] = [
         "command": "web-open",
-        "url": fileURL
+        "url": url
     ]
     if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
        !originPaneID.isEmpty {
