@@ -140,17 +140,32 @@ enum WebPaneBatchMarkerScript {
             popover.setAttribute('data-nex-batch-popover', '1');
             popover.style.cssText = [
                 'position:fixed',
-                'min-width:200px', 'max-width:260px',
+                // Flex column so the textarea can flex to fill the
+                // dialog as the user drags the corner grabber larger.
+                'display:none', 'flex-direction:column',
+                'box-sizing:border-box',
+                // Definite starting width; min/max keep it usable and
+                // on-screen. `resize:both` + a non-visible `overflow`
+                // give the whole dialog a bottom-right drag handle so
+                // there's room for a longer comment or a screenshot
+                // pasted alongside the text.
+                'width:280px',
+                // Floor keeps the label, a usable textarea, and the
+                // Remove/Done footer visible even at the smallest drag.
+                'min-width:220px', 'min-height:130px',
+                'max-width:90vw', 'max-height:80vh',
+                'resize:both', 'overflow:hidden',
                 'background:#1c1c1e', 'color:#fff',
                 'border:1px solid rgba(255,255,255,0.18)',
                 'border-radius:6px',
                 'box-shadow:0 6px 24px rgba(0,0,0,0.4)',
-                'padding:8px',
+                // Extra bottom padding so the native bottom-right
+                // resize grabber gets its own corner instead of
+                // sitting on top of the Done button.
+                'padding:8px 8px 15px',
                 'font:11px -apple-system,system-ui,sans-serif',
                 'pointer-events:auto',
                 'z-index:2147483647',
-                'display:none',
-                'box-sizing:border-box',
                 // While the picker is armed, the inspector script
                 // sets `cursor:crosshair` on documentElement, which
                 // the popover would otherwise inherit. Force a
@@ -161,6 +176,7 @@ enum WebPaneBatchMarkerScript {
 
             popoverLabel = document.createElement('div');
             popoverLabel.style.cssText = [
+                'flex:0 0 auto',
                 'color:#5AC8FA',
                 'font:600 10px/14px ui-monospace,SFMono-Regular,Menlo,monospace',
                 'margin-bottom:4px',
@@ -174,13 +190,18 @@ enum WebPaneBatchMarkerScript {
             popoverTextarea.setAttribute('placeholder', 'Add a comment…');
             popoverTextarea.style.cssText = [
                 'width:100%', 'box-sizing:border-box',
+                // Flex to fill the space the dialog gains when the
+                // user drags its corner. The dialog owns resizing now,
+                // so the textarea drops its own `resize` handle to
+                // avoid two competing grabbers.
+                'flex:1 1 auto',
+                'resize:none',
                 'background:rgba(255,255,255,0.06)',
                 'color:#fff',
                 'border:1px solid rgba(255,255,255,0.18)',
                 'border-radius:4px',
                 'padding:4px 6px',
                 'font:12px -apple-system,system-ui,sans-serif',
-                'resize:vertical',
                 'min-height:48px',
                 'outline:none'
             ].join(';');
@@ -223,6 +244,7 @@ enum WebPaneBatchMarkerScript {
             // Footer row with Remove + Done buttons.
             var footer = document.createElement('div');
             footer.style.cssText = [
+                'flex:0 0 auto',
                 'display:flex', 'align-items:center',
                 'justify-content:space-between',
                 'gap:6px',
@@ -312,7 +334,7 @@ enum WebPaneBatchMarkerScript {
                             rect.top >= vh || rect.left >= vw;
             if (collapsed || offscreen) { hidePopover(); return; }
             var pop = ensurePopover();
-            pop.style.display = 'block';
+            pop.style.display = 'flex';
 
             // Placement: below the element when there's room, else
             // above. Horizontally centered to the viewport (not the
@@ -320,7 +342,10 @@ enum WebPaneBatchMarkerScript {
             // spot regardless of where on the page the picked
             // element sits. Clamped to the viewport with an 8px
             // margin.
-            var popWidth = 260;
+            // Measure the live width so a user-resized dialog stays
+            // centered and clamped to the viewport (rather than using
+            // the old fixed 260px assumption).
+            var popWidth = pop.offsetWidth || 280;
             var popHeight = pop.offsetHeight || 120;
             var roomBelow = vh - rect.bottom;
             var roomAbove = rect.top;
