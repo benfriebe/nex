@@ -70,6 +70,27 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
+    @Test func createGroupSetsSidebarScrollTarget() async {
+        // Issue #187: a fresh group should queue itself to be scrolled
+        // into view; `clearSidebarScrollTarget` consumes the signal.
+        let store = makeStore()
+
+        await store.send(.createGroup(name: "Monitors")) { state in
+            #expect(state.sidebarScrollTarget == .group(Self.groupA))
+        }
+        await store.send(.clearSidebarScrollTarget) { state in
+            #expect(state.sidebarScrollTarget == nil)
+        }
+    }
+
+    @Test func createGroupWhitespaceOnlyLeavesScrollTargetNil() async {
+        // The whitespace guard returns before the scroll target is set.
+        let store = makeStore()
+        await store.send(.createGroup(name: "   ")) { state in
+            #expect(state.sidebarScrollTarget == nil)
+        }
+    }
+
     @Test func createGroupTrimsWhitespaceAndSkipsEmpty() async {
         let store = makeStore()
 

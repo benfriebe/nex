@@ -146,6 +146,7 @@ extension AppReducer {
              .toggleSidebar,
              .showNewWorkspaceSheet,
              .dismissNewWorkspaceSheet,
+             .clearSidebarScrollTarget,
              .beginRenameActiveWorkspace,
              .setRenamingWorkspaceID,
              .setRenamingPaneID,

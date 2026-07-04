@@ -77,6 +77,14 @@ struct WorkspaceListView: View {
     /// the authoritative scroll offset + viewport height and is driven
     /// directly during auto-scroll for pixel-perfect control.
     @State private var hostScrollView: NSScrollView?
+    /// Sidebar entry queued to be scrolled into view after a create
+    /// (issue #187). Latched from `store.sidebarScrollTarget` in
+    /// `onChange`; held until the newly inserted row measures (its
+    /// height appears in `rowHeights`), then consumed by
+    /// `attemptScrollToPendingTarget`. Local rather than derived so the
+    /// scroll survives the measurement-race retry across preference
+    /// updates.
+    @State private var pendingScrollTarget: SidebarID?
     /// Active auto-scroll loop during a drag near the viewport edges.
     @State private var autoScrollTask: Task<Void, Never>?
     /// Cursor Y in the scroll viewport (viewport-relative), captured on
@@ -125,6 +133,18 @@ struct WorkspaceListView: View {
                 } else {
                     filteredListBody
                 }
+            }
+            // Scroll a freshly created workspace/group into view (#187).
+            // Consume the one-shot signal immediately so it can't re-fire
+            // on unrelated re-renders. Only the main (unfiltered) list has
+            // a live `hostScrollView`; while filtering, drop the request.
+            .onChange(of: store.sidebarScrollTarget) { _, target in
+                guard let target else { return }
+                store.send(.clearSidebarScrollTarget)
+                guard filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return }
+                pendingScrollTarget = target
+                attemptScrollToPendingTarget()
             }
             // Bulk-action dialogs and sheets are attached at the body
             // level (not inside `mainListBody`) so they remain mounted
@@ -278,7 +298,13 @@ struct WorkspaceListView: View {
                             // because AppKit reverts it to the wide legacy
                             // scroller as the list re-lays-out.
                             if sv.scrollerStyle != .overlay { sv.scrollerStyle = .overlay }
-                            if hostScrollView !== sv { hostScrollView = sv }
+                            if hostScrollView !== sv {
+                                hostScrollView = sv
+                                // A create that fired before the scroll view
+                                // was captured left a pending target stranded
+                                // — retry now that we have a handle.
+                                if pendingScrollTarget != nil { attemptScrollToPendingTarget() }
+                            }
                         }
                         .frame(height: 0)
 
@@ -350,6 +376,12 @@ struct WorkspaceListView: View {
                         merged[id] = h
                     }
                     rowHeights = merged
+                    // A pending create-scroll waits here for the new row to
+                    // measure. Gate on `merged` (not `rowHeights`) — the
+                    // `@State` write above isn't visible synchronously.
+                    if pendingScrollTarget != nil {
+                        attemptScrollToPendingTarget(heights: merged)
+                    }
                 }
                 .onPreferenceChange(EmptyRowHeightKey.self) { h in
                     if h > 0 { measuredEmptyRowHeight = h }
@@ -2037,6 +2069,129 @@ struct WorkspaceListView: View {
             startAutoScroll(direction: 1)
         } else {
             cancelAutoScroll()
+        }
+    }
+
+    // MARK: - Scroll-created-entry-into-view (issue #187)
+
+    /// Resolve a queued scroll target to the sidebar entry that should
+    /// actually be revealed. A group is scrolled directly. A workspace
+    /// that has a visible row (top level, or inside an expanded group)
+    /// is scrolled directly; one hidden inside a *collapsed* group
+    /// resolves to that group's header instead. Returns nil when a
+    /// workspace has neither a visible row nor a parent group — an
+    /// unreachable state in the non-lazy list, handled defensively so
+    /// the pending target is dropped rather than retried forever.
+    ///
+    /// The socket `workspace-create --group` path can land a new
+    /// workspace in a collapsed group (its `.moveWorkspaceToGroup`
+    /// follow-up only auto-expands when `expandGroupOnWorkspaceDrop` is
+    /// set), unlike the reducer `.createWorkspace(groupID:)` path which
+    /// always expands — hence the header fallback here.
+    private func resolvedScrollTarget(_ target: SidebarID) -> SidebarID? {
+        switch target {
+        case .group:
+            return target
+        case .workspace(let id):
+            if currentRenderedEntries.contains(where: { $0.sidebarID == .workspace(id) }) {
+                return target
+            }
+            if let gid = store.state.groupID(forWorkspace: id) {
+                return .group(gid)
+            }
+            return nil
+        }
+    }
+
+    /// Attempt to consume `pendingScrollTarget`. No-ops (and keeps the
+    /// target pending) until the scroll view is captured and the
+    /// resolved row's height is measured — the newly inserted row
+    /// measures a layout pass after it appears, so this is retried from
+    /// `onPreferenceChange`. `heights` carries the freshly-merged
+    /// measurements when called from there (the `rowHeights` `@State`
+    /// write isn't visible synchronously); it defaults to `rowHeights`
+    /// for the `onChange` / scroll-view-capture entry points.
+    private func attemptScrollToPendingTarget(heights: [SidebarID: CGFloat]? = nil) {
+        guard let pending = pendingScrollTarget, hostScrollView != nil else { return }
+        guard let resolved = resolvedScrollTarget(pending) else {
+            pendingScrollTarget = nil
+            return
+        }
+        let effective = heights ?? rowHeights
+        // Wait for the target row to be measured before revealing it.
+        guard effective[resolved] != nil else { return }
+        pendingScrollTarget = nil
+        // Defer to the next main-actor turn so the reveal runs after the
+        // insert layout + spring settle, and recompute geometry then
+        // from the committed state (the socket-group path briefly leaves
+        // the workspace top-level before its move effect commits).
+        Task { @MainActor in performScrollReveal(to: pending) }
+    }
+
+    /// Reveal the resolved entry for `target`, recomputing its resting
+    /// frame from current state. Safe to call late: bails if the entry
+    /// vanished or its height is no longer known.
+    private func performScrollReveal(to target: SidebarID) {
+        guard let sv = hostScrollView,
+              let resolved = resolvedScrollTarget(target) else { return }
+        let topY: CGFloat
+        let height: CGFloat
+        switch resolved {
+        case .workspace(let id):
+            guard let h = rowHeights[.workspace(id)] else { return }
+            topY = workspaceStartY(id)
+            height = h
+        case .group(let gid):
+            guard let h = rowHeights[.group(gid)] else { return }
+            topY = groupStartY(gid)
+            height = h
+        }
+        // Creation and drag are mutually exclusive, but cancelling any
+        // stray auto-scroll loop keeps the reveal from being fought.
+        cancelAutoScroll()
+        scrollContentToReveal(sv, topY: topY, height: height)
+    }
+
+    /// Scroll `sv` the minimum amount needed to make the content band
+    /// `[topY, topY+height]` fully visible, honouring the top selection
+    /// header and bottom "+ New Workspace" footer (SwiftUI maps those
+    /// `safeAreaInset`s to `NSScrollView.contentInsets`). Already-visible
+    /// entries are left untouched. Clamp bounds mirror `startAutoScroll`.
+    private func scrollContentToReveal(_ sv: NSScrollView, topY: CGFloat, height: CGFloat) {
+        let visible = sv.documentVisibleRect
+        guard visible.height > 0 else { return }
+        let insetTop = sv.contentInsets.top
+        let insetBottom = sv.contentInsets.bottom
+        // Flush any pending layout so `documentView.bounds.height` reflects
+        // the just-inserted row before we derive the scroll ceiling — the
+        // insert's spring animation can otherwise leave AppKit's bounds
+        // lagging, clamping a bottom-appended row short of fully revealed.
+        sv.documentView?.layoutSubtreeIfNeeded()
+        let contentHeight = sv.documentView?.bounds.height ?? 0
+        let minY = -insetTop
+        let maxY = max(minY, contentHeight + insetBottom - visible.height)
+        // Unobscured viewport band, in content coordinates.
+        let bandTop = visible.origin.y + insetTop
+        let bandBottom = visible.origin.y + visible.height - insetBottom
+        let bottomY = topY + height
+        var newY = visible.origin.y
+        if topY < bandTop {
+            newY = topY - insetTop
+        } else if bottomY > bandBottom {
+            newY = bottomY - visible.height + insetBottom
+        } else {
+            return // already fully visible
+        }
+        newY = max(minY, min(maxY, newY))
+        guard abs(newY - visible.origin.y) > 0.5 else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.allowsImplicitAnimation = true
+            sv.contentView.animator().setBoundsOrigin(
+                NSPoint(x: visible.origin.x, y: newY)
+            )
+        } completionHandler: {
+            sv.reflectScrolledClipView(sv.contentView)
         }
     }
 

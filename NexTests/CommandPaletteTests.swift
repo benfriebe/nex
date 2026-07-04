@@ -508,6 +508,8 @@ struct CommandPaletteTests {
 
         #expect(store.state.isCommandPaletteVisible == false)
         #expect(store.state.activeWorkspaceID == Self.wsID2)
+        // Issue #187: the jumped-to workspace scrolls into view.
+        #expect(store.state.sidebarScrollTarget == .workspace(Self.wsID2))
     }
 
     @Test func confirmPaneFocusesPaneAndSwitchesWorkspace() async {
