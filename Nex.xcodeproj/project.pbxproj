@@ -47,6 +47,7 @@
 		2F440D3EB93B6C127A1FF003 /* WebPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A97924791DAA26F0E4B0BA /* WebPaneView.swift */; };
 		33B0CCD680CE4BAC31407678 /* SystemStatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A55FFAEAAEA23FA5688599 /* SystemStatsService.swift */; };
 		3B60C0FC48A2AAF6282CAB40 /* WorkspaceListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */; };
+		3BA27704A53CF36450B7301F /* FileOpenGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D4A4CD52161113DEA569D8 /* FileOpenGate.swift */; };
 		3C74513CA9D5FD60E672B477 /* CommandPaletteItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */; };
 		3DF88C2A2966C7B0209E22FE /* RepoPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0689D085597FF9C7F4D87401 /* RepoPickerView.swift */; };
 		3EB758164265D71D08B0156C /* PaneCloseReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5CE8D708EEECA4A82BE0AC1 /* PaneCloseReplyTests.swift */; };
@@ -353,6 +354,7 @@
 		BEB0B6964DA7F7328476540A /* AppReducer+SearchNotify.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppReducer+SearchNotify.swift"; sourceTree = "<group>"; };
 		BECB2222837AC350E94222BB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BF16F0C4A6A8BF8151651F53 /* InspectPayloadSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectPayloadSanitiser.swift; sourceTree = "<group>"; };
+		C1D4A4CD52161113DEA569D8 /* FileOpenGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOpenGate.swift; sourceTree = "<group>"; };
 		C4D5453E5B7EB4E8E7F11453 /* PaneSendReplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSendReplyTests.swift; sourceTree = "<group>"; };
 		C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyleTheme.swift; sourceTree = "<group>"; };
 		C58BE92A0878D9CCC786A657 /* WorkspaceRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRowView.swift; sourceTree = "<group>"; };
@@ -604,6 +606,7 @@
 				3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
+				C1D4A4CD52161113DEA569D8 /* FileOpenGate.swift */,
 				BECB2222837AC350E94222BB /* Info.plist */,
 				F1A8D5B3446F6056F443CDB8 /* Nex.entitlements */,
 				3714AA1F15C85762BF36B1FE /* NexApp.swift */,
@@ -1054,6 +1057,7 @@
 				7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */,
 				A3B349AFCABD43FDC2F97A2A /* EditorService.swift in Sources */,
 				503C106566E08F34EDBC80D0 /* Favourites.swift in Sources */,
+				3BA27704A53CF36450B7301F /* FileOpenGate.swift in Sources */,
 				9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */,
 				2BD04AF1F25BBC3516E5F706 /* GhosttyApp.swift in Sources */,
 				ECA2C078504EB9BF0E04B343 /* GhosttyConfig.swift in Sources */,

@@ -11,12 +11,14 @@ struct AppReducerTests {
     private func makeStore(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State> = [],
         activeWorkspaceID: UUID? = nil,
-        repoRegistry: IdentifiedArrayOf<Repo> = []
+        repoRegistry: IdentifiedArrayOf<Repo> = [],
+        pendingFileOpens: [String] = []
     ) -> TestStoreOf<AppReducer> {
         var appState = AppReducer.State()
         appState.workspaces = workspaces
         appState.activeWorkspaceID = activeWorkspaceID
         appState.repoRegistry = repoRegistry
+        appState.pendingFileOpens = pendingFileOpens
         // Mirror the backfill the reducer applies on load: when no
         // groups are in play, `topLevelOrder` is the workspaces list.
         // Without this, `visibleWorkspaceOrder` (used by range-select,
@@ -105,6 +107,88 @@ struct AppReducerTests {
             #expect(dir == .vertical)
         } else {
             Issue.record("Expected a vertical split layout after ⇧-click open")
+        }
+    }
+
+    // MARK: - Open With: markdown file open + cold-launch queue (#197)
+
+    @Test func openFileAtPathQueuesWhenNoWorkspaceYet() async {
+        // Cold launch: Finder's "Open With" fires before the async state
+        // load has created a workspace. The path is parked in
+        // `pendingFileOpens` instead of being dropped.
+        let store = makeStore() // no workspace; activeWorkspaceID == nil
+
+        await store.send(.openFileAtPath("/tmp/notes.md", fromPaneID: nil)) { state in
+            #expect(state.pendingFileOpens == ["/tmp/notes.md"])
+        }
+    }
+
+    @Test func openFileAtPathRoutesImmediatelyWhenWorkspaceExists() async {
+        // Already running: the path routes straight to `.openMarkdownFile`
+        // and never touches the cold-launch queue.
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.wsID1)
+
+        await store.send(.openFileAtPath("/tmp/notes.md", fromPaneID: nil)) { state in
+            #expect(state.pendingFileOpens.isEmpty)
+        }
+        await store.skipReceivedActions()
+
+        let markdownPanes = store.state.workspaces[id: Self.wsID1]?
+            .panes.filter { $0.type == .markdown } ?? []
+        #expect(markdownPanes.count == 1)
+        #expect(markdownPanes.first?.filePath == "/tmp/notes.md")
+    }
+
+    @Test func flushPendingFileOpensDrainsAndClearsQueue() async {
+        // The drain replays every parked path AND empties the queue, so a
+        // later `createWorkspace` can't resurrect stale opens as phantom
+        // panes (openMarkdownFile has no dedup).
+        // Seed pane id is deliberately outside the `.incrementing` UUID
+        // range so the two freshly minted markdown pane ids (UUID(0),
+        // UUID(1)) can't collide with it and get dropped by IdentifiedArray.
+        let seedPane = UUID(uuidString: "DEADBEEF-0000-0000-0000-000000000001")!
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: seedPane)
+        let store = makeStore(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID1,
+            pendingFileOpens: ["/tmp/a.md", "/tmp/b.md"]
+        )
+
+        await store.send(.flushPendingFileOpens) { state in
+            #expect(state.pendingFileOpens.isEmpty)
+        }
+        // Both parked paths are replayed as `.openFileAtPath` (queued first),
+        // then each routed to the active workspace as a new markdown pane.
+        await store.receive(\.openFileAtPath)
+        await store.receive(\.openFileAtPath)
+        await store.receive(\.workspaces)
+        await store.receive(\.workspaces)
+        await store.skipReceivedActions()
+
+        let markdownPanes = store.state.workspaces[id: Self.wsID1]?
+            .panes.filter { $0.type == .markdown } ?? []
+        #expect(markdownPanes.count == 2)
+    }
+
+    @Test func stateLoadedEmptyBranchDrainsPendingFileOpens() async {
+        // End-to-end cold launch on a fresh install: a queued open survives
+        // until `.stateLoaded` (empty DB) creates the Default workspace and
+        // then drains the queue via `.flushPendingFileOpens`.
+        let store = makeStore()
+
+        await store.send(.openFileAtPath("/tmp/notes.md", fromPaneID: nil)) { state in
+            #expect(state.pendingFileOpens == ["/tmp/notes.md"])
+        }
+
+        await store.send(.stateLoaded(
+            [], groups: [], topLevelOrder: [], activeWorkspaceID: nil, repoRegistry: []
+        ))
+        // Default workspace is created first (sets activeWorkspaceID)...
+        await store.receive(\.createWorkspace)
+        // ...then the parked open is drained and the queue cleared.
+        await store.receive(\.flushPendingFileOpens) { state in
+            #expect(state.pendingFileOpens.isEmpty)
         }
     }
 

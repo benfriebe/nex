@@ -33,4 +33,29 @@ final class NexAppDelegate: NSObject, NSApplicationDelegate {
             ? .terminateNow
             : .terminateCancel
     }
+
+    /// Receives files opened from Finder ("Open With" / double-click) and
+    /// forwards markdown ones into the existing open pipeline via
+    /// `FileOpenGate`, reusing the same `.openFileAtPath` action as
+    /// drag-and-drop (issue #197). Only the modern unified `open:` method
+    /// is implemented — when present, AppKit never calls the legacy
+    /// `application(_:openFiles:)`, so there is no double-open. Handles
+    /// multi-file open events and both the running and cold-launch cases
+    /// (the gate buffers cold-launch arrivals until the store is wired).
+    func application(_: NSApplication, open urls: [URL]) {
+        var forwarded = false
+        for url in urls where url.isFileURL
+            && FileOpenGate.markdownExtensions.contains(url.pathExtension.lowercased()) {
+            FileOpenGate.shared.open(url.path)
+            forwarded = true
+        }
+        // Surface the window so an open triggered while Nex is running but
+        // minimised/hidden actually shows the new pane rather than adding it
+        // to an off-screen window. No-op on cold launch (no window yet;
+        // Launch Services activates us anyway).
+        if forwarded {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+    }
 }

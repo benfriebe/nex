@@ -39,7 +39,8 @@ extension AppReducer {
              .surfaceProcessExited,
              .desktopNotification,
              .openFile,
-             .openFileAtPath:
+             .openFileAtPath,
+             .flushPendingFileOpens:
             .searchNotify
 
         // MARK: WebPane
