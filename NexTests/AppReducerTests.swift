@@ -206,6 +206,21 @@ struct AppReducerTests {
         }
     }
 
+    @Test func createWorkspaceSetsSidebarScrollTarget() async {
+        // Issue #187: a fresh workspace queues itself to be scrolled into
+        // view; `clearSidebarScrollTarget` consumes the one-shot signal.
+        let store = makeStore()
+
+        await store.send(.createWorkspace(name: "Test", color: .green)) { state in
+            let newID = state.workspaces.first?.id
+            #expect(newID != nil)
+            #expect(state.sidebarScrollTarget == .workspace(newID!))
+        }
+        await store.send(.clearSidebarScrollTarget) { state in
+            #expect(state.sidebarScrollTarget == nil)
+        }
+    }
+
     @Test func createWorkspaceWithoutColorPicksNonRepeatingColor() async {
         // Seed with an existing workspace whose color is red, then create a new
         // workspace without specifying a color. The reducer should resolve the
@@ -535,6 +550,25 @@ struct AppReducerTests {
 
         await store.send(.setActiveWorkspace(Self.wsID2)) { state in
             #expect(state.activeWorkspaceID == Self.wsID2)
+            // Issue #187: navigating to a workspace scrolls it into view.
+            #expect(state.sidebarScrollTarget == .workspace(Self.wsID2))
+        }
+    }
+
+    @Test func switchToWorkspaceByIndexScrollsTargetIntoView() async {
+        // ⌘1-9 routes through setActiveWorkspace, so the destination
+        // workspace should be queued for scroll-into-view (issue #187).
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1")
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2")
+
+        let store = makeStore(
+            workspaces: [ws1, ws2],
+            activeWorkspaceID: Self.wsID1
+        )
+
+        await store.send(.switchToWorkspaceByIndex(1))
+        await store.receive(.setActiveWorkspace(Self.wsID2)) { state in
+            #expect(state.sidebarScrollTarget == .workspace(Self.wsID2))
         }
     }
 
@@ -1003,6 +1037,9 @@ struct AppReducerTests {
 
             // Source is empty
             #expect(state.workspaces[id: Self.wsID1]?.panes.count == 0)
+
+            // Issue #187: the freshly created destination scrolls into view.
+            #expect(state.sidebarScrollTarget == .workspace(newWS!.id))
         }
     }
 

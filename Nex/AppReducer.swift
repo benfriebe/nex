@@ -18,6 +18,19 @@ struct AppReducer {
         var renamingWorkspaceID: UUID?
         var renamingPaneID: UUID?
         var renamingGroupID: UUID?
+        /// One-shot "scroll this sidebar entry into view" signal, set
+        /// whenever an entry is created or a workspace is navigated to
+        /// (so it can't be stranded below the fold): every
+        /// workspace/group creation path (GUI + socket), plus activation
+        /// via `setActiveWorkspace` (⌘1-9, ⌘⇧]/[, sidebar/filter clicks,
+        /// the menu-bar popover, notification "Open") and the command
+        /// palette. `WorkspaceListView` observes it, scrolls the entry
+        /// into the viewport (a no-op when it is already fully visible),
+        /// and immediately dispatches `clearSidebarScrollTarget` to
+        /// consume it. Transient UI state — never persisted. Not set by
+        /// state restore on launch or by delete/move reflow, so those
+        /// don't yank the list around.
+        var sidebarScrollTarget: SidebarID?
         var groupDeleteConfirmation: GroupDeleteConfirmation?
         var groupBulkCreatePrompt: GroupBulkCreatePrompt?
         var groupCustomEmojiPrompt: GroupCustomEmojiPrompt?
@@ -362,6 +375,7 @@ struct AppReducer {
         case toggleSidebar
         case showNewWorkspaceSheet(groupID: UUID? = nil)
         case dismissNewWorkspaceSheet
+        case clearSidebarScrollTarget
         case beginRenameActiveWorkspace
         case setRenamingWorkspaceID(UUID?)
         case setRenamingPaneID(UUID?)
@@ -1101,6 +1115,9 @@ struct AppReducer {
                 state.activeWorkspaceID = workspace.id
                 state.isNewWorkspaceSheetPresented = false
                 state.pendingSheetGroupID = nil
+                // Ask the sidebar to scroll the new (now-active) workspace
+                // into view once it lays out (issue #187).
+                state.sidebarScrollTarget = .workspace(workspace.id)
 
                 // Create the initial surface for the default pane
                 let paneID = workspace.panes.first!.id
@@ -1265,6 +1282,11 @@ struct AppReducer {
                    state.groups[id: groupID]?.isCollapsed == true {
                     state.groups[id: groupID]?.isCollapsed = false
                 }
+                // Bring the activated workspace into view — a keyboard
+                // switch (⌘1-9, ⌘⇧]/[), menu-bar/notification jump, or a
+                // click on a partially-clipped row can land on an entry
+                // below the fold (issue #187). No-op when already visible.
+                state.sidebarScrollTarget = .workspace(id)
                 return .merge(
                     .send(.persistState),
                     .send(.refreshGitStatus)
@@ -1309,6 +1331,11 @@ struct AppReducer {
             case .dismissNewWorkspaceSheet:
                 state.isNewWorkspaceSheetPresented = false
                 state.pendingSheetGroupID = nil
+                return .none
+
+            case .clearSidebarScrollTarget:
+                // The sidebar consumed the one-shot scroll signal.
+                state.sidebarScrollTarget = nil
                 return .none
 
             case .beginRenameActiveWorkspace:
@@ -1582,6 +1609,8 @@ struct AppReducer {
                 if autoRename {
                     state.renamingGroupID = newGroup.id
                 }
+                // Scroll the new group header into view (issue #187).
+                state.sidebarScrollTarget = .group(newGroup.id)
                 return .send(.persistState)
 
             case .renameGroup(let id, let name):

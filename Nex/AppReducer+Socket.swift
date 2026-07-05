@@ -261,6 +261,11 @@ extension AppReducer {
                         state.workspaces.append(newWS)
                         state.topLevelOrder.append(.workspace(newID))
                         targetWSID = newID
+                        // Scroll the freshly created (and about-to-be-active)
+                        // destination workspace into view (issue #187). Only
+                        // the auto-create branch: moving into an existing
+                        // workspace is a plain move, out of scope.
+                        state.sidebarScrollTarget = .workspace(newID)
                     }
 
                     guard let targetWSID, targetWSID != sourceWS.id else { return .none }
@@ -847,6 +852,11 @@ extension AppReducer {
         state.workspaces.append(seeded)
         state.topLevelOrder.append(.workspace(newWorkspaceID))
         state.activeWorkspaceID = newWorkspaceID
+        // Scroll the new (now-active) workspace into view (issue #187).
+        // The sidebar re-resolves this to its parent group header at
+        // scroll time if the follow-up `.moveWorkspaceToGroup` lands it
+        // inside a collapsed group.
+        state.sidebarScrollTarget = .workspace(newWorkspaceID)
 
         // Resolve or create the group.
         let targetGroupID: UUID
@@ -947,6 +957,8 @@ extension AppReducer {
         let createdGroup = WorkspaceGroup(id: newID, name: trimmed, color: color)
         state.groups.append(createdGroup)
         state.topLevelOrder.append(.group(newID))
+        // Scroll the new group header into view (issue #187).
+        state.sidebarScrollTarget = .group(newID)
         return .send(.persistState)
     }
 

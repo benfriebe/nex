@@ -114,6 +114,38 @@ struct WorkspaceGroupSocketTests {
         }
     }
 
+    @Test func socketGroupCreateSetsSidebarScrollTarget() async {
+        // Issue #187: `nex group create` should scroll the new group
+        // header into view. The socket handler mutates inline, so the
+        // signal is set in the send closure.
+        let store = makeStore()
+
+        await store.send(.socketMessage(.groupCreate(name: "Monitors", color: nil), reply: nil)) { state in
+            let newID = state.groups.first?.id
+            #expect(newID != nil)
+            #expect(state.sidebarScrollTarget == .group(newID!))
+        }
+    }
+
+    @Test func socketWorkspaceCreateWithGroupSetsSidebarScrollTarget() async {
+        // Issue #187: `nex workspace create --group` targets the new
+        // workspace (the sidebar resolves it to the group header if it
+        // lands in a collapsed group).
+        let existing = WorkspaceGroup(id: Self.groupAID, name: "Monitors", childOrder: [])
+        let store = makeStore(groups: [existing], topLevelOrder: [.group(Self.groupAID)])
+
+        await store.send(.socketMessage(.workspaceCreate(
+            name: "Alpha",
+            path: "/tmp",
+            color: .blue,
+            group: "Monitors"
+        ), reply: nil)) { state in
+            let newID = state.workspaces.first?.id
+            #expect(newID != nil)
+            #expect(state.sidebarScrollTarget == .workspace(newID!))
+        }
+    }
+
     @Test func socketGroupRenameByName() async {
         let group = WorkspaceGroup(id: Self.groupAID, name: "Old", childOrder: [])
         let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupAID)])

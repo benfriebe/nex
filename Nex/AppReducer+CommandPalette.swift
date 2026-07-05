@@ -90,6 +90,10 @@ extension AppReducer {
                 // Set workspace directly to avoid effect indirection
                 state.activeWorkspaceID = item.workspaceID
                 state.workspaces[id: item.workspaceID]?.lastAccessedAt = Date()
+                // Scroll the jumped-to workspace into view — the palette
+                // can target an entry far outside the current scroll
+                // window (issue #187). No-op when already visible.
+                state.sidebarScrollTarget = .workspace(item.workspaceID)
 
                 var effects: [Effect<Action>] = [
                     .send(.persistState),
