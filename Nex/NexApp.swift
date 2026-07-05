@@ -46,6 +46,7 @@ struct NexApp: App {
                 .environment(\.webPaneStore, WebPaneStore.liveValue)
                 .background(SpacesBindingAttacher())
                 .background(DuplicateMainWindowCloser())
+                .background(WindowFrameRestorer())
                 .frame(minWidth: 600, minHeight: 400)
                 // An appearance change updates `liveValue` and posts this; mirror
                 // it into @State so the env re-injects and the non-terminal panes
@@ -276,8 +277,23 @@ private struct DuplicateMainWindowCloser: NSViewRepresentable {
 }
 
 @MainActor
-private enum MainWindowRegistry {
+enum MainWindowRegistry {
     weak static var primary: NSWindow?
+
+    /// Claims `window` as the primary main window if none is registered yet
+    /// (or it's the same window), returning whether `window` is the primary.
+    /// `false` means it's a duplicate — a second main WindowGroup window
+    /// SwiftUI spawned for a file-open on the already-running app. Both
+    /// `DuplicateMainWindowCloser` and `WindowFrameRestorer` route through
+    /// this so the answer is stable regardless of which `.background`
+    /// attachment's `viewDidMoveToWindow` fires first.
+    static func isPrimary(_ window: NSWindow) -> Bool {
+        if primary == nil || primary === window {
+            primary = window
+            return true
+        }
+        return false
+    }
 }
 
 private final class DuplicateMainWindowCloserView: NSView {
@@ -285,10 +301,7 @@ private final class DuplicateMainWindowCloserView: NSView {
         super.viewDidMoveToWindow()
         guard let window else { return }
         // The first main window (cold launch / normal) becomes the primary.
-        if MainWindowRegistry.primary == nil || MainWindowRegistry.primary === window {
-            MainWindowRegistry.primary = window
-            return
-        }
+        if MainWindowRegistry.isPrimary(window) { return }
         // A second main window — SwiftUI spawned it for a file-open on the
         // already-running app. Close it; the file was already routed into
         // the primary window's workspace by NexAppDelegate.
