@@ -294,6 +294,17 @@ enum MainWindowRegistry {
         }
         return false
     }
+
+    /// Clears the primary registration when the primary window closes, so a
+    /// window reopened from the Dock (app still running after its last window
+    /// closed) can claim primary again instead of being treated as a
+    /// duplicate. The `weak` ref only zeroes on dealloc, whose timing isn't
+    /// guaranteed to precede the reopen.
+    static func relinquishIfPrimary(_ window: NSWindow) {
+        if primary === window {
+            primary = nil
+        }
+    }
 }
 
 private final class DuplicateMainWindowCloserView: NSView {

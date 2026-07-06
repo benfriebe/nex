@@ -16,7 +16,9 @@ import SwiftUI
 ///    use `setFrameAutosaveName` -- inside a SwiftUI `WindowGroup` it does
 ///    not reliably capture user resizes, so the window always came back at
 ///    the default size (issue #179). Saving is skipped while in native
-///    fullscreen so the stored frame stays the *windowed* one.
+///    fullscreen, and across the enter/exit fullscreen transition (AppKit
+///    posts screen-sized transition frames before `.fullScreen` lands in the
+///    style mask), so the stored frame stays the *windowed* one.
 ///
 ///  - **Fullscreen flag**: persisted from the enter/exit fullscreen
 ///    notifications; on launch we re-enter fullscreen after the windowed
@@ -43,6 +45,11 @@ final class WindowFrameRestorerView: NSView {
     nonisolated static let fullscreenDefaultsKey = "nex.mainWindow.isFullScreen"
 
     private var didConfigure = false
+    /// True between `willEnter/willExitFullScreen` and the matching
+    /// `didEnter/didExitFullScreen`. AppKit posts screen-sized transition
+    /// frames during the animation before `.fullScreen` reaches the style
+    /// mask, which would otherwise be saved as the "windowed" frame.
+    private var inFullscreenTransition = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -73,6 +80,14 @@ final class WindowFrameRestorerView: NSView {
             name: NSWindow.didMoveNotification, object: window
         )
         center.addObserver(
+            self, selector: #selector(fullscreenWillTransition(_:)),
+            name: NSWindow.willEnterFullScreenNotification, object: window
+        )
+        center.addObserver(
+            self, selector: #selector(fullscreenWillTransition(_:)),
+            name: NSWindow.willExitFullScreenNotification, object: window
+        )
+        center.addObserver(
             self, selector: #selector(windowDidEnterFullScreen(_:)),
             name: NSWindow.didEnterFullScreenNotification, object: window
         )
@@ -80,16 +95,27 @@ final class WindowFrameRestorerView: NSView {
             self, selector: #selector(windowDidExitFullScreen(_:)),
             name: NSWindow.didExitFullScreenNotification, object: window
         )
+        // Relinquish primary ownership when the window closes, so a window
+        // reopened from the Dock (app still running after the last window
+        // closed) can re-claim primary instead of being misread as a
+        // duplicate and closed / left un-restored.
+        center.addObserver(
+            self, selector: #selector(windowWillClose(_:)),
+            name: NSWindow.willCloseNotification, object: window
+        )
 
-        // Restore the saved windowed frame (size + position). Recenter it if
-        // it no longer overlaps any screen -- e.g. saved on a since-
-        // disconnected external display; with `.hiddenTitleBar` AppKit's own
-        // constrain is weak. Applying the frame fires didResize/didMove above,
-        // which re-persists the (possibly clamped) frame -- intended.
-        if let saved = UserDefaults.standard.string(forKey: Self.frameDefaultsKey) {
+        // Restore the saved windowed frame (size + position) -- but never onto
+        // a window that is currently fullscreen (a recreated representable
+        // could otherwise shrink the fullscreen surface to a floating rect).
+        // Recenter it if it no longer sits reachably on a screen (saved on a
+        // since-disconnected external display; with `.hiddenTitleBar` AppKit's
+        // own constrain is weak). Applying the frame fires didResize/didMove
+        // above, which re-persists the (possibly clamped) frame -- intended.
+        if !window.styleMask.contains(.fullScreen),
+           let saved = UserDefaults.standard.string(forKey: Self.frameDefaultsKey) {
             let rect = NSRectFromString(saved)
             if rect.width > 0, rect.height > 0 {
-                let screens = NSScreen.screens.map(\.frame)
+                let screens = NSScreen.screens.map(\.visibleFrame)
                 let fallback = (window.screen ?? NSScreen.main)?.visibleFrame ?? rect
                 let safe = WindowFrameClamp.constrained(rect, toVisible: screens, fallback: fallback)
                 window.setFrame(safe, display: true)
@@ -107,20 +133,33 @@ final class WindowFrameRestorerView: NSView {
     }
 
     /// Persist the windowed frame on every move/resize. Skipped while in
-    /// native fullscreen so we keep remembering the *windowed* frame, not the
-    /// full-screen one AppKit reports during fullscreen.
+    /// native fullscreen (or its transition) so we keep remembering the
+    /// *windowed* frame, not the full-screen one AppKit reports.
     @objc private func windowFrameChanged(_ note: Notification) {
-        guard let window = note.object as? NSWindow,
+        guard !inFullscreenTransition,
+              let window = note.object as? NSWindow,
               !window.styleMask.contains(.fullScreen) else { return }
         UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameDefaultsKey)
     }
 
+    @objc private func fullscreenWillTransition(_: Notification) {
+        inFullscreenTransition = true
+    }
+
     @objc private func windowDidEnterFullScreen(_: Notification) {
+        inFullscreenTransition = false
         UserDefaults.standard.set(true, forKey: Self.fullscreenDefaultsKey)
     }
 
     @objc private func windowDidExitFullScreen(_: Notification) {
+        inFullscreenTransition = false
         UserDefaults.standard.set(false, forKey: Self.fullscreenDefaultsKey)
+    }
+
+    @objc private func windowWillClose(_ note: Notification) {
+        if let window = note.object as? NSWindow {
+            MainWindowRegistry.relinquishIfPrimary(window)
+        }
     }
 
     deinit {
@@ -128,23 +167,37 @@ final class WindowFrameRestorerView: NSView {
     }
 }
 
-/// Pure geometry helper for keeping a restored window frame on-screen.
-/// Split out from `WindowFrameRestorerView` so it can be unit-tested without
-/// a real `NSWindow` / display.
+/// Pure geometry helper for keeping a restored window frame on-screen and
+/// grabbable. Split out from `WindowFrameRestorerView` so it can be
+/// unit-tested without a real `NSWindow` / display.
 enum WindowFrameClamp {
-    /// Minimum overlap (points) required on each axis for a saved frame to
-    /// count as "still reachable" on a screen.
+    /// Minimum grabbable width (points) of the top drag strip on a screen.
     static let minVisible: CGFloat = 80
+    /// Height of the hidden-titlebar drag strip that must stay reachable --
+    /// with `.hiddenTitleBar` this top band is the only window drag handle.
+    static let dragStripHeight: CGFloat = 28
 
-    /// If `frame` overlaps at least one of `screens` by `minVisible` on both
-    /// axes it's returned unchanged; otherwise it's recentered on `fallback`
-    /// (keeping its size, shrunk to fit if larger than `fallback`).
+    /// Returns `frame` unchanged if it fits within some `screens` (visible
+    /// frames) and that screen contains the window's whole top drag strip with
+    /// at least `minVisible` grabbable width; otherwise recenters it on
+    /// `fallback` (shrinking to fit). Testing the *top strip* (not just any
+    /// overlap) is what prevents restoring a window whose titlebar is above /
+    /// off the only remaining screen.
     static func constrained(_ frame: NSRect, toVisible screens: [NSRect], fallback: NSRect) -> NSRect {
-        let visibleEnough = screens.contains { screen in
-            let overlap = screen.intersection(frame)
-            return !overlap.isNull && overlap.width >= minVisible && overlap.height >= minVisible
+        let topStrip = NSRect(
+            x: frame.minX,
+            y: frame.maxY - dragStripHeight,
+            width: frame.width,
+            height: dragStripHeight
+        )
+        let reachable = screens.contains { screen in
+            guard frame.width <= screen.width, frame.height <= screen.height else { return false }
+            let overlap = screen.intersection(topStrip)
+            return !overlap.isNull
+                && overlap.width >= minVisible
+                && overlap.height >= dragStripHeight
         }
-        if visibleEnough { return frame }
+        if reachable { return frame }
 
         let width = min(frame.width, fallback.width)
         let height = min(frame.height, fallback.height)
