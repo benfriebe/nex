@@ -3,11 +3,21 @@ import Foundation
 
 /// Message received from the `nex` CLI via the Unix socket.
 enum SocketMessage: Equatable {
-    // Agent lifecycle
+    /// Agent lifecycle
     case agentStarted(paneID: UUID)
-    case agentStopped(paneID: UUID)
+    /// The main agent loop finished responding (Claude Code `Stop` hook).
+    /// `backgroundTaskCount` is the number of `run_in_background` shells +
+    /// background subagents still running, read from the hook payload's
+    /// `background_tasks` array (issues #215, #220). > 0 means the turn
+    /// ended but work continues, so the pane stays `.running` rather than
+    /// flipping to `.waitingForInput`. Defaults to 0 (no background info /
+    /// nothing in flight → today's behaviour).
+    case agentStopped(paneID: UUID, backgroundTaskCount: Int)
     case agentError(paneID: UUID, message: String)
-    case notification(paneID: UUID, title: String, body: String)
+    /// Claude Code `Notification` hook. `backgroundTaskCount` mirrors
+    /// `agentStopped`: > 0 keeps the pane `.running` (the notification
+    /// fired while background work is still in flight).
+    case notification(paneID: UUID, title: String, body: String, backgroundTaskCount: Int)
     case sessionStarted(paneID: UUID, sessionID: String)
     /// A Claude Code session ended (SessionEnd hook: the agent process
     /// exited, the user logged out, or `/clear` retired the old id).
@@ -332,6 +342,7 @@ private let replyCommandAllowlist: Set<String> = [
 /// Wire format (newline-terminated JSON):
 /// ```
 /// {"command":"stop","pane_id":"<uuid>"}\n
+/// {"command":"stop","pane_id":"<uuid>","background_tasks":2}\n
 /// {"command":"error","pane_id":"<uuid>","message":"..."}\n
 /// {"command":"pane-split","pane_id":"<uuid>","direction":"horizontal"}\n
 /// {"command":"pane-capture","target":"worker","lines":50}\n
@@ -705,6 +716,11 @@ final class SocketServer: Sendable {
         var title: String?
         var body: String?
         var sessionID: String?
+        /// `stop` / `notification` — count of Claude Code background units
+        /// (`run_in_background` shells + background subagents) still in
+        /// flight, derived CLI-side from the hook payload's
+        /// `background_tasks` array (issues #215, #220). Absent / nil → 0.
+        var backgroundTasks: Int?
         var direction: String?
         var path: String?
         var name: String?
@@ -815,6 +831,7 @@ final class SocketServer: Sendable {
             case paneID = "pane_id"
             case message, title, body
             case sessionID = "session_id"
+            case backgroundTasks = "background_tasks"
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
             case cascade, index, group
@@ -1401,14 +1418,15 @@ final class SocketServer: Sendable {
         case "start":
             socketMessage = .agentStarted(paneID: paneID)
         case "stop":
-            socketMessage = .agentStopped(paneID: paneID)
+            socketMessage = .agentStopped(paneID: paneID, backgroundTaskCount: wire.backgroundTasks ?? 0)
         case "error":
             socketMessage = .agentError(paneID: paneID, message: wire.message ?? "Unknown error")
         case "notification":
             socketMessage = .notification(
                 paneID: paneID,
                 title: wire.title ?? "Agent",
-                body: wire.body ?? ""
+                body: wire.body ?? "",
+                backgroundTaskCount: wire.backgroundTasks ?? 0
             )
         case "session-start":
             guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }

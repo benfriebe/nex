@@ -50,11 +50,11 @@ struct AgentLifecycleTests {
         )
 
         // Send socket message for pane in WS2 (background workspace)
-        await store.send(.socketMessage(.agentStopped(paneID: paneID2), reply: nil))
+        await store.send(.socketMessage(.agentStopped(paneID: paneID2, backgroundTaskCount: 0), reply: nil))
 
         // The .send() effect routes to the child — wait for it
         await store.receive(
-            .workspaces(.element(id: wsID2, action: .agentStopped(paneID: paneID2)))
+            .workspaces(.element(id: wsID2, action: .agentStopped(paneID: paneID2, backgroundTaskCount: 0)))
         ) { state in
             state.workspaces[id: wsID2]?.panes[id: paneID2]?.status = .waitingForInput
         }
@@ -134,7 +134,7 @@ struct AgentLifecycleTests {
         )
 
         // Should produce no child effects — unknown pane
-        await store.send(.socketMessage(.agentStopped(paneID: unknownPaneID), reply: nil))
+        await store.send(.socketMessage(.agentStopped(paneID: unknownPaneID, backgroundTaskCount: 0), reply: nil))
     }
 
     // MARK: - Desktop Notifications

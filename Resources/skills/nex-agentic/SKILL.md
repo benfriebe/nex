@@ -219,6 +219,17 @@ hooks by `install-hooks.sh`. `session-end` clears the pane's tracked
 session id (only when it still matches the ending session) so Nex does
 not `claude --resume` a session that has already exited.
 
+On `stop` / `notification`, `nex event` also reads the hook payload's
+`background_tasks` array — Claude Code's live snapshot of the
+`run_in_background` shells and background subagents still in flight — and
+forwards the running count to Nex. While that count is non-zero the pane
+stays **running** (not "waiting for input") and the synthetic
+"waiting" notification is suppressed, so a pane whose turn ended but
+still has background work in flight reads correctly. The count shows in
+`nex pane list --json` as `background_tasks` and in the pane header as
+"· N running". No extra hook wiring is needed — it rides on the existing
+`Stop` / `Notification` hooks.
+
 ### Workspace Commands
 
 ```bash

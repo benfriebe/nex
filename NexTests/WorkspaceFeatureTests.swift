@@ -512,8 +512,56 @@ struct WorkspaceFeatureTests {
             $0.surfaceManager = SurfaceManager()
         }
 
-        await store.send(.agentStopped(paneID: paneID)) { state in
+        await store.send(.agentStopped(paneID: paneID, backgroundTaskCount: 0)) { state in
             state.panes[id: paneID]?.status = .waitingForInput
+        }
+    }
+
+    @Test func agentStoppedWithBackgroundWorkStaysRunning() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        // Simulate a live turn: the pane is already running with a clock.
+        let started = Date(timeIntervalSince1970: 1000)
+        workspace.panes[id: paneID]?.status = .running
+        workspace.panes[id: paneID]?.agentStartedAt = started
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        // Turn ends but two background units are still in flight → the pane
+        // must NOT flip to waiting; it stays running and records the count,
+        // and the elapsed clock is untouched (issues #215, #220).
+        await store.send(.agentStopped(paneID: paneID, backgroundTaskCount: 2)) { state in
+            state.panes[id: paneID]?.backgroundTaskCount = 2
+        }
+
+        // Next Stop with an empty snapshot is the authoritative "awaiting
+        // input" transition.
+        await store.send(.agentStopped(paneID: paneID, backgroundTaskCount: 0)) { state in
+            state.panes[id: paneID]?.status = .waitingForInput
+            state.panes[id: paneID]?.backgroundTaskCount = 0
+        }
+    }
+
+    @Test func agentStartedClearsBackgroundTaskCount() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .running
+        workspace.panes[id: paneID]?.backgroundTaskCount = 3
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 2000))
+        }
+
+        // A fresh turn supersedes the previous turn's background snapshot.
+        await store.send(.agentStarted(paneID: paneID)) { state in
+            state.panes[id: paneID]?.backgroundTaskCount = 0
         }
     }
 
@@ -529,6 +577,65 @@ struct WorkspaceFeatureTests {
 
         await store.send(.agentError(paneID: paneID)) { state in
             state.panes[id: paneID]?.status = .waitingForInput
+        }
+    }
+
+    @Test func agentErrorClearsBackgroundTaskCount() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .running
+        workspace.panes[id: paneID]?.backgroundTaskCount = 4
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.agentError(paneID: paneID)) { state in
+            state.panes[id: paneID]?.status = .waitingForInput
+            state.panes[id: paneID]?.backgroundTaskCount = 0
+        }
+    }
+
+    @Test func setPaneStatusClearsBackgroundTaskCount() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .running
+        workspace.panes[id: paneID]?.backgroundTaskCount = 2
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 3000))
+        }
+
+        // Manual override to "awaiting input" must not leave a stale count
+        // lingering in the header / pane-list.
+        await store.send(.setPaneStatus(paneID: paneID, status: .waitingForInput)) { state in
+            state.panes[id: paneID]?.status = .waitingForInput
+            state.panes[id: paneID]?.backgroundTaskCount = 0
+        }
+    }
+
+    @Test func sessionStartedClearsBackgroundTaskCount() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .running
+        workspace.panes[id: paneID]?.backgroundTaskCount = 3
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        // A fresh session bounds a stuck `.running`: even if the final empty
+        // Stop was dropped, the count can't pin the pane past a new session.
+        await store.send(.sessionStarted(paneID: paneID, sessionID: "sess-new")) { state in
+            state.panes[id: paneID]?.agentSessionID = "sess-new"
+            state.panes[id: paneID]?.backgroundTaskCount = 0
         }
     }
 

@@ -50,7 +50,7 @@ extension AppReducer {
                         .send(.updateExternalIndicators)
                     )
 
-                case .agentStopped(let paneID):
+                case .agentStopped(let paneID, let backgroundTaskCount):
                     guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
@@ -58,12 +58,18 @@ extension AppReducer {
                     let notifService = notificationService
                     let wsID = workspace.id
                     let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
-                    let shouldNotify = !isFocused || !isAppActive
-                    let shouldBounce = !isAppActive
+                    // Background work still in flight → the pane stays
+                    // `.running`, so don't fire the synthetic "waiting for
+                    // input" notification or bounce the dock. This also kills
+                    // the notification churn from the repeat Stops that fire
+                    // as each background unit completes (issues #215, #220).
+                    let hasBackgroundWork = backgroundTaskCount > 0
+                    let shouldNotify = (!isFocused || !isAppActive) && !hasBackgroundWork
+                    let shouldBounce = !isAppActive && !hasBackgroundWork
                     let title = workspace.pane(id: paneID)?.title ?? workspace.name
 
                     return .merge(
-                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID)))),
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID, backgroundTaskCount: backgroundTaskCount)))),
                         .send(.updateExternalIndicators),
                         .run { _ in
                             if shouldNotify {
@@ -102,7 +108,7 @@ extension AppReducer {
                         }
                     )
 
-                case .notification(let paneID, let title, let body):
+                case .notification(let paneID, let title, let body, let backgroundTaskCount):
                     guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
@@ -111,8 +117,14 @@ extension AppReducer {
                     let wsID = workspace.id
                     let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
 
+                    // Route through `agentStopped` so the same background-aware
+                    // rule applies: a Notification fired while background work
+                    // is in flight keeps the pane `.running` rather than
+                    // reading "waiting" (issues #215, #220). Claude's own
+                    // message is still posted — unlike the synthetic stop-path
+                    // notification, it may be an actionable permission prompt.
                     var effects: [Effect<Action>] = [
-                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID)))),
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID, backgroundTaskCount: backgroundTaskCount)))),
                         .send(.updateExternalIndicators)
                     ]
                     if !isFocused || !isAppActive {
@@ -1122,6 +1134,7 @@ extension AppReducer {
                 if let title = pane.title { entry["title"] = title }
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
+                if pane.backgroundTaskCount > 0 { entry["background_tasks"] = pane.backgroundTaskCount }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
                 panes.append(entry)
             }

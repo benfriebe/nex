@@ -283,7 +283,11 @@ struct WorkspaceFeature {
         case paneProcessTerminated(paneID: UUID)
         case movePane(paneID: UUID, targetPaneID: UUID, zone: PaneLayout.DropZone)
         case agentStarted(paneID: UUID)
-        case agentStopped(paneID: UUID)
+        /// The agent's turn ended. `backgroundTaskCount` > 0 means
+        /// `run_in_background` shells / background subagents are still in
+        /// flight (issues #215, #220): keep the pane `.running` instead of
+        /// flipping to `.waitingForInput`. 0 → the usual "awaiting input".
+        case agentStopped(paneID: UUID, backgroundTaskCount: Int)
         case agentError(paneID: UUID)
         case setPaneStatus(paneID: UUID, status: PaneStatus)
         case sessionStarted(paneID: UUID, sessionID: String)
@@ -1310,15 +1314,37 @@ struct WorkspaceFeature {
                     // pings within one run don't reset "claude · mm:ss".
                     if $0.status != .running { $0.agentStartedAt = now }
                     $0.status = .running
+                    // A fresh turn supersedes any background snapshot from
+                    // the previous turn.
+                    $0.backgroundTaskCount = 0
                 }
                 return .none
 
-            case .agentStopped(let paneID):
-                state.mutatePane(id: paneID) { $0.status = .waitingForInput }
+            case .agentStopped(let paneID, let backgroundTaskCount):
+                state.mutatePane(id: paneID) {
+                    $0.backgroundTaskCount = backgroundTaskCount
+                    if backgroundTaskCount > 0 {
+                        // The main loop finished responding but background
+                        // shells / subagents are still running. Keep the
+                        // pane `.running` so its status doesn't falsely read
+                        // "waiting" (issues #215, #220). Forcing `.running`
+                        // (rather than leaving as-is) also collapses the
+                        // repeat Stops that fire as each background unit
+                        // completes into idempotent no-ops. Start the clock
+                        // if we somehow arrive here not already running.
+                        if $0.status != .running { $0.agentStartedAt = now }
+                        $0.status = .running
+                    } else {
+                        $0.status = .waitingForInput
+                    }
+                }
                 return .none
 
             case .agentError(let paneID):
-                state.mutatePane(id: paneID) { $0.status = .waitingForInput }
+                state.mutatePane(id: paneID) {
+                    $0.status = .waitingForInput
+                    $0.backgroundTaskCount = 0
+                }
                 return .none
 
             case .setPaneStatus(let paneID, let status):
@@ -1334,11 +1360,24 @@ struct WorkspaceFeature {
                         $0.agentStartedAt = now
                     }
                     $0.status = status
+                    // A manual override takes control of the status, so drop
+                    // any background snapshot — otherwise a stale "N running"
+                    // would linger in the header / `pane list --json`.
+                    $0.backgroundTaskCount = 0
                 }
                 return .none
 
             case .sessionStarted(let paneID, let sessionID):
-                state.mutatePane(id: paneID) { $0.agentSessionID = sessionID }
+                state.mutatePane(id: paneID) {
+                    $0.agentSessionID = sessionID
+                    // A brand-new session carries no inherited background work.
+                    // Clearing here also bounds a stuck `.running`: if the
+                    // final empty `Stop` was dropped (Nex wedged / restarting)
+                    // the count can't pin the pane past the next session start
+                    // (mirrors #215's session-scoped clearing of the in-flight
+                    // set).
+                    $0.backgroundTaskCount = 0
+                }
                 return .none
 
             case .sessionEnded(let paneID, let sessionID):

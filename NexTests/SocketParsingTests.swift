@@ -27,7 +27,16 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .agentStopped(paneID: Self.paneUUID))
+        #expect(result?.0 == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
+    }
+
+    @Test func parseStopCommandWithBackgroundTasks() {
+        let data = jsonData("""
+        {"command":"stop","pane_id":"\(Self.paneIDString)","background_tasks":3}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 3))
     }
 
     @Test func parseErrorCommand() {
@@ -45,7 +54,16 @@ struct SocketParsingTests {
         """)
         let result = SocketServer.parseWireMessage(data)
         #expect(result != nil)
-        #expect(result?.0 == .notification(paneID: Self.paneUUID, title: "Done", body: "Task complete"))
+        #expect(result?.0 == .notification(paneID: Self.paneUUID, title: "Done", body: "Task complete", backgroundTaskCount: 0))
+    }
+
+    @Test func parseNotificationCommandWithBackgroundTasks() {
+        let data = jsonData("""
+        {"command":"notification","pane_id":"\(Self.paneIDString)","title":"Done","body":"Task complete","background_tasks":1}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result != nil)
+        #expect(result?.0 == .notification(paneID: Self.paneUUID, title: "Done", body: "Task complete", backgroundTaskCount: 1))
     }
 
     @Test func parseSessionStartCommand() {
@@ -593,7 +611,7 @@ struct SocketParsingTests {
         let results = SocketServer.parseMessages(jsonData(input))
         #expect(results.count == 2)
         #expect(results[0] == .agentStarted(paneID: Self.paneUUID))
-        #expect(results[1] == .agentStopped(paneID: Self.paneUUID))
+        #expect(results[1] == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
     }
 
     @Test func parseDataInvalidJSONSkipped() {
@@ -605,7 +623,7 @@ struct SocketParsingTests {
         let results = SocketServer.parseMessages(jsonData(input))
         #expect(results.count == 2)
         #expect(results[0] == .agentStarted(paneID: Self.paneUUID))
-        #expect(results[1] == .agentStopped(paneID: Self.paneUUID))
+        #expect(results[1] == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
     }
 
     @Test func parseSessionIDDualFire() {
@@ -615,7 +633,7 @@ struct SocketParsingTests {
         let results = SocketServer.parseMessages(jsonData(input))
         // Should produce two messages: .agentStopped + .sessionStarted
         #expect(results.count == 2)
-        #expect(results[0] == .agentStopped(paneID: Self.paneUUID))
+        #expect(results[0] == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
         #expect(results[1] == .sessionStarted(paneID: Self.paneUUID, sessionID: "sess-xyz"))
     }
 

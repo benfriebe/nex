@@ -801,7 +801,38 @@ func handleEvent(_ args: inout ArraySlice<String>) {
         sessionID = json["session_id"] as? String
     }
 
-    var payload: [String: String] = [
+    // The `Stop` and `Notification` hook payloads carry a `background_tasks`
+    // array — a live snapshot of the `run_in_background` shells and
+    // background subagents still in flight (issues #215, #220). Count the
+    // ones still in flight so the app can keep the pane "running" instead of
+    // flipping to "waiting". This is an *observed* field, not a documented
+    // contract, so guard defensively: a missing / renamed / misshaped field
+    // yields 0 → today's behaviour.
+    //
+    // Predicate: count an entry unless it declares a *terminal* status. The
+    // only in-flight value observed so far is "running", but counting by
+    // terminal-exclusion is robust to Claude Code reporting other active
+    // states ("in_progress", "pending", "starting", …) on a future release —
+    // a running-only match would silently flip the pane back to "waiting" and
+    // re-introduce the exact bug. An entry with no `status` key is counted
+    // too (presence implies in-flight), matching the observed
+    // empty-when-idle shape where completed units drop out of the array.
+    let terminalTaskStatuses: Set = [
+        "completed", "complete", "done", "success", "succeeded",
+        "failed", "failure", "error", "errored",
+        "cancelled", "canceled", "killed", "stopped",
+        "timeout", "timed_out", "aborted", "skipped"
+    ]
+    var backgroundTaskCount = 0
+    if eventType == "stop" || eventType == "notification",
+       let tasks = stdinJSON?["background_tasks"] as? [[String: Any]] {
+        backgroundTaskCount = tasks.count(where: { task in
+            guard let status = (task["status"] as? String)?.lowercased() else { return true }
+            return !terminalTaskStatuses.contains(status)
+        })
+    }
+
+    var payload: [String: Any] = [
         "command": eventType,
         "pane_id": paneID
     ]
@@ -809,8 +840,11 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     if let title { payload["title"] = title }
     if let body { payload["body"] = body }
     if let sessionID { payload["session_id"] = sessionID }
+    // Only attach when non-zero so the common no-background path stays wire-
+    // identical to before (absent → server defaults to 0 → "waiting").
+    if backgroundTaskCount > 0 { payload["background_tasks"] = backgroundTaskCount }
 
-    sendJSON(payload, commandLabel: "nex event \(eventType)")
+    sendJSONAny(payload, commandLabel: "nex event \(eventType)")
 }
 
 func handlePane(_ args: inout ArraySlice<String>) {

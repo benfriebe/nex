@@ -315,6 +315,12 @@ struct PaneHeaderView: View {
                             .monospacedDigit()
                     }
                 }
+                // Background work still in flight after the turn ended
+                // (issues #215, #220): surface the count so "running" reads
+                // as "working in the background", not a stalled clock.
+                if pane.backgroundTaskCount > 0 {
+                    Text("· \(pane.backgroundTaskCount) running")
+                }
             }
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(theme.activeAgent)
