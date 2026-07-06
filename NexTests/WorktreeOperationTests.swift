@@ -132,9 +132,11 @@ struct WorktreeOperationTests {
 
     @Test func createWorktreeSurfacesGitStderrNotOpaqueDescription() async {
         // A residual git failure (path exists, branch checked out elsewhere)
-        // must surface git's stderr — not the useless localizedDescription of
-        // a non-LocalizedError `GitServiceError`. Guards the safety net that
-        // the sanitize-first design leans on (issue #218).
+        // must surface git's real diagnostic — not the useless
+        // localizedDescription of a non-LocalizedError `GitServiceError`, and
+        // not git's leading "Preparing worktree (…)" progress line, which
+        // precedes the actual "fatal: …" on stderr and once hid the "already
+        // exists" reason from the alert (issue #218).
         let repoID = UUID()
         let wsID = UUID()
 
@@ -148,10 +150,13 @@ struct WorktreeOperationTests {
         } withDependencies: {
             $0.surfaceManager = SurfaceManager()
             $0.gitService.createWorktree = { _, _, _ in
+                // Real `git worktree add -b` failure shape: progress line
+                // first, the fatal diagnostic second.
                 throw GitServiceError.commandFailed(
                     command: "git worktree add",
                     exitCode: 128,
-                    stderr: "fatal: '/code/repo/../wt/my-worktree' already exists"
+                    stderr: "Preparing worktree (new branch '2')\n"
+                        + "fatal: '/code/repo/../wt/2' already exists"
                 )
             }
         }
@@ -160,12 +165,12 @@ struct WorktreeOperationTests {
         await store.send(.createWorktree(
             workspaceID: wsID,
             repoID: repoID,
-            worktreeName: "my worktree",
-            branchName: "my worktree"
+            worktreeName: "2",
+            branchName: "2"
         ))
 
         await store.receive(\.worktreeCreationFailed) { state in
-            #expect(state.worktreeCreationError == "fatal: '/code/repo/../wt/my-worktree' already exists")
+            #expect(state.worktreeCreationError == "fatal: '/code/repo/../wt/2' already exists")
         }
     }
 
