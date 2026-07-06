@@ -4,6 +4,8 @@ A Mac-native terminal workspace multiplexer for polyrepo development with AI cod
 
 Nex gives you named, persistent workspaces with free-form pane splits, multi-repo worktree management, an in-app browser that agents can drive, and first-class lifecycle monitoring for Claude Code. Switching workspaces is instant. Agents get noticed when they need you.
 
+![Nex overview](docs/screenshots/hero.png)
+
 > Built on [libghostty](https://github.com/ghostty-org/ghostty) for terminal rendering. Targets macOS 14+. Written in Swift 6 + SwiftUI + [TCA](https://github.com/pointfreeco/swift-composable-architecture).
 
 ## Highlights
@@ -17,6 +19,8 @@ Nex gives you named, persistent workspaces with free-form pane splits, multi-rep
 - **Themeable chrome.** A warm light / dark / system app theme, independent of the terminal theme. Recolour any surface, save your look as a shareable `.nextheme` file or code, or pick a built-in preset (Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Solarized). A bottom status bar shows the focused pane's path, branch and git diff stats plus live CPU / memory / load sparklines.
 - **Customisable everything.** Keybindings, global hotkey, focus-follows-mouse, terminal theme, and background opacity, all editable in Settings or via `~/.config/nex/config`.
 - **Persistent.** Workspaces, panes, layouts, and repo associations survive restarts.
+
+![Workspace sidebar and inspector](docs/screenshots/workspaces.png)
 
 ## Install
 
@@ -55,6 +59,8 @@ xcodebuild -scheme Nex -destination 'platform=macOS' -skipMacroValidation build
 5. Run `claude` in any pane. The pane header lights up while the agent thinks; the menu-bar icon shows running and waiting counts across all workspaces.
 6. Open `Cmd+P` for the command palette, `Cmd+I` for the inspector, `Cmd+Shift+S` for the sidebar.
 
+![Command palette](docs/screenshots/command-palette.png)
+
 ## Core concepts
 
 ### Workspaces
@@ -70,6 +76,8 @@ Workspaces can live inside named, colour-coded groups (folders, effectively). Dr
 ### Labels and the sidebar filter
 
 Tag any workspace with one or more labels from the inspector. Labels are managed presets with assigned colours (edit them in **Settings > Labels**) and render as coloured pills in the sidebar. The filter input at the top of the sidebar searches workspace names AND labels live, so `Cmd+Shift+S` (sidebar), type, and jump.
+
+![Groups and labels](docs/screenshots/groups-labels.png)
 
 ## Pane types
 
@@ -90,6 +98,8 @@ Open `.md` files via `Cmd+O` or drag-and-drop onto the window.
 - Toggle to a plain-text editor with 500ms auto-save (`Cmd+E`).
 - `Cmd+F` find, `Cmd+=` / `Cmd+-` / `Cmd+0` font zoom, clickable URLs, task-list checkboxes.
 
+![Markdown pane](docs/screenshots/markdown-pane.png)
+
 ### Diff
 
 Open a git diff in a pane: `nex diff [<path>]` from the CLI, the inspector plus/minus button, or the `open_diff` action (bindable, default unbound).
@@ -97,6 +107,8 @@ Open a git diff in a pane: `nex diff [<path>]` from the CLI, the inspector plus/
 - GitHub-style colours, line-by-line classifier.
 - Each file collapses into a `<details>` block with a sticky header that pins as you scroll through its hunks.
 - Refresh on focus, or hit the header refresh button.
+
+![Diff pane](docs/screenshots/diff-pane.png)
 
 ### Scratchpad
 
@@ -109,6 +121,8 @@ A full WebKit browser pane with multi-tab support and an actuator surface for ag
 - `Cmd+L` to focus the URL bar, `Cmd+T` new tab, `Cmd+W` close tab, `Cmd+Shift+]` / `[` cycle tabs.
 - Private mode per pane (`nex web private on`) with isolated storage.
 - An agent in a neighbouring pane can drive the browser via `nex web` (see CLI section): click, type, scroll, capture screenshots, dump DOM, exec JS, wait for selectors, batch-inspect, drain the console buffer, arm an element picker.
+
+![Web pane](docs/screenshots/web-pane.png)
 
 ## AI agent integration
 
@@ -129,6 +143,8 @@ Where the signal surfaces:
 - **Dock badge** shows how many agents are waiting for input.
 - **Desktop notifications** include "Open" and "Dismiss" actions and route you to the right pane.
 - **Quit confirmation** lists running agents before letting `Cmd+Q` exit.
+
+![Agent monitoring](docs/screenshots/agent-monitoring.png)
 
 Manual setup (skip if `install-hooks.sh` did it):
 
@@ -167,6 +183,8 @@ nex graft stop
 ### Live git status
 
 Pane headers and the sidebar show the current branch with sub-second updates via a `.git/HEAD` watcher (no polling). The inspector shows added / modified / deleted counts.
+
+![Inspector and graft](docs/screenshots/inspector-graft.png)
 
 ## The `nex` CLI
 
@@ -337,7 +355,11 @@ The app chrome (sidebar, title bar, pane headers, and the bottom status bar) has
 - **Save and share.** Export your styling as a shareable `.nextheme` file or a copy-paste code, and import either back. The recipient's light/dark mode and terminal background are left untouched.
 - **Preset themes.** One-click palettes modelled on popular editor themes: Dracula, Nord, Gruvbox (dark and light), Tokyo Night, Catppuccin Mocha, and Solarized Light.
 
+![Appearance theme presets](docs/screenshots/themes.png)
+
 The **bottom status bar** shows the focused pane's working directory, git branch and diff stats, and the active agent with elapsed time on the left; on the right it shows live CPU / memory / load sparklines (toggle in **Settings > General**) and running / waiting / inactive agent counts, each of which opens a popover to jump straight to that pane.
+
+![Bottom status bar](docs/screenshots/status-bar.png)
 
 The **terminal** theme and background are configured separately (see `theme` and background opacity below).
 

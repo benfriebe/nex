@@ -32,7 +32,11 @@ Package.resolved
 # Python
 __pycache__/
 
-# Local working docs (plans, notes — not part of the public repo)
-docs/
+# Local working docs (plans, notes — not part of the public repo).
+# docs/* ignores the working notes but re-includes the public README
+# screenshots (git can only re-include a subdir when the parent dir
+# itself isn't excluded, hence docs/* rather than docs/).
+docs/*
+!docs/screenshots/
 .nex-tasks/
 .nex-results/
