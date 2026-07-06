@@ -46,6 +46,7 @@
 		2D8754E0B3E9AD185D7EB6B0 /* ConfigParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4114D723403D4FF8F4AC1B /* ConfigParser.swift */; };
 		2F440D3EB93B6C127A1FF003 /* WebPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A97924791DAA26F0E4B0BA /* WebPaneView.swift */; };
 		33B0CCD680CE4BAC31407678 /* SystemStatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A55FFAEAAEA23FA5688599 /* SystemStatsService.swift */; };
+		34B728B745CB6B2F8D0E20EF /* WindowFrameRestorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 922B1C9B497BBAD22C80AA8C /* WindowFrameRestorer.swift */; };
 		3B60C0FC48A2AAF6282CAB40 /* WorkspaceListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F9C43CA9B19E7281082913 /* WorkspaceListView.swift */; };
 		3BA27704A53CF36450B7301F /* FileOpenGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D4A4CD52161113DEA569D8 /* FileOpenGate.swift */; };
 		3C74513CA9D5FD60E672B477 /* CommandPaletteItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */; };
@@ -146,6 +147,7 @@
 		B8B5B666D5CC24071420A966 /* StoragePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45141531B99E3E1B79620ECA /* StoragePanel.swift */; };
 		B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */; };
 		BAEEBBBC67C9969D0553D084 /* ChromeIndicatorRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */; };
+		BB08FDFACF7C19A24AC75A95 /* WindowFrameClampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAD37C3132175B4E6A1076D /* WindowFrameClampTests.swift */; };
 		BF19A66EC95FA4FB46CA400D /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F228193206574DB257C8B3FB /* AppKit.framework */; };
 		C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */; };
 		C0741544E700ECB9D719CB64 /* TitlebarDoubleClickActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA151EED6939BCA9792BBF1 /* TitlebarDoubleClickActionTests.swift */; };
@@ -320,6 +322,7 @@
 		8908AF59D359222CBC0EF21D /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		89FC5F004277851CEA0CFF3F /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
 		8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsClient.swift; sourceTree = "<group>"; };
+		922B1C9B497BBAD22C80AA8C /* WindowFrameRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowFrameRestorer.swift; sourceTree = "<group>"; };
 		92E85EE83A315989753EADF1 /* DiffHTMLRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffHTMLRenderer.swift; sourceTree = "<group>"; };
 		933D5B5E664E30B2E88EE3C7 /* WorkspaceGroupPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupPersistenceTests.swift; sourceTree = "<group>"; };
 		935FE280F97CB5A1DBD31113 /* NexGhosttyDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NexGhosttyDefaults.swift; sourceTree = "<group>"; };
@@ -376,6 +379,7 @@
 		D919B65B3E950098BF3405EA /* WebPaneConsoleScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneConsoleScript.swift; sourceTree = "<group>"; };
 		D9335AE3C92A37DD50A5715A /* AppReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducer.swift; sourceTree = "<group>"; };
 		D9EC869803E36C99B3653FF5 /* CLIInstallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIInstallService.swift; sourceTree = "<group>"; };
+		DAAD37C3132175B4E6A1076D /* WindowFrameClampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowFrameClampTests.swift; sourceTree = "<group>"; };
 		DAE917FD003D3FFD196DBF77 /* PaneSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneSearchOverlay.swift; sourceTree = "<group>"; };
 		DB65E3CCBB3A287C413A6015 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		DC371B0DE7B02828E9EDFE8E /* ClipboardImageHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardImageHelper.swift; sourceTree = "<group>"; };
@@ -500,6 +504,7 @@
 			isa = PBXGroup;
 			children = (
 				6762B22A5CA7CC5867025DA2 /* RootChromeView.swift */,
+				922B1C9B497BBAD22C80AA8C /* WindowFrameRestorer.swift */,
 				D2EE3D8224F44E30912F703D /* WindowTitleBar.swift */,
 			);
 			path = Chrome;
@@ -557,6 +562,7 @@
 				310A7BC6CBE6160568122935 /* WebPaneExecWrapperTests.swift */,
 				06845D1AC00D409504EDAB61 /* WebPaneURLNormalisationTests.swift */,
 				E52ED6952E87B8F73B2450D7 /* WebTabNewFocusTests.swift */,
+				DAAD37C3132175B4E6A1076D /* WindowFrameClampTests.swift */,
 				94D09D767C96B3F96E4DF7C5 /* WindowSpacesBindingTests.swift */,
 				28D977DB42ACD0B176225711 /* WorkspaceColorSelectionTests.swift */,
 				E01C66D4D59D04F6372D8AD7 /* WorkspaceDropTargetTests.swift */,
@@ -1016,6 +1022,7 @@
 				2AB792CA68A7B12D55C2F834 /* WebPaneExecWrapperTests.swift in Sources */,
 				53AD8B876DA9611918F5F585 /* WebPaneURLNormalisationTests.swift in Sources */,
 				21BAC97B61C9367EADD1315A /* WebTabNewFocusTests.swift in Sources */,
+				BB08FDFACF7C19A24AC75A95 /* WindowFrameClampTests.swift in Sources */,
 				DDD05A3B3A535DEA66485A47 /* WindowSpacesBindingTests.swift in Sources */,
 				5C4AA6204D49398B2E63A18B /* WorkspaceColorSelectionTests.swift in Sources */,
 				F01CDB667AE2A0CF2A825AD3 /* WorkspaceDropTargetTests.swift in Sources */,
@@ -1145,6 +1152,7 @@
 				630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */,
 				A8626EC08DC12588F912E1EF /* WebPaneStore.swift in Sources */,
 				2F440D3EB93B6C127A1FF003 /* WebPaneView.swift in Sources */,
+				34B728B745CB6B2F8D0E20EF /* WindowFrameRestorer.swift in Sources */,
 				EDF35E86B633BB1E8C3DE844 /* WindowSpacesBinding.swift in Sources */,
 				A100881CAD4946DC855B50A6 /* WindowTitleBar.swift in Sources */,
 				4AF9CB9A4E7CE871FBE1A6F2 /* WorkspaceColor.swift in Sources */,

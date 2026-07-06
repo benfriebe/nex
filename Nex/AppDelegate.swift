@@ -58,4 +58,12 @@ final class NexAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
     }
+
+    /// Opt into secure state restoration (macOS 14+). Required for the
+    /// system to persist window state and to silence the runtime warning;
+    /// the window frame + fullscreen restore itself lives in
+    /// `WindowFrameRestorer`.
+    func applicationSupportsSecureRestorableState(_: NSApplication) -> Bool {
+        true
+    }
 }
