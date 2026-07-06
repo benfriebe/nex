@@ -848,11 +848,15 @@ final class SocketServer: Sendable {
         }
     }
 
-    /// Shared scope extraction for the `web-*` commands. All of them
-    /// follow the same shape on the wire (paneID from NEX_PANE_ID
-    /// and/or --target with optional --workspace) and reject when
-    /// neither paneID nor target is present.
-    private static func parseWebTarget(
+    /// Shared scope extraction for pane-addressing commands (the
+    /// `pane-*` and `web-*` families). They all follow the same shape
+    /// on the wire (paneID from NEX_PANE_ID and/or --target with
+    /// optional --workspace) and reject when neither paneID nor target
+    /// is present. Commands whose `target` is mandatory guard the
+    /// returned optional `target` at the call site; commands that
+    /// accept `workspace` alone as an anchor (pane-split / pane-create)
+    /// do their own extraction and don't use this helper.
+    private static func parsePaneTarget(
         _ wire: WireMessage
     ) -> (paneID: UUID?, target: String?, workspace: String?)? {
         let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
@@ -926,11 +930,8 @@ final class SocketServer: Sendable {
             // `workspace` optionally narrows label resolution to a
             // specific workspace (useful when the same label is reused
             // across workspaces).
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
-            return (.paneClose(paneID: paneID, target: target, workspace: workspace), wire)
+            guard let scope = parsePaneTarget(wire) else { return nil }
+            return (.paneClose(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "pane-list" {
@@ -946,14 +947,11 @@ final class SocketServer: Sendable {
         if wire.command == "pane-capture" {
             // Mirrors `pane-close`: at least one of `pane_id` / `target` must
             // be present; the reducer resolves `target` to a concrete pane.
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard paneID != nil || target != nil else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.paneCapture(
-                paneID: paneID,
-                target: target,
-                workspace: workspace,
+                paneID: scope.paneID,
+                target: scope.target,
+                workspace: scope.workspace,
                 lines: wire.lines,
                 includeScrollback: wire.scrollback ?? false
             ), wire)
@@ -988,7 +986,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-navigate" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let url = wire.url, !url.isEmpty else { return nil }
             return (.webNavigate(
                 paneID: scope.paneID,
@@ -999,22 +997,22 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-url" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webURL(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-back" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webBack(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-forward" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webForward(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-reload" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webReload(
                 paneID: scope.paneID, target: scope.target, workspace: scope.workspace,
                 hard: wire.hard ?? false
@@ -1022,7 +1020,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-capture" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             let mode = (wire.mode?.isEmpty == true) ? "meta" : (wire.mode ?? "meta")
             return (.webCapture(
                 paneID: scope.paneID, target: scope.target, workspace: scope.workspace, mode: mode
@@ -1030,12 +1028,12 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-tabs" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webTabs(paneID: scope.paneID, target: scope.target, workspace: scope.workspace), wire)
         }
 
         if wire.command == "web-tab-new" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webTabNew(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1046,7 +1044,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-tab-close" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
             return (.webTabClose(
                 paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
@@ -1054,7 +1052,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-tab-select" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let tabRef = wire.tab, !tabRef.isEmpty else { return nil }
             return (.webTabSelect(
                 paneID: scope.paneID, target: scope.target, workspace: scope.workspace, tabRef: tabRef
@@ -1062,7 +1060,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-console" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webConsole(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1074,7 +1072,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-inspect" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webInspect(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1086,7 +1084,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-inspect-result" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webInspectResult(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1096,7 +1094,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-private" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let enabled = wire.isPrivate else { return nil }
             return (.webPrivate(
                 paneID: scope.paneID,
@@ -1107,7 +1105,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-cookies-list" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webCookiesList(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1116,7 +1114,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-cookies-clear" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             return (.webCookiesClear(
                 paneID: scope.paneID,
                 target: scope.target,
@@ -1127,7 +1125,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-cookies-delete" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let name = wire.name, !name.isEmpty else { return nil }
             return (.webCookiesDelete(
                 paneID: scope.paneID,
@@ -1139,7 +1137,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-click" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webClick(
                 paneID: scope.paneID,
@@ -1154,7 +1152,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-type" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty,
                   let text = wire.text else { return nil }
             return (.webType(
@@ -1169,7 +1167,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-q-text" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webQText(
                 paneID: scope.paneID,
@@ -1181,7 +1179,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-q-attr" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty,
                   let attribute = wire.attribute, !attribute.isEmpty else { return nil }
             return (.webQAttr(
@@ -1194,7 +1192,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-q-count" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webQCount(
                 paneID: scope.paneID,
@@ -1205,7 +1203,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-q-exists" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webQExists(
                 paneID: scope.paneID,
@@ -1216,7 +1214,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-q-dom" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webQDom(
                 paneID: scope.paneID,
@@ -1228,7 +1226,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-select" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty,
                   let valueOrLabel = wire.valueOrLabel else { return nil }
             return (.webSelect(
@@ -1241,7 +1239,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-scroll" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             let block = wire.block.flatMap { $0.isEmpty ? nil : $0 } ?? "center"
             let behavior = wire.behavior.flatMap { $0.isEmpty ? nil : $0 } ?? "instant"
@@ -1256,7 +1254,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-hover" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let selector = wire.selector, !selector.isEmpty else { return nil }
             return (.webHover(
                 paneID: scope.paneID,
@@ -1267,7 +1265,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-key" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let keyName = wire.key, !keyName.isEmpty else { return nil }
             let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
             return (.webKey(
@@ -1280,7 +1278,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-exec" {
-            guard let scope = parseWebTarget(wire),
+            guard let scope = parsePaneTarget(wire),
                   let script = wire.script, !script.isEmpty else { return nil }
             return (.webExec(
                 paneID: scope.paneID,
@@ -1291,7 +1289,7 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "web-wait" {
-            guard let scope = parseWebTarget(wire) else { return nil }
+            guard let scope = parsePaneTarget(wire) else { return nil }
             let selector = (wire.selector?.isEmpty == true) ? nil : wire.selector
             let urlMatch = (wire.urlMatch?.isEmpty == true) ? nil : wire.urlMatch
             // Exactly one of selector / urlMatch must be present. The
@@ -1327,12 +1325,10 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "pane-sync-exclude" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            guard let target = wire.target, !target.isEmpty,
+            guard let scope = parsePaneTarget(wire), let target = scope.target,
                   let excluded = wire.excluded else { return nil }
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
             return (.paneSyncExclude(
-                paneID: paneID, target: target, workspace: workspace, excluded: excluded
+                paneID: scope.paneID, target: target, workspace: scope.workspace, excluded: excluded
             ), wire)
         }
 
@@ -1343,11 +1339,9 @@ final class SocketServer: Sendable {
             // `resolvePaneTarget` requires either a UUID target or
             // an explicit `--workspace`. `target` and `key` are
             // both required and non-empty.
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            guard let target = wire.target, !target.isEmpty,
+            guard let scope = parsePaneTarget(wire), let target = scope.target,
                   let key = wire.key, !key.isEmpty else { return nil }
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            return (.paneSendKey(paneID: paneID, target: target, key: key, workspace: workspace), wire)
+            return (.paneSendKey(paneID: scope.paneID, target: target, key: key, workspace: scope.workspace), wire)
         }
 
         // `pane-send` / `pane-split` / `pane-create` / `pane-name` are
@@ -1357,13 +1351,11 @@ final class SocketServer: Sendable {
         // routing is by `--target` (UUID = global, label = needs scope)
         // and/or `--workspace`. Mirrors `pane-close` / `pane-send-key`.
         if wire.command == "pane-send" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            guard let target = wire.target, !target.isEmpty,
+            guard let scope = parsePaneTarget(wire), let target = scope.target,
                   let text = wire.text, !text.isEmpty else { return nil }
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
             return (.paneSend(
-                paneID: paneID, target: target, text: text,
-                workspace: workspace, bare: wire.bare ?? false
+                paneID: scope.paneID, target: target, text: text,
+                workspace: scope.workspace, bare: wire.bare ?? false
             ), wire)
         }
 
@@ -1395,13 +1387,10 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "pane-name" {
-            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            let target = (wire.target?.isEmpty == true) ? nil : wire.target
-            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
-            guard let name = wire.name, !name.isEmpty else { return nil }
             // Need either the caller pane or an explicit target to rename.
-            guard paneID != nil || target != nil else { return nil }
-            return (.paneName(paneID: paneID, target: target, workspace: workspace, name: name), wire)
+            guard let scope = parsePaneTarget(wire),
+                  let name = wire.name, !name.isEmpty else { return nil }
+            return (.paneName(paneID: scope.paneID, target: scope.target, workspace: scope.workspace, name: name), wire)
         }
 
         guard let paneIDString = wire.paneID,

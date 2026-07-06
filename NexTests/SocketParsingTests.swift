@@ -919,7 +919,7 @@ struct SocketParsingTests {
     }
 
     @Test func parseWebConsoleRequiresScope() {
-        // No pane_id and no target — `parseWebTarget` rejects.
+        // No pane_id and no target — `parsePaneTarget` rejects.
         let data = jsonData("""
         {"command":"web-console"}
         """)
