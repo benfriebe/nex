@@ -87,6 +87,7 @@ extension AppReducer {
              .createWorktree,
              .worktreeCreated,
              .worktreeCreationFailed,
+             .dismissWorktreeCreationError,
              .removeWorktreeAssociation,
              .autoLinkRepoForPane,
              .autoLinkResolved,

@@ -105,21 +105,39 @@ extension AppReducer {
             case .createWorktree(let workspaceID, let repoID, let worktreeName, let branchName):
                 guard let repo = state.repoRegistry[id: repoID],
                       state.workspaces[id: workspaceID] != nil else { return .none }
+                // Sanitize before the raw name reaches the filesystem path or
+                // the git ref — verbatim spaces/unsafe chars otherwise make
+                // `git worktree add` fail silently (issue #218). This is the
+                // single source of truth; the sheet's live preview shows the
+                // same sanitized result. A name that sanitizes to nothing
+                // usable surfaces the failure rather than shelling out.
+                guard let folderName = WorkspaceFeature.State.sanitizedGitName(from: worktreeName) else {
+                    return .send(.worktreeCreationFailed(
+                        workspaceID: workspaceID,
+                        error: "\"\(worktreeName)\" isn't a usable worktree name. Use letters, numbers, or - _ / . characters."
+                    ))
+                }
+                guard let safeBranch = WorkspaceFeature.State.sanitizedGitName(from: branchName) else {
+                    return .send(.worktreeCreationFailed(
+                        workspaceID: workspaceID,
+                        error: "\"\(branchName)\" isn't a usable branch name. Use letters, numbers, or - _ / . characters."
+                    ))
+                }
                 let basePath = state.settings.resolvedWorktreeBasePath(forRepoPath: repo.path)
-                let worktreePath = "\(basePath)/\(worktreeName)"
+                let worktreePath = "\(basePath)/\(folderName)"
                 return .run { send in
                     do {
-                        try await gitService.createWorktree(repo.path, worktreePath, branchName)
+                        try await gitService.createWorktree(repo.path, worktreePath, safeBranch)
                         await send(.worktreeCreated(
                             workspaceID: workspaceID,
                             repoID: repoID,
                             worktreePath: worktreePath,
-                            branchName: branchName
+                            branchName: safeBranch
                         ))
                     } catch {
                         await send(.worktreeCreationFailed(
                             workspaceID: workspaceID,
-                            error: error.localizedDescription
+                            error: worktreeErrorMessage(error)
                         ))
                     }
                 }
@@ -145,8 +163,14 @@ extension AppReducer {
                     ))
                 )
 
-            case .worktreeCreationFailed:
-                // UI can observe this for error display
+            case .worktreeCreationFailed(_, let error):
+                // Surface the failure so it isn't swallowed (issue #218). The
+                // inspector binds an alert to this transient error string.
+                state.worktreeCreationError = error
+                return .none
+
+            case .dismissWorktreeCreationError:
+                state.worktreeCreationError = nil
                 return .none
 
             case .removeWorktreeAssociation(let workspaceID, let associationID, let deleteWorktree):
@@ -519,4 +543,37 @@ extension AppReducer {
         }
         .cancellable(id: AutoUnlinkDebounceID.workspace(workspaceID), cancelInFlight: true)
     }
+}
+
+/// Turn a worktree-creation error into a message worth showing the user.
+/// `GitServiceError` is not `LocalizedError`, so `localizedDescription`
+/// yields the useless "operation couldn't be completed" string and drops the
+/// `stderr` git printed. Surfacing the raw stderr instead is what makes the
+/// alert actionable — e.g. "fatal: '<path>' already exists" or "is already
+/// checked out" — for the residual failures sanitization can't prevent
+/// (issue #218). Mirrors `GraftService.describeSyncError`.
+///
+/// `git worktree add` prints an informational "Preparing worktree (…)"
+/// progress line to stderr *before* the real "fatal: …" line, so the first
+/// line is misleading (it hid the "already exists" reason in testing). Prefer
+/// git's actual diagnostic — the last `fatal:` / `error:` line — and fall back
+/// to the last non-empty line, then the whole stderr.
+func worktreeErrorMessage(_ error: Error) -> String {
+    guard let git = error as? GitServiceError,
+          case .commandFailed(_, _, let stderr) = git,
+          let stderr, !stderr.isEmpty
+    else {
+        return error.localizedDescription
+    }
+    let lines = stderr
+        .split(separator: "\n")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    if let diagnostic = lines.last(where: {
+        let lower = $0.lowercased()
+        return lower.hasPrefix("fatal:") || lower.hasPrefix("error:")
+    }) {
+        return diagnostic
+    }
+    return lines.last ?? stderr
 }

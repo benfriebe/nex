@@ -43,6 +43,10 @@ struct AppReducer {
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
+        /// Transient (never persisted) message for a failed worktree
+        /// creation. The inspector binds an alert to it; cleared via
+        /// `.dismissWorktreeCreationError`. See issue #218.
+        var worktreeCreationError: String?
         var configHotkey = ConfigHotkeyFeature.State()
 
         /// Per-web-pane monotonic counter used as the URL bar focus
@@ -452,6 +456,7 @@ struct AppReducer {
         case createWorktree(workspaceID: UUID, repoID: UUID, worktreeName: String, branchName: String)
         case worktreeCreated(workspaceID: UUID, repoID: UUID, worktreePath: String, branchName: String)
         case worktreeCreationFailed(workspaceID: UUID, error: String)
+        case dismissWorktreeCreationError
         case removeWorktreeAssociation(workspaceID: UUID, associationID: UUID, deleteWorktree: Bool)
 
         // Auto-detected repo associations
