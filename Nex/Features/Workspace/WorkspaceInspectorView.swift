@@ -124,6 +124,22 @@ struct WorkspaceInspectorView: View {
                         } : nil
                     )
                 }
+                .alert(
+                    "Couldn’t create worktree",
+                    isPresented: Binding(
+                        get: { store.worktreeCreationError != nil },
+                        set: { presenting in
+                            if !presenting { store.send(.dismissWorktreeCreationError) }
+                        }
+                    ),
+                    presenting: store.worktreeCreationError
+                ) { _ in
+                    Button("OK", role: .cancel) {
+                        store.send(.dismissWorktreeCreationError)
+                    }
+                } message: { error in
+                    Text(error)
+                }
             }
         }
     }
@@ -442,9 +458,18 @@ struct CreateWorktreeSheet: View {
     @State private var branchEdited = false
     @Environment(\.chromeTheme) private var chromeTheme
 
+    /// The sanitized folder/branch names that will actually be created —
+    /// nil when the input has nothing usable left after sanitization.
+    private var sanitizedName: String? {
+        WorkspaceFeature.State.sanitizedGitName(from: worktreeName)
+    }
+
+    private var sanitizedBranch: String? {
+        WorkspaceFeature.State.sanitizedGitName(from: branchName)
+    }
+
     private var isValid: Bool {
-        !worktreeName.trimmingCharacters(in: .whitespaces).isEmpty
-            && !branchName.trimmingCharacters(in: .whitespaces).isEmpty
+        sanitizedName != nil && sanitizedBranch != nil
     }
 
     var body: some View {
@@ -486,10 +511,17 @@ struct CreateWorktreeSheet: View {
                     .onSubmit { if isValid { onCreate() } }
             }
 
-            Text("\(worktreeBasePath)/\(worktreeName.isEmpty ? "<name>" : worktreeName)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Live preview of what will actually be created. Names are
+            // sanitized (spaces/unsafe chars → hyphens) so the user sees the
+            // real folder + branch up front instead of a silent git failure
+            // on an invalid ref (issue #218).
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(worktreeBasePath)/\(sanitizedName ?? "<name>")")
+                Text("branch: \(sanitizedBranch ?? "<branch>")")
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack {
                 Button("Cancel", action: onCancel)

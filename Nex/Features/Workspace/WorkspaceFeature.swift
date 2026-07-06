@@ -227,6 +227,29 @@ struct WorkspaceFeature {
             let suffix = id.uuidString.prefix(8).lowercased()
             return base.isEmpty ? suffix : "\(base)-\(suffix)"
         }
+
+        /// Sanitize a user-entered worktree/branch name into a value that is
+        /// safe to use *both* as a filesystem path component and a git branch
+        /// ref. Unlike `makeSlug`, this preserves valid ref characters — slashes
+        /// (for `feature/foo` namespacing), dots, underscores, hyphens, and case
+        /// — so an already-valid name is a fixed point. Spaces and everything
+        /// else git rejects (`~^:?*[\@{` control chars, …) collapse to a single
+        /// hyphen; runs of `-`/`/`/`.` collapse and leading/trailing separators
+        /// are trimmed. Returns `nil` when nothing usable remains (input was
+        /// only whitespace or symbols).
+        ///
+        /// This is best-effort: it neutralises the common failures (notably
+        /// spaces, issue #218) but does not enforce every `git check-ref-format`
+        /// rule (e.g. a mid-path component beginning with `.`). Callers pair it
+        /// with a surfaced error so any residual git rejection is still visible.
+        static func sanitizedGitName(from name: String) -> String? {
+            var slug = name.replacing(/[^A-Za-z0-9\/._-]+/, with: "-")
+            slug = slug.replacing(/-{2,}/, with: "-")
+            slug = slug.replacing(/\/{2,}/, with: "/")
+            slug = slug.replacing(/\.{2,}/, with: ".")
+            slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-/._ "))
+            return slug.isEmpty ? nil : slug
+        }
     }
 
     enum Action: Equatable {
