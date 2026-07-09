@@ -283,6 +283,24 @@ final class PaneShortcutMonitor {
             if urlBarIsEditing { return nil }
             store.send(.webPaneTabCycleFocused(offset: 1))
             return true
+        case (24, true, _), (24, false, true): // ⌘= / ⌘⇧= (⌘+) → zoom in
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: 0.1)
+            )))
+            return true
+        case (27, true, _): // ⌘- → zoom out
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: -0.1)
+            )))
+            return true
+        case (29, true, _): // ⌘0 → reset zoom
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: nil)
+            )))
+            return true
         default:
             return nil
         }
@@ -444,6 +462,21 @@ final class PaneShortcutMonitor {
         case .webTabNext:
             return handleWebAction(activeWorkspaceID: id) { _ in
                 .webPaneTabCycleFocused(offset: 1)
+            }
+
+        case .webZoomIn:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: 0.1)))
+            }
+
+        case .webZoomOut:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: -0.1)))
+            }
+
+        case .webZoomReset:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: nil)))
             }
 
         default:

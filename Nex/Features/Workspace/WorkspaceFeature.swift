@@ -318,6 +318,8 @@ struct WorkspaceFeature {
         case webPaneBack(paneID: UUID)
         case webPaneForward(paneID: UUID)
         case webPaneReload(paneID: UUID, hard: Bool = false)
+        /// Adjust the active tab's page zoom by `delta`; `nil` resets to 1.0.
+        case webPaneZoom(paneID: UUID, delta: CGFloat?)
         /// Mirror coordinator-reported URL/title changes into state so
         /// persistence keeps a fresh URL even when the user navigates
         /// without typing in the URL bar.
@@ -830,6 +832,18 @@ struct WorkspaceFeature {
                 return .run { _ in
                     await MainActor.run {
                         _ = store.coordinator(for: paneID, isPrivate: isPrivate).reload(tabID: tab.id, hard: hard)
+                    }
+                }
+
+            case .webPaneZoom(let paneID, let delta):
+                guard let webState = state.webPanes[paneID],
+                      let tab = webState.activeTab else { return .none }
+                let store = webPaneStore
+                let isPrivate = webState.isPrivate
+                return .run { _ in
+                    await MainActor.run {
+                        _ = store.coordinator(for: paneID, isPrivate: isPrivate)
+                            .adjustPageZoom(tabID: tab.id, delta: delta)
                     }
                 }
 

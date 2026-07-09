@@ -459,6 +459,16 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return true
     }
 
+    /// Step the tab's page zoom by `delta` (nil resets to 1.0),
+    /// clamped to [0.5, 3.0].
+    @discardableResult
+    func adjustPageZoom(tabID: UUID, delta: CGFloat?) -> Bool {
+        guard let webView = webViews[tabID] else { return false }
+        let target = delta.map { webView.pageZoom + $0 } ?? 1.0
+        webView.pageZoom = min(max(target, 0.5), 3.0)
+        return true
+    }
+
     /// Toggle the Safari Web Inspector docked inside the tab's
     /// `WebPaneTabContainer` via WebKit's private `_inspector` SPI.
     /// Closes the inspector if it's currently visible; otherwise
