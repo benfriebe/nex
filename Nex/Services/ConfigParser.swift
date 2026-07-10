@@ -1,7 +1,8 @@
 import Foundation
 import os.log
 
-/// Parses Ghostty-style config files for keybinding entries.
+/// Parses Ghostty-style config files for keybinding, general-setting, and
+/// workspace-profile entries.
 enum ConfigParser {
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.benfriebe.nex",
@@ -103,6 +104,82 @@ enum ConfigParser {
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// A named environment-variable set assignable to a workspace.
+    struct Profile: Equatable {
+        let name: String
+        var env: [String: String]
+    }
+
+    /// Parse workspace-profile entries from a config file.
+    /// Returns an empty list if the file doesn't exist or has no profile entries.
+    static func parseProfiles(fromFile path: String) -> [Profile] {
+        guard FileManager.default.fileExists(atPath: path),
+              let contents = try? String(contentsOfFile: path, encoding: .utf8)
+        else {
+            return []
+        }
+        return parseProfiles(from: contents)
+    }
+
+    /// Parse `profile = <name>:<KEY>=<value>` entries from a config file's
+    /// contents — one variable per line; repeated lines with the same profile
+    /// name merge, later lines winning on key collision:
+    /// ```
+    /// profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work
+    /// profile = work:FOO=bar
+    /// profile = personal:CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+    /// ```
+    /// Profile names cannot contain `:` or `=`; values may contain both.
+    /// Key/value case is preserved, a leading `~` in the value is
+    /// tilde-expanded, and quotes are kept literal (no stripping) like the
+    /// rest of the config syntax. Profiles are returned in order of first
+    /// appearance.
+    static func parseProfiles(from contents: String) -> [Profile] {
+        var order: [String] = []
+        var envByName: [String: [String: String]] = [:]
+
+        for line in contents.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard trimmed.hasPrefix("profile") else { continue }
+            guard let eqIndex = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces)
+            guard key == "profile" else { continue }
+
+            let value = trimmed[trimmed.index(after: eqIndex)...]
+                .trimmingCharacters(in: .whitespaces)
+
+            // Split on the first ":" — everything before is the profile name,
+            // everything after is a single KEY=value assignment.
+            guard let colonIndex = value.firstIndex(of: ":") else {
+                logger.warning("Malformed profile line (missing ':'): \(value)")
+                continue
+            }
+            let name = value[..<colonIndex].trimmingCharacters(in: .whitespaces)
+            let assignment = value[value.index(after: colonIndex)...]
+
+            guard let varEqIndex = assignment.firstIndex(of: "=") else {
+                logger.warning("Malformed profile assignment (missing '='): \(value)")
+                continue
+            }
+            let envKey = assignment[..<varEqIndex].trimmingCharacters(in: .whitespaces)
+            var envValue = assignment[assignment.index(after: varEqIndex)...]
+                .trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !envKey.isEmpty else {
+                logger.warning("Malformed profile entry (empty name or key): \(value)")
+                continue
+            }
+
+            if envValue.hasPrefix("~") {
+                envValue = (envValue as NSString).expandingTildeInPath
+            }
+            if envByName[name] == nil { order.append(name) }
+            envByName[name, default: [:]][envKey] = envValue
+        }
+
+        return order.map { Profile(name: $0, env: envByName[$0] ?? [:]) }
     }
 
     /// Parse keybind entries from a config file's contents.

@@ -6,6 +6,7 @@ struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.openSettings) private var openSettings
     @Environment(\.chromeTheme) private var chromeTheme
+    @Dependency(\.workspaceProfiles) private var workspaceProfiles
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -908,6 +909,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
+            profileMenu(workspaceStore: workspaceStore)
             workspaceChangeIconMenu(workspaceID: workspaceID)
             labelsMenu(workspaceID: workspaceID, workspaceStore: workspaceStore)
             moveToGroupMenu(workspaceID: workspaceID)
@@ -922,6 +924,23 @@ struct WorkspaceListView: View {
                 store.send(.deleteWorkspace(workspaceID))
             }
             .disabled(store.workspaces.count <= 1)
+        }
+    }
+
+    /// "Profile ▸" submenu — assigns a workspace profile (named env-var set
+    /// from ~/.config/nex/config) to panes spawned in this workspace from
+    /// now on. Menu content is built at right-click time, so the profile
+    /// list is always fresh without a file watcher.
+    private func profileMenu(workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
+        Menu("Profile") {
+            Button("None") { workspaceStore.send(.setProfile(nil)) }
+            let profiles = workspaceProfiles.listProfiles()
+            if !profiles.isEmpty {
+                Divider()
+                ForEach(profiles, id: \.self) { name in
+                    Button(name) { workspaceStore.send(.setProfile(name)) }
+                }
+            }
         }
     }
 

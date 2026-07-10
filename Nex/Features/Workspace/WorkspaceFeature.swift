@@ -27,6 +27,11 @@ struct WorkspaceFeature {
         /// Optional avatar icon override (SF Symbol or emoji). `nil` falls
         /// back to the first letter of the workspace name.
         var icon: GroupIcon?
+        /// Name of the workspace profile (named env-var set from
+        /// ~/.config/nex/config) injected into every pane PTY spawned in
+        /// this workspace. Affects only panes spawned after assignment —
+        /// live PTYs keep the env they were born with. Persisted.
+        var profileName: String?
         var panes: IdentifiedArrayOf<Pane>
         var layout: PaneLayout
         var focusedPaneID: UUID?
@@ -140,7 +145,8 @@ struct WorkspaceFeature {
             lastAccessedAt: Date,
             labels: [String] = [],
             icon: GroupIcon? = nil,
-            webPanes: [UUID: WebPaneState] = [:]
+            webPanes: [UUID: WebPaneState] = [:],
+            profileName: String? = nil
         ) {
             self.id = id
             self.name = name
@@ -155,6 +161,7 @@ struct WorkspaceFeature {
             self.lastAccessedAt = lastAccessedAt
             self.labels = labels
             self.webPanes = webPanes
+            self.profileName = profileName
         }
 
         /// Read a pane wherever it lives — visible layout or the
@@ -255,6 +262,7 @@ struct WorkspaceFeature {
     enum Action: Equatable {
         case rename(String)
         case setColor(WorkspaceColor)
+        case setProfile(String?)
         case addLabel(String)
         case removeLabel(String)
         case setLabels([String])
@@ -438,6 +446,7 @@ struct WorkspaceFeature {
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.ghosttyConfig) var ghosttyConfig
+    @Dependency(\.workspaceProfiles) var workspaceProfiles
     @Dependency(\.gitService) var gitService
     @Dependency(\.editorService) var editorService
     @Dependency(\.webPaneStore) var webPaneStore
@@ -467,6 +476,13 @@ struct WorkspaceFeature {
 
             case .setColor(let color):
                 state.color = color
+                return .none
+
+            case .setProfile(let raw):
+                // Single normalization choke point for every entry path
+                // (socket, CLI, UI): trim, empty → nil (= no profile).
+                let trimmed = raw?.trimmingCharacters(in: .whitespaces)
+                state.profileName = (trimmed?.isEmpty == false) ? trimmed : nil
                 return .none
 
             case .addLabel(let raw):
@@ -506,11 +522,14 @@ struct WorkspaceFeature {
                 state.layout = .leaf(newPaneID)
                 state.setFocus(newPaneID)
                 let opacity = ghosttyConfig.backgroundOpacity
+                let profileName = state.profileName
                 return .run { _ in
+                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: resolvedDir,
-                        backgroundOpacity: opacity
+                        backgroundOpacity: opacity,
+                        env: env
                     )
                 }
 
@@ -537,11 +556,14 @@ struct WorkspaceFeature {
                 state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
+                let profileName = state.profileName
                 return .run { _ in
+                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,
-                        backgroundOpacity: opacity
+                        backgroundOpacity: opacity,
+                        env: env
                     )
                 }
 
@@ -573,11 +595,14 @@ struct WorkspaceFeature {
                 state.currentLayoutIndex = nil
 
                 let opacity = ghosttyConfig.backgroundOpacity
+                let profileName = state.profileName
                 return .run { _ in
+                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,
-                        backgroundOpacity: opacity
+                        backgroundOpacity: opacity,
+                        env: env
                     )
                 }
 
@@ -1404,17 +1429,20 @@ struct WorkspaceFeature {
                     state.panes[id: paneID]?.externalEditorCommand = command
                     let opacity = ghosttyConfig.backgroundOpacity
                     let cwd = pane.workingDirectory
+                    let profileName = state.profileName
                     return .run { _ in
                         if wasSearching {
                             await MainActor.run {
                                 MarkdownFindController.shared.close(paneID: paneID)
                             }
                         }
+                        let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
                         await surfaceManager.createSurface(
                             paneID: paneID,
                             workingDirectory: cwd,
                             backgroundOpacity: opacity,
-                            command: command
+                            command: command,
+                            env: env
                         )
                     }
                 }
@@ -1723,11 +1751,17 @@ struct WorkspaceFeature {
 
                 let opacity = ghosttyConfig.backgroundOpacity
                 let sessionID = snapshot.agentSessionID
+                let profileName = state.profileName
                 return .run { _ in
+                    // The profile env is baked into the spawned PTY, so the
+                    // `claude --resume` typed below inherits it — a reopened
+                    // agent stays on the workspace's account.
+                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,
-                        backgroundOpacity: opacity
+                        backgroundOpacity: opacity,
+                        env: env
                     )
                     if let sessionID {
                         try? await Task.sleep(for: .seconds(2))

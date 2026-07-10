@@ -76,6 +76,9 @@ struct PaneGridView: View {
     var favourites: [Favourite] = []
     var onToggleFavourite: ((String, String) -> Void)?
     var onOpenFavourite: ((UUID, String) -> Void)?
+    /// Workspace-profile name, threaded to `SurfaceContainerView` so its
+    /// lazy-create fallback injects the same env as the reducer effect.
+    var profileName: String?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.chromeTheme) private var chromeTheme
@@ -208,7 +211,8 @@ struct PaneGridView: View {
                 SurfaceContainerView(
                     paneID: pane.id,
                     workingDirectory: pane.workingDirectory,
-                    isFocused: pane.id == focusedPaneID
+                    isFocused: pane.id == focusedPaneID,
+                    profileName: profileName
                 )
             case .markdown:
                 if pane.isEditing {
@@ -220,7 +224,8 @@ struct PaneGridView: View {
                             paneID: pane.id,
                             workingDirectory: pane.workingDirectory,
                             isFocused: pane.id == focusedPaneID,
-                            command: editorCommand
+                            command: editorCommand,
+                            profileName: profileName
                         )
                     } else {
                         MarkdownEditorView(

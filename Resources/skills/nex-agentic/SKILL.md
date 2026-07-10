@@ -222,8 +222,51 @@ not `claude --resume` a session that has already exited.
 ### Workspace Commands
 
 ```bash
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray]
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--profile <name>]
+nex workspace profile <name-or-id> (<profile> | --clear)
 ```
+
+### Workspace Profiles (multi-account env injection)
+
+A workspace profile is a named env-var set defined in
+`~/.config/nex/config`, one variable per line (repeated lines with the
+same name merge, later lines win):
+
+```
+profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work
+profile = personal:CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+```
+
+Assign one to a workspace (`workspace create --profile`, `workspace
+profile`, the inspector picker, or the sidebar context menu) and every
+pane PTY spawned in that workspace from then on gets those vars plus
+`NEX_PROFILE=<name>`. The flagship use case is running multiple Claude
+Code accounts side by side — one workspace per `CLAUDE_CONFIG_DIR` —
+and the injection survives restart: restored panes respawn with the
+profile env, so auto-resumed agent sessions (`claude --resume`) stay
+on their workspace's account.
+
+Rules worth knowing:
+
+- **Spawn-time only.** Assignment changes never touch live PTYs; open
+  a fresh pane after assigning. Two corollaries: `pane
+  move-to-workspace` moves a live PTY, so the pane keeps its birth env
+  even when the destination workspace has a different profile; and a
+  workspace created from the GUI sheet spawns its first pane before
+  any profile is assigned — assign, then open a new pane.
+- Profile definitions are re-read from the config file on every spawn,
+  so editing values applies to new panes without restarting Nex.
+- Profile names cannot contain `:` or `=`; values may contain both.
+  Quotes in values are literal (no stripping). A leading `~` in the
+  value is tilde-expanded.
+- `NEX_PANE_ID` and `PATH` are reserved — profile entries for them are
+  ignored.
+- Assigning a profile with no definitions in the config is allowed
+  (`workspace create --profile` works before the config lines exist);
+  panes then get only `NEX_PROFILE=<name>` and a warning is logged.
+- `workspace profile` is fire-and-forget: an unknown or ambiguous
+  workspace name is a silent no-op (same semantics as `workspace
+  move`). UUIDs always win over names.
 
 ### File Commands
 

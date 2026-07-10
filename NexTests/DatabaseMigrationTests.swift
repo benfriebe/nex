@@ -28,6 +28,15 @@ struct DatabaseMigrationTests {
         }
     }
 
+    @Test func v17AddsWorkspaceProfileNameColumn() throws {
+        let db = try DatabaseService(inMemory: true)
+
+        try db.writer.read { db in
+            let columns = try Set(db.columns(in: "workspace").map(\.name))
+            #expect(columns.contains("profileName"))
+        }
+    }
+
     @Test func repoRecordInsertAndFetch() throws {
         let db = try DatabaseService(inMemory: true)
 

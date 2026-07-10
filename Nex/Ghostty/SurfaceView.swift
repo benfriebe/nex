@@ -32,7 +32,13 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         .string
     ]
 
-    init(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0, command: String? = nil) {
+    init(
+        paneID: UUID,
+        workingDirectory: String,
+        backgroundOpacity: Double = 1.0,
+        command: String? = nil,
+        env: [String: String] = [:]
+    ) {
         self.paneID = paneID
         super.init(frame: .zero)
         wantsLayer = true
@@ -59,48 +65,73 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
         let modifiedPath = helpersDir + ":" + currentPath
 
-        paneIDString.withCString { paneIDCStr in
-            modifiedPath.withCString { pathCStr in
-                var envVars: [ghostty_env_var_s] = []
+        // Every key/value is strdup'd; libghostty copies the strings during
+        // ghostty_surface_new, so all allocations are freed unconditionally
+        // after the call returns.
+        var envVars: [ghostty_env_var_s] = []
+        var envAllocations: [UnsafeMutablePointer<CChar>] = []
+        func appendEnv(_ key: String, _ value: String) {
+            let keyPtr = strdup(key)!
+            let valuePtr = strdup(value)!
+            envAllocations.append(keyPtr)
+            envAllocations.append(valuePtr)
+            var entry = ghostty_env_var_s()
+            entry.key = UnsafePointer(keyPtr)
+            entry.value = UnsafePointer(valuePtr)
+            envVars.append(entry)
+        }
 
-                let paneKey = strdup("NEX_PANE_ID")!
-                let paneVal = strdup(paneIDCStr)!
-                var paneEnv = ghostty_env_var_s()
-                paneEnv.key = UnsafePointer(paneKey)
-                paneEnv.value = UnsafePointer(paneVal)
-                envVars.append(paneEnv)
+        for (key, value) in Self.mergedEnvVars(
+            paneID: paneIDString, path: modifiedPath, profileEnv: env
+        ) {
+            appendEnv(key, value)
+        }
 
-                let pathKey = strdup("PATH")!
-                let pathVal = strdup(pathCStr)!
-                var pathEnv = ghostty_env_var_s()
-                pathEnv.key = UnsafePointer(pathKey)
-                pathEnv.value = UnsafePointer(pathVal)
-                envVars.append(pathEnv)
+        envVars.withUnsafeMutableBufferPointer { buffer in
+            config.env_vars = buffer.baseAddress
+            config.env_var_count = buffer.count
 
-                envVars.withUnsafeMutableBufferPointer { buffer in
-                    config.env_vars = buffer.baseAddress
-                    config.env_var_count = buffer.count
-
-                    workingDirectory.withCString { cwd in
-                        config.working_directory = cwd
-                        Self.withOptionalCString(command) { cmdPtr in
-                            config.command = cmdPtr
-                            let rawSurface = ghostty_surface_new(app, &config)
-                            if let rawSurface {
-                                ghosttySurface = GhosttySurface(surface: rawSurface)
-                                // Start unfocused — focus is granted explicitly via makeFirstResponder
-                                ghosttySurface?.setFocus(false)
-                            }
-                        }
+            workingDirectory.withCString { cwd in
+                config.working_directory = cwd
+                Self.withOptionalCString(command) { cmdPtr in
+                    config.command = cmdPtr
+                    let rawSurface = ghostty_surface_new(app, &config)
+                    if let rawSurface {
+                        ghosttySurface = GhosttySurface(surface: rawSurface)
+                        // Start unfocused — focus is granted explicitly via makeFirstResponder
+                        ghosttySurface?.setFocus(false)
                     }
                 }
-
-                free(paneKey)
-                free(paneVal)
-                free(pathKey)
-                free(pathVal)
             }
         }
+
+        for pointer in envAllocations {
+            free(pointer)
+        }
+    }
+
+    /// Env keys the app owns; workspace-profile entries for these are ignored.
+    private static let reservedEnvKeys: Set = ["NEX_PANE_ID", "PATH"]
+
+    /// Build the ordered env list for a new surface: built-ins first, then
+    /// profile vars in deterministic (sorted) order with reserved keys
+    /// filtered out. Pure — split out so the filtering/ordering is
+    /// unit-testable (`init` early-returns in test mode, so the actual
+    /// env assembly never runs under test).
+    static func mergedEnvVars(
+        paneID: String,
+        path: String,
+        profileEnv: [String: String]
+    ) -> [(key: String, value: String)] {
+        var result: [(key: String, value: String)] = [
+            ("NEX_PANE_ID", paneID),
+            ("PATH", path)
+        ]
+        for (key, value) in profileEnv.sorted(by: { $0.key < $1.key })
+            where !reservedEnvKeys.contains(key) {
+            result.append((key, value))
+        }
+        return result
     }
 
     /// Passes the UTF-8 C representation of `string` to `body`, or nil if `string` is nil.

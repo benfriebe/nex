@@ -57,6 +57,51 @@ struct PersistenceTests {
         #expect(loadedWS.focusedPaneID == paneID)
     }
 
+    @Test func profileNameRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let paneID1 = UUID()
+        let paneID2 = UUID()
+        let wsWithProfileID = UUID()
+        let wsWithoutProfileID = UUID()
+        let withProfile = WorkspaceFeature.State(
+            id: wsWithProfileID,
+            name: "Work",
+            slug: "work-\(wsWithProfileID.uuidString.prefix(8).lowercased())",
+            color: .blue,
+            panes: [Pane(id: paneID1)],
+            layout: .leaf(paneID1),
+            focusedPaneID: paneID1,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 1000),
+            profileName: "work"
+        )
+        let withoutProfile = WorkspaceFeature.State(
+            id: wsWithoutProfileID,
+            name: "Plain",
+            slug: "plain-\(wsWithoutProfileID.uuidString.prefix(8).lowercased())",
+            color: .green,
+            panes: [Pane(id: paneID2)],
+            layout: .leaf(paneID2),
+            focusedPaneID: paneID2,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 1000)
+        )
+
+        let state = AppReducer.State(
+            workspaces: [withProfile, withoutProfile],
+            activeWorkspaceID: wsWithProfileID
+        )
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        #expect(result.workspaces.count == 2)
+        #expect(result.workspaces.first(where: { $0.id == wsWithProfileID })?.profileName == "work")
+        #expect(result.workspaces.first(where: { $0.id == wsWithoutProfileID })?.profileName == nil)
+    }
+
     @Test func agentSessionIDRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)

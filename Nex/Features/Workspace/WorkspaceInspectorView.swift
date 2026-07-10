@@ -9,11 +9,15 @@ extension UUID: @retroactive Identifiable {
 struct WorkspaceInspectorView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.chromeTheme) private var chromeTheme
+    @Dependency(\.workspaceProfiles) private var workspaceProfiles
     @State private var isRepoPickerPresented = false
     @State private var isWorktreePickerPresented = false
     @State private var worktreeRepoID: UUID?
     @State private var worktreeName = ""
     @State private var worktreeBranchName = ""
+    /// Loaded once per inspector appearance — `listProfiles()` reads the
+    /// config file, which must stay out of the render path.
+    @State private var availableProfiles: [String] = []
 
     var body: some View {
         WithPerceptionTracking {
@@ -38,7 +42,7 @@ struct WorkspaceInspectorView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             // Workspace metadata
-                            workspaceSection(workspace)
+                            workspaceSection(workspace, activeID: activeID)
 
                             Divider()
 
@@ -55,6 +59,7 @@ struct WorkspaceInspectorView: View {
                 }
                 .frame(width: 280)
                 .background(chromeTheme.sidebarBackground)
+                .onAppear { availableProfiles = workspaceProfiles.listProfiles() }
                 .sheet(isPresented: $isRepoPickerPresented) {
                     RepoPickerView(
                         repos: store.repoRegistry,
@@ -144,7 +149,7 @@ struct WorkspaceInspectorView: View {
         }
     }
 
-    private func workspaceSection(_ workspace: WorkspaceFeature.State) -> some View {
+    private func workspaceSection(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Workspace", systemImage: "rectangle.stack")
                 .font(.subheadline.weight(.semibold))
@@ -161,6 +166,45 @@ struct WorkspaceInspectorView: View {
             Text("\(workspace.panes.count) pane\(workspace.panes.count == 1 ? "" : "s")")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+
+            profilePicker(workspace, activeID: activeID)
+        }
+    }
+
+    /// Workspace-profile assignment. Applies to panes spawned after the
+    /// change — live PTYs keep the env they were born with.
+    @ViewBuilder
+    private func profilePicker(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
+        if availableProfiles.isEmpty, workspace.profileName == nil {
+            Picker("Profile", selection: .constant(String?.none)) {
+                Text("None").tag(String?.none)
+            }
+            .pickerStyle(.menu)
+            .font(.caption)
+            .disabled(true)
+            Text("Define profiles in ~/.config/nex/config")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        } else {
+            // Keep an assigned-but-missing name selectable so the picker
+            // never shows blank after a profile is removed from the config.
+            let options: [String] = {
+                if let assigned = workspace.profileName, !availableProfiles.contains(assigned) {
+                    return availableProfiles + [assigned]
+                }
+                return availableProfiles
+            }()
+            Picker("Profile", selection: Binding(
+                get: { workspace.profileName },
+                set: { store.send(.workspaces(.element(id: activeID, action: .setProfile($0)))) }
+            )) {
+                Text("None").tag(String?.none)
+                ForEach(options, id: \.self) { name in
+                    Text(name).tag(String?.some(name))
+                }
+            }
+            .pickerStyle(.menu)
+            .font(.caption)
         }
     }
 

@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import SwiftUI
 
 /// NSViewRepresentable that bridges SurfaceView (NSView) into SwiftUI.
@@ -9,9 +10,17 @@ struct SurfaceContainerView: NSViewRepresentable {
     /// Optional launch command for the lazy-create fallback. When non-nil,
     /// a newly spawned surface runs this command instead of the default shell.
     var command: String?
+    /// Workspace-profile name for the lazy-create fallback. This view races
+    /// the reducer effect (first caller wins in SurfaceManager), so it must
+    /// inject the same profile env or profiles apply only when the effect
+    /// wins the race.
+    var profileName: String?
     @Environment(\.surfaceManager) private var surfaceManager
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.sidebarTextEditingActive) private var sidebarTextEditingActive
+    /// Resolved here — not at the call site — so the config-file read only
+    /// happens when the lazy-create branch actually spawns, not per render.
+    @Dependency(\.workspaceProfiles) private var workspaceProfiles
 
     func makeNSView(context _: Context) -> NSView {
         let container = NSView()
@@ -19,11 +28,13 @@ struct SurfaceContainerView: NSViewRepresentable {
 
         // Create surface lazily if it doesn't exist yet
         if surfaceManager.surface(for: paneID) == nil {
+            let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
             surfaceManager.createSurface(
                 paneID: paneID,
                 workingDirectory: workingDirectory,
                 backgroundOpacity: ghosttyConfig.backgroundOpacity,
-                command: command
+                command: command,
+                env: env
             )
         }
 

@@ -212,4 +212,106 @@ struct ConfigParserTests {
         #expect(cleared.globalHotkey == nil)
         #expect(cleared.focusFollowsMouse == true)
     }
+
+    // MARK: - Workspace profiles
+
+    @Test func parseProfilesSingleLine() {
+        let config = "profile = work:CLAUDE_CONFIG_DIR=/accounts/work"
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result.count == 1)
+        #expect(result[0].name == "work")
+        #expect(result[0].env == ["CLAUDE_CONFIG_DIR": "/accounts/work"])
+    }
+
+    @Test func parseProfilesMergesRepeatedLinesLaterWins() {
+        let config = """
+        profile = work:FOO=first
+        profile = work:BAR=kept
+        profile = work:FOO=second
+        """
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result.count == 1)
+        #expect(result[0].env == ["FOO": "second", "BAR": "kept"])
+    }
+
+    @Test func parseProfilesPreservesFirstAppearanceOrder() {
+        let config = """
+        profile = work:A=1
+        profile = personal:B=2
+        profile = work:C=3
+        """
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result.map(\.name) == ["work", "personal"])
+        #expect(result[0].env == ["A": "1", "C": "3"])
+    }
+
+    @Test func parseProfilesExpandsLeadingTilde() {
+        let config = "profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work"
+        let result = ConfigParser.parseProfiles(from: config)
+        let expected = ("~/.claude-accounts/work" as NSString).expandingTildeInPath
+        #expect(result[0].env["CLAUDE_CONFIG_DIR"] == expected)
+        #expect(result[0].env["CLAUDE_CONFIG_DIR"]?.hasPrefix("~") == false)
+    }
+
+    @Test func parseProfilesLeavesMidStringTildeAlone() {
+        let config = "profile = work:MARKER=a~b"
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result[0].env["MARKER"] == "a~b")
+    }
+
+    @Test func parseProfilesKeepsQuotesLiteral() {
+        // Quotes are not stripped (matches the rest of the config syntax),
+        // and a leading quote suppresses tilde expansion.
+        let config = "profile = work:DIR=\"~/path with spaces\""
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result[0].env["DIR"] == "\"~/path with spaces\"")
+    }
+
+    @Test func parseProfilesValueMayContainColonsAndEquals() {
+        let config = "profile = work:URL=https://example.com:8080/a=b"
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result[0].env["URL"] == "https://example.com:8080/a=b")
+    }
+
+    @Test func parseProfilesSkipsMalformedLines() {
+        let config = """
+        profile = missing-colon-entirely
+        profile = work:JUSTAKEY
+        profile = :K=V
+        profile = work:=value
+        profile = work:GOOD=yes
+        """
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result.count == 1)
+        #expect(result[0].name == "work")
+        #expect(result[0].env == ["GOOD": "yes"])
+    }
+
+    @Test func parseProfilesIgnoresCommentsAndOtherKeys() {
+        let config = """
+        # profile = commented:A=1
+        focus-follows-mouse = true
+        profiles = notme:A=1
+        profile-x = notme:A=1
+        keybind = super+d=split_right
+        profile = work:A=1
+        """
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result.count == 1)
+        #expect(result[0].name == "work")
+    }
+
+    @Test func parseProfilesPreservesCase() {
+        let config = "profile = Work:MixedCase=VaLuE"
+        let result = ConfigParser.parseProfiles(from: config)
+        #expect(result[0].name == "Work")
+        #expect(result[0].env == ["MixedCase": "VaLuE"])
+    }
+
+    @Test func parseProfilesMissingFileReturnsEmpty() {
+        let result = ConfigParser.parseProfiles(
+            fromFile: "/nonexistent/path/to/nex/config"
+        )
+        #expect(result.isEmpty)
+    }
 }
