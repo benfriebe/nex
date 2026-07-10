@@ -399,6 +399,10 @@ extension AppReducer {
                         index: index
                     )
 
+                case .groupList:
+                    handleGroupList(state: state, reply: reply)
+                    return .none
+
                 case .groupCreate(let name, let color):
                     return handleSocketGroupCreate(&state, name: name, color: color)
 
@@ -962,6 +966,43 @@ extension AppReducer {
         return .send(.persistState)
     }
 
+    /// Build and send the read-only `group-list` response. Groups follow
+    /// their header order in the sidebar; any unplaced groups are appended
+    /// in state order so a recoverable ordering inconsistency cannot hide
+    /// them from the CLI. Member workspaces follow each group's child order.
+    func handleGroupList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        var orderedGroupIDs = state.topLevelOrder.compactMap(\.groupID)
+        var seenGroupIDs = Set(orderedGroupIDs)
+        for group in state.groups where seenGroupIDs.insert(group.id).inserted {
+            orderedGroupIDs.append(group.id)
+        }
+
+        let groups: [[String: Any]] = orderedGroupIDs.compactMap { groupID in
+            guard let group = state.groups[id: groupID] else { return nil }
+            let workspaces: [[String: Any]] = state.workspaces(inGroup: groupID).map { workspace in
+                [
+                    "id": workspace.id.uuidString,
+                    "name": workspace.name
+                ]
+            }
+            var entry: [String: Any] = [
+                "id": group.id.uuidString,
+                "name": group.name,
+                "workspaces": workspaces
+            ]
+            if let color = group.color { entry["color"] = color.rawValue }
+            return entry
+        }
+
+        reply.send(["ok": true, "groups": groups])
+        reply.close()
+    }
+
     /// Shared success reply for `pane-split` / `pane-create`: the new
     /// pane's UUID is minted by the caller and threaded into the
     /// workspace action so the reply can return it before the pane is
@@ -1104,6 +1145,8 @@ extension AppReducer {
 
         var panes: [[String: Any]] = []
         for workspace in workspaces {
+            let parentGroup = state.groupID(forWorkspace: workspace.id)
+                .flatMap { state.groups[id: $0] }
             for paneID in workspace.layout.allPaneIDs {
                 guard let pane = workspace.panes[id: paneID] else { continue }
                 var entry: [String: Any] = [
@@ -1123,6 +1166,10 @@ extension AppReducer {
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
+                if let parentGroup {
+                    entry["group_id"] = parentGroup.id.uuidString
+                    entry["group_name"] = parentGroup.name
+                }
                 panes.append(entry)
             }
         }

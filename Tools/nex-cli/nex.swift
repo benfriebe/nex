@@ -21,6 +21,7 @@
 //   nex pane id
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+//   nex group list [--json] [--no-header]
 //   nex group create <name> [--color blue]
 //   nex group rename <name-or-id> <new-name>
 //   nex group delete <name-or-id> [--cascade]
@@ -206,6 +207,7 @@ func printUsage() {
       nex pane id
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+      nex group list [--json] [--no-header]
       nex group create <name> [--color blue]
       nex group rename <name-or-id> <new-name>
       nex group delete <name-or-id> [--cascade]
@@ -2752,11 +2754,30 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
 
 func handleGroup(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex group create|rename|delete [...]\n", stderr)
+        fputs("Usage: nex group list|create|rename|delete [...]\n", stderr)
         exit(1)
     }
 
     switch action {
+    case "list":
+        let asJSON = popSwitch("--json", from: &args)
+        let noHeader = popSwitch("--no-header", from: &args)
+        guard args.isEmpty else {
+            fputs("Usage: nex group list [--json] [--no-header]\n", stderr)
+            exit(1)
+        }
+
+        let json = decodeReply(["command": "group-list"], command: "nex group list")
+        let groups = (json["groups"] as? [[String: Any]]) ?? []
+        if asJSON {
+            if let out = try? JSONSerialization.data(withJSONObject: groups, options: [.sortedKeys]),
+               let string = String(data: out, encoding: .utf8) {
+                print(string)
+            }
+            return
+        }
+        printGroupTable(groups, noHeader: noHeader)
+
     case "create":
         guard let name = args.popFirst() else {
             fputs("Usage: nex group create <name> [--color blue]\n", stderr)
@@ -2796,8 +2817,59 @@ func handleGroup(_ args: inout ArraySlice<String>) {
 
     default:
         fputs("Unknown group action: \(action)\n", stderr)
-        fputs("Valid actions: create, rename, delete\n", stderr)
+        fputs("Valid actions: list, create, rename, delete\n", stderr)
         exit(1)
+    }
+}
+
+/// Render `group-list` as ID, NAME, COLOR, WORKSPACES. Member workspaces
+/// retain their sidebar order and display as `name (short-id)` pairs.
+func printGroupTable(_ groups: [[String: Any]], noHeader: Bool) {
+    struct Row {
+        let id: String
+        let name: String
+        let color: String
+        let workspaces: String
+    }
+
+    func shortUUID(_ value: String) -> String {
+        guard value.count >= 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
+    }
+
+    let rows: [Row] = groups.map { entry in
+        let members = (entry["workspaces"] as? [[String: Any]]) ?? []
+        let memberText = members.map { member in
+            let id = shortUUID((member["id"] as? String) ?? "")
+            let name = (member["name"] as? String) ?? ""
+            return name.isEmpty ? id : "\(name) (\(id))"
+        }.joined(separator: ", ")
+        return Row(
+            id: shortUUID((entry["id"] as? String) ?? ""),
+            name: (entry["name"] as? String) ?? "",
+            color: (entry["color"] as? String) ?? "-",
+            workspaces: memberText.isEmpty ? "-" : memberText
+        )
+    }
+
+    let headers = ["ID", "NAME", "COLOR", "WORKSPACES"]
+    var widths = headers.map(\.count)
+    for row in rows {
+        widths[0] = max(widths[0], row.id.count)
+        widths[1] = max(widths[1], row.name.count)
+        widths[2] = max(widths[2], row.color.count)
+    }
+
+    func pad(_ value: String, _ width: Int) -> String {
+        if value.count >= width { return value }
+        return value + String(repeating: " ", count: width - value.count)
+    }
+
+    if !noHeader {
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(headers[3])")
+    }
+    for row in rows {
+        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.color, widths[2]))  \(row.workspaces)")
     }
 }
 

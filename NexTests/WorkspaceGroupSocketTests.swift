@@ -15,6 +15,19 @@ struct WorkspaceGroupSocketTests {
     private static let groupAID = UUID(uuidString: "60000000-0000-0000-0000-0000000000A1")!
     private static let groupBID = UUID(uuidString: "60000000-0000-0000-0000-0000000000A2")!
 
+    private final class CaptureSink: @unchecked Sendable {
+        var payloads: [[String: Any]] = []
+        var closedCount = 0
+    }
+
+    private func makeCaptureHandle(_ sink: CaptureSink) -> SocketServer.ReplyHandle {
+        SocketServer.ReplyHandle(
+            id: 1,
+            send: { json in sink.payloads.append(json) },
+            close: { sink.closedCount += 1 }
+        )
+    }
+
     private static func makeWorkspace(id: UUID, name: String) -> WorkspaceFeature.State {
         let paneID = UUID()
         return WorkspaceFeature.State(
@@ -91,7 +104,65 @@ struct WorkspaceGroupSocketTests {
         #expect(state.resolveGroup("Missing") == nil)
     }
 
-    // MARK: - group-create / rename / delete
+    // MARK: - group-list / create / rename / delete
+
+    @Test func socketGroupListPreservesSidebarAndMemberOrder() async {
+        let ws1 = Self.makeWorkspace(id: Self.ws1ID, name: "Alpha")
+        let ws2 = Self.makeWorkspace(id: Self.ws2ID, name: "Beta")
+        let staleWorkspaceID = UUID(uuidString: "60000000-0000-0000-0000-000000000099")!
+        let populated = WorkspaceGroup(
+            id: Self.groupAID,
+            name: "Workers",
+            color: .blue,
+            childOrder: [Self.ws2ID, staleWorkspaceID, Self.ws1ID]
+        )
+        let empty = WorkspaceGroup(
+            id: Self.groupBID,
+            name: "Empty",
+            childOrder: []
+        )
+        let store = makeStore(
+            workspaces: [ws1, ws2],
+            groups: [populated, empty],
+            topLevelOrder: [.group(Self.groupBID), .group(Self.groupAID)]
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.groupList, reply: makeCaptureHandle(sink)))
+
+        #expect(sink.payloads.count == 1)
+        #expect(sink.closedCount == 1)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+
+        let groups = sink.payloads[0]["groups"] as? [[String: Any]] ?? []
+        #expect(groups.count == 2)
+        #expect(groups[0]["id"] as? String == Self.groupBID.uuidString)
+        #expect(groups[0]["name"] as? String == "Empty")
+        #expect(groups[0]["color"] == nil)
+        #expect((groups[0]["workspaces"] as? [[String: Any]])?.isEmpty == true)
+
+        #expect(groups[1]["id"] as? String == Self.groupAID.uuidString)
+        #expect(groups[1]["name"] as? String == "Workers")
+        #expect(groups[1]["color"] as? String == WorkspaceColor.blue.rawValue)
+        let members = groups[1]["workspaces"] as? [[String: Any]] ?? []
+        #expect(members.compactMap { $0["id"] as? String } == [
+            Self.ws2ID.uuidString,
+            Self.ws1ID.uuidString
+        ])
+        #expect(members.compactMap { $0["name"] as? String } == ["Beta", "Alpha"])
+    }
+
+    @Test func socketGroupListEmptyStateRepliesWithEmptyArray() async {
+        let store = makeStore()
+        let sink = CaptureSink()
+
+        await store.send(.socketMessage(.groupList, reply: makeCaptureHandle(sink)))
+
+        #expect(sink.payloads.count == 1)
+        #expect(sink.closedCount == 1)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect((sink.payloads[0]["groups"] as? [[String: Any]])?.isEmpty == true)
+    }
 
     @Test func socketGroupCreateSpawnsGroup() async {
         let store = makeStore()

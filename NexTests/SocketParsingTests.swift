@@ -441,6 +441,14 @@ struct SocketParsingTests {
 
     // MARK: - parseWireMessage — Group commands
 
+    @Test func parseGroupList() {
+        let data = jsonData("""
+        {"command":"group-list"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupList)
+    }
+
     @Test func parseGroupCreateMinimal() {
         let data = jsonData("""
         {"command":"group-create","name":"Monitors"}

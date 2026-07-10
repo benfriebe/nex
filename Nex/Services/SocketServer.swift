@@ -61,6 +61,7 @@ enum SocketMessage: Equatable {
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
+    case groupList
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
@@ -308,6 +309,7 @@ enum SocketMessage: Equatable {
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
+    "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
@@ -890,6 +892,10 @@ final class SocketServer: Sendable {
             // accidentally target a group with an empty name.
             let group = (wire.group?.isEmpty == true) ? nil : wire.group
             return (.workspaceMove(nameOrID: nameOrID, group: group, index: wire.index), wire)
+        }
+
+        if wire.command == "group-list" {
+            return (.groupList, wire)
         }
 
         if wire.command == "group-create" {
