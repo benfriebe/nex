@@ -182,7 +182,7 @@ struct WorkspaceInspectorView: View {
             .pickerStyle(.menu)
             .font(.caption)
             .disabled(true)
-            Text("Define profiles in ~/.config/nex/config")
+            Text("Define profiles in Settings → Profiles")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         } else {

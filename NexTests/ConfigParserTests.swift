@@ -314,4 +314,94 @@ struct ConfigParserTests {
         )
         #expect(result.isEmpty)
     }
+
+    @Test func parseProfilesRawModeKeepsTilde() {
+        let config = "profile = work:DIR=~/keep-me"
+        let result = ConfigParser.parseProfiles(from: config, expandTilde: false)
+        #expect(result[0].env["DIR"] == "~/keep-me")
+    }
+
+    @Test func writeProfilesPreservesOtherLinesAndReplacesProfiles() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-writeprofiles-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try """
+        # my comment
+        focus-follows-mouse = true
+        profile = old:GONE=1
+        keybind = super+d=split_right
+        """.write(to: tmp, atomically: true, encoding: .utf8)
+
+        ConfigParser.writeProfiles(
+            [.init(name: "work", env: ["B": "2", "A": "1"])],
+            toFile: tmp.path
+        )
+
+        let contents = try String(contentsOfFile: tmp.path, encoding: .utf8)
+        #expect(contents.contains("# my comment"))
+        #expect(contents.contains("focus-follows-mouse = true"))
+        #expect(contents.contains("keybind = super+d=split_right"))
+        #expect(!contents.contains("old:GONE"))
+        // Keys serialize sorted within a profile.
+        let aRange = contents.range(of: "profile = work:A=1")
+        let bRange = contents.range(of: "profile = work:B=2")
+        #expect(aRange != nil && bRange != nil)
+        if let aRange, let bRange {
+            #expect(aRange.lowerBound < bRange.lowerBound)
+        }
+
+        // Round-trip: raw parse returns exactly what was written.
+        let reparsed = ConfigParser.parseProfiles(fromFile: tmp.path, expandTilde: false)
+        #expect(reparsed == [ConfigParser.Profile(name: "work", env: ["A": "1", "B": "2"])])
+    }
+
+    @Test func writeProfilesSkipsEmptyNamesAndKeys() {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-writeprofiles-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        ConfigParser.writeProfiles(
+            [
+                .init(name: "  ", env: ["A": "1"]),
+                .init(name: "ok", env: ["": "x", "GOOD": "y"])
+            ],
+            toFile: tmp.path
+        )
+
+        let reparsed = ConfigParser.parseProfiles(fromFile: tmp.path, expandTilde: false)
+        #expect(reparsed == [ConfigParser.Profile(name: "ok", env: ["GOOD": "y"])])
+    }
+
+    @Test func writeProfilesEmptyListRemovesAllProfileLines() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-writeprofiles-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try """
+        theme = nord
+        profile = work:A=1
+        profile = personal:B=2
+        """.write(to: tmp, atomically: true, encoding: .utf8)
+
+        ConfigParser.writeProfiles([], toFile: tmp.path)
+
+        let contents = try String(contentsOfFile: tmp.path, encoding: .utf8)
+        #expect(contents.contains("theme = nord"))
+        #expect(!contents.contains("profile ="))
+        #expect(ConfigParser.parseProfiles(fromFile: tmp.path).isEmpty)
+    }
+
+    @Test func writeProfilesCreatesFileWhenMissing() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-writeprofiles-dir-\(UUID().uuidString)")
+        let tmp = dir.appendingPathComponent("config")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        ConfigParser.writeProfiles(
+            [.init(name: "work", env: ["A": "1"])],
+            toFile: tmp.path
+        )
+
+        let reparsed = ConfigParser.parseProfiles(fromFile: tmp.path, expandTilde: false)
+        #expect(reparsed == [ConfigParser.Profile(name: "work", env: ["A": "1"])])
+    }
 }

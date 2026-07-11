@@ -137,6 +137,7 @@ All services are registered as TCA dependencies: `surfaceManager`, `persistenceS
 
 ### Workspace profiles
 - Named env-var sets in the config file (`profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work`), assigned per workspace (`WorkspaceFeature.State.profileName`, persisted in `WorkspaceRecord`). `WorkspaceProfilesClient` re-reads the config per call — definitions stay fresh without a watcher. Env is injected at surface spawn (`SurfaceView.init` → `ghostty_surface_config_s.env_vars`) plus a `NEX_PROFILE=<name>` marker; `NEX_PANE_ID`/`PATH` are reserved (built-ins win). Spawn-time only: live PTYs keep their birth env. Every spawn path threads env — reducer effects, the socket group-create path, the restart-restore path (so `claude --resume` lands in a PTY already on the right account), and the `SurfaceContainerView.makeNSView` lazy-create fallback (which races the reducer effect; both must inject or profiles get flaky). Multi-account Claude Code is the flagship use case: one workspace per `CLAUDE_CONFIG_DIR`.
+- **Definition management**: hand-edit the config file, or Settings → Profiles (`ProfilesSettingsView`, storeless — the config file is the source of truth; loads with `parseProfiles(expandTilde: false)` so `~` values round-trip unexpanded, writes through `ConfigParser.writeProfiles`, which replaces all `profile` lines while preserving every other config line).
 
 ## Key Conventions
 

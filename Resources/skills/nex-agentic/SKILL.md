@@ -230,7 +230,8 @@ nex workspace profile <name-or-id> (<profile> | --clear)
 
 A workspace profile is a named env-var set defined in
 `~/.config/nex/config`, one variable per line (repeated lines with the
-same name merge, later lines win):
+same name merge, later lines win). Manage them by hand in the config
+file or via **Settings → Profiles** (both write the same lines):
 
 ```
 profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work

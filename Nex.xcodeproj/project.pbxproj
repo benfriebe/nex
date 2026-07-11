@@ -105,6 +105,7 @@
 		81044184C0ED04C2EC6B1854 /* WebPaneActuatorScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6BA91C8A3C092BFBD95DF /* WebPaneActuatorScript.swift */; };
 		811C87C669F7A920EE05E8DA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 3A812A87D56E4976C8BF532E /* GRDB */; };
 		8132EF9FB6ACF51F7AEB57CE /* NexCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20CEA0FEF28F3972BCE7D /* NexCommands.swift */; };
+		81B51760F01331F38614C438 /* ProfilesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */; };
 		838F2F85AED6591FE3D2C9C9 /* WebBatchInspectPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998480F19F798025639D20A7 /* WebBatchInspectPanel.swift */; };
 		840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */; };
 		8BACC3111C7193B1AC30B40B /* PaneLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30D306AA2907696B7A28F9DA /* PaneLayout.swift */; };
@@ -240,6 +241,7 @@
 		140051AE1CBF1087B5F289F7 /* RecursiveFSWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecursiveFSWatcher.swift; sourceTree = "<group>"; };
 		150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingOutsideNexTests.swift; sourceTree = "<group>"; };
 		1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteItem.swift; sourceTree = "<group>"; };
+		1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesSettingsView.swift; sourceTree = "<group>"; };
 		191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenamePaneSheet.swift; sourceTree = "<group>"; };
 		191E820170ADF2ADB58B8079 /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		1A198A2F5EA992907A3031ED /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -498,6 +500,7 @@
 			children = (
 				439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */,
 				9D01D7C0300DB8B0987C7F58 /* LabelPresetsSettingsView.swift */,
+				1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */,
 				8322D3C28268495A01EA0597 /* SettingsFeature.swift */,
 				523DE37561222E411737C3F8 /* SettingsView.swift */,
 			);
@@ -1118,6 +1121,7 @@
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
 				CB44792B290665E1AFEAD3E6 /* PresetsFeature.swift in Sources */,
+				81B51760F01331F38614C438 /* ProfilesSettingsView.swift in Sources */,
 				FF3255F9A9213474DC14A2A0 /* QuitGate.swift in Sources */,
 				9443792BCB5BEA5B06312F00 /* RecursiveFSWatcher.swift in Sources */,
 				C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */,

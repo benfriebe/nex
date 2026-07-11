@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Identifier for the Settings TabView's tabs, used for deep-linking
 /// from the web pane's "Manage favourites…" menu.
-enum SettingsTab: Hashable { case general, appearance, repos, labels, keybindings, web }
+enum SettingsTab: Hashable { case general, appearance, repos, labels, profiles, keybindings, web }
 
 struct SettingsView: View {
     let store: StoreOf<AppReducer>
@@ -39,6 +39,12 @@ struct SettingsView: View {
                         Label("Labels", systemImage: "tag")
                     }
                     .tag(SettingsTab.labels)
+
+                ProfilesSettingsView()
+                    .tabItem {
+                        Label("Profiles", systemImage: "person.badge.key")
+                    }
+                    .tag(SettingsTab.profiles)
 
                 KeybindingsSettingsView(store: store)
                     .tabItem {
