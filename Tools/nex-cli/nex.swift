@@ -353,6 +353,48 @@ func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
     """, stream)
 }
 
+func printPaneCaptureUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+    Prints a pane's terminal contents to stdout. Without --target, captures the
+    calling pane (requires NEX_PANE_ID).
+
+    Options:
+      --target <name-or-uuid>     Pane to read (UUID = global, label needs scope).
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --lines N                   Limit to the last N lines (positive integer).
+      --scrollback                Include the full scrollback, not just the viewport.
+      -h, --help                  Show this help.
+
+    The target is flag-only: a bare positional argument is rejected on purpose so
+    `nex pane capture <uuid>` can't silently fall back to capturing the caller.
+    Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneListUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane list [--workspace <name-or-uuid> | --current] [--json] [--no-header]
+
+    Lists panes as a table (or a JSON array with --json).
+
+    Options:
+      --workspace <name-or-uuid>  Only panes in this workspace.
+      --current                   Only the calling pane's workspace (requires NEX_PANE_ID).
+      --json                      Print a JSON array instead of the table.
+      --no-header                 Omit the table header row.
+      -h, --help                  Show this help.
+
+    --workspace and --current are mutually exclusive. This command takes no
+    positional arguments. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
 /// Send a pane-mutation command (`split` / `create` / `name`) and print
 /// the structured `{ok,...}` reply. Exits non-zero on transport failure,
 /// empty reply (Nex too old for request/response on this command),
@@ -411,6 +453,36 @@ func extractPositionalTail(from args: inout ArraySlice<String>) -> [String] {
     let tail = Array(args[args.index(after: idx)...])
     args = args[..<idx]
     return tail
+}
+
+/// After a subcommand has consumed every flag it recognises, reject
+/// whatever is left so a stray positional or a mistyped flag fails loudly
+/// instead of being silently dropped (issue #237). Silent fallthrough is
+/// especially dangerous for verbs whose no-target default is "the calling
+/// pane" (e.g. `pane capture`): `nex pane capture <uuid>` would otherwise
+/// drop the positional and capture the caller's own pane with exit 0.
+///
+/// `positionalHint` is appended to the unexpected-positional message to
+/// point the caller at the flag they meant to use (e.g.
+/// "target panes with --target <name-or-uuid>"). `usage`, when supplied,
+/// prints the subcommand's usage block to stderr before exiting.
+/// A no-op when `args` is empty, so callers can invoke it unconditionally.
+func rejectLeftoverArgs(
+    _ args: ArraySlice<String>,
+    command: String,
+    positionalHint: String? = nil,
+    usage: ((UnsafeMutablePointer<FILE>) -> Void)? = nil
+) {
+    guard let first = args.first else { return }
+    if first.hasPrefix("-") {
+        fputs("\(command): unknown option \(first)\n", stderr)
+    } else if let positionalHint {
+        fputs("\(command): unexpected argument '\(first)' — \(positionalHint)\n", stderr)
+    } else {
+        fputs("\(command): unexpected argument '\(first)'\n", stderr)
+    }
+    usage?(stderr)
+    exit(1)
 }
 
 func requirePaneID() -> String {
@@ -863,6 +935,9 @@ func handlePane(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        // `pane split` takes no positionals; reject stray args / unknown
+        // flags instead of silently dropping them (issue #237).
+        rejectLeftoverArgs(args, command: "nex pane split", usage: printPaneSplitUsage)
         let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         guard target != nil || workspace != nil || originPaneID != nil else {
             fputs("nex pane split: requires --target <name-or-uuid> or --workspace <name-or-id> when called from outside a Nex pane\n", stderr)
@@ -888,6 +963,9 @@ func handlePane(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        // `pane create` takes no positionals; reject stray args / unknown
+        // flags instead of silently dropping them (issue #237).
+        rejectLeftoverArgs(args, command: "nex pane create", usage: printPaneCreateUsage)
         let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         guard target != nil || workspace != nil || originPaneID != nil else {
             fputs("nex pane create: requires --workspace <name-or-id> or --target <name-or-uuid> when called from outside a Nex pane\n", stderr)
@@ -2536,10 +2614,17 @@ private func sendWebReplyAndPrintCookiesDelete(_ payload: [String: Any]) {
 // MARK: - pane list
 
 func handlePaneList(_ args: inout ArraySlice<String>) {
+    if args.contains("--help") || args.contains("-h") {
+        printPaneListUsage(stream: stdout)
+        exit(0)
+    }
     let workspace = parseFlag("--workspace", from: &args)
     let currentOnly = popSwitch("--current", from: &args)
     let asJSON = popSwitch("--json", from: &args)
     let noHeader = popSwitch("--no-header", from: &args)
+    // `pane list` takes no positionals; reject stray args and unknown
+    // flags rather than silently ignoring them (issue #237).
+    rejectLeftoverArgs(args, command: "nex pane list", usage: printPaneListUsage)
 
     if workspace != nil, currentOnly {
         fputs("pane list: --workspace and --current are mutually exclusive\n", stderr)
@@ -2655,10 +2740,22 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
 // MARK: - pane capture
 
 func handlePaneCapture(_ args: inout ArraySlice<String>) {
+    if args.contains("--help") || args.contains("-h") {
+        printPaneCaptureUsage(stream: stdout)
+        exit(0)
+    }
     let target = parseFlag("--target", from: &args)
     let workspace = parseFlag("--workspace", from: &args)
     let linesArg = parseFlag("--lines", from: &args)
     let scrollback = popSwitch("--scrollback", from: &args)
+    // The target is flag-only. Reject any stray positional or unknown
+    // flag so `nex pane capture <uuid>` fails loudly instead of silently
+    // falling back to capturing the calling pane (issue #237).
+    rejectLeftoverArgs(
+        args, command: "nex pane capture",
+        positionalHint: "target panes with --target <name-or-uuid>",
+        usage: printPaneCaptureUsage
+    )
 
     var lines: Int?
     if let linesArg {

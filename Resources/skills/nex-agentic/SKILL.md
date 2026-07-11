@@ -118,6 +118,15 @@ nex pane send [--bare] [--json] --target <label-or-uuid> [--workspace <name-or-u
 # List panes (only command that returns data — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 
+# Read another pane's terminal contents as text (viewport, or full
+# scrollback with --scrollback). WITHOUT --target it captures the CALLING
+# pane — always pass --target to read a worker. The target is flag-only:
+# a bare `nex pane capture <uuid>` is rejected, not treated as --target.
+nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+# Move a pane to another workspace (creates it with --create).
+nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+
 # Print current pane's UUID (local; no socket). Exit 1 if not in Nex.
 nex pane id
 ```
