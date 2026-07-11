@@ -59,6 +59,14 @@ enum SocketMessage: Equatable {
     /// Workspace commands
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
+    /// Delete a single workspace by name-or-id. Request/response
+    /// (`replyCommandAllowlist`) — the CLI loops one request per id for
+    /// bulk `nex workspace delete a b c`, and reads back the deleted
+    /// workspace's directory so `--prune-worktree` can remove it.
+    /// `force` (from `--force`/`-y`) bypasses the running-agents guard:
+    /// without it, deleting a workspace that still has active agents is
+    /// refused (mirrors the app-quit warning).
+    case workspaceDelete(nameOrID: String, force: Bool)
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
     case groupCreate(name: String, color: WorkspaceColor?)
@@ -311,6 +319,7 @@ private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
+    "workspace-create", "workspace-delete",
     "graft-start", "graft-stop", "graft-status",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
@@ -719,6 +728,8 @@ final class SocketServer: Sendable {
         // Group/workspace-management fields
         var newName: String?
         var cascade: Bool?
+        /// `workspace-delete --force`/`-y` — bypass the running-agents guard.
+        var force: Bool?
         var index: Int?
         var group: String?
         // Request/response — `pane-list` filters
@@ -817,7 +828,7 @@ final class SocketServer: Sendable {
             case sessionID = "session_id"
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
-            case cascade, index, group
+            case cascade, force, index, group
             case workspace, scope
             case reuse
             case repoPath = "repo_path"
@@ -890,6 +901,11 @@ final class SocketServer: Sendable {
             // accidentally target a group with an empty name.
             let group = (wire.group?.isEmpty == true) ? nil : wire.group
             return (.workspaceMove(nameOrID: nameOrID, group: group, index: wire.index), wire)
+        }
+
+        if wire.command == "workspace-delete" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.workspaceDelete(nameOrID: nameOrID, force: wire.force ?? false), wire)
         }
 
         if wire.command == "group-create" {
