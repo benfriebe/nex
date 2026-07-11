@@ -3,6 +3,10 @@ import SwiftUI
 /// Settings tab for creating and editing workspace profiles — the named
 /// env-var sets injected into pane PTYs (see `WorkspaceProfilesClient`).
 ///
+/// Master-detail layout (Terminal.app profiles style): profile list on the
+/// left with add/remove controls, selected profile's name + variables on
+/// the right.
+///
 /// The config file is the source of truth: this view loads it on appear and
 /// writes through on every edit via `ConfigParser.writeProfiles`. Because
 /// profile definitions are re-read from disk at every surface spawn, edits
@@ -28,21 +32,20 @@ struct ProfilesSettingsView: View {
     }
 
     @State private var profiles: [EditableProfile] = []
+    @State private var selectedID: UUID?
     /// Guards write-through until the initial load has populated state.
     @State private var loaded = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if profiles.isEmpty {
-                emptyState
-            } else {
-                List {
-                    ForEach($profiles) { $profile in
-                        profileSection($profile)
-                    }
-                }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
-                .scrollContentBackground(.hidden)
+            HStack(spacing: 0) {
+                profileList
+                    .frame(width: 170)
+
+                Divider()
+
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             Divider()
@@ -57,9 +60,8 @@ struct ProfilesSettingsView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Button("Add Profile") { addProfile() }
             }
-            .padding(12)
+            .padding(10)
         }
         .background(chromeTheme.surfaceBackground)
         .onAppear(perform: load)
@@ -69,46 +71,82 @@ struct ProfilesSettingsView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "person.badge.key")
-                .font(.system(size: 36))
-                .foregroundStyle(.tertiary)
-            Text("No workspace profiles")
-                .font(.headline)
-            Text("A profile is a named set of environment variables injected into every pane opened in a workspace it's assigned to — e.g. one CLAUDE_CONFIG_DIR per Claude account. Assign profiles from the workspace context menu or inspector.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+    // MARK: - Left column
+
+    private var profileList: some View {
+        VStack(spacing: 0) {
+            List(selection: $selectedID) {
+                ForEach(profiles) { profile in
+                    Label(
+                        profile.name.isEmpty ? "Untitled" : profile.name,
+                        systemImage: "person.badge.key"
+                    )
+                    .tag(profile.id)
+                }
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+
+            Divider()
+
+            // Standard macOS add/remove strip.
+            HStack(spacing: 0) {
+                Button(action: addProfile) {
+                    Image(systemName: "plus")
+                        .frame(width: 24, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Add profile")
+
+                Divider().frame(height: 14)
+
+                Button(action: removeSelectedProfile) {
+                    Image(systemName: "minus")
+                        .frame(width: 24, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(selectedID == nil)
+                .help("Remove selected profile")
+
+                Spacer()
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func profileSection(_ profile: Binding<EditableProfile>) -> some View {
-        Section {
-            ForEach(profile.vars) { $variable in
-                varRow($variable, in: profile)
-            }
+    // MARK: - Right column
 
-            HStack {
-                Button {
-                    profile.wrappedValue.vars.append(EditableVar(key: "", value: ""))
-                } label: {
-                    Label("Add Variable", systemImage: "plus")
-                        .font(.caption)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                if profile.wrappedValue.vars.allSatisfy({ $0.key.trimmingCharacters(in: .whitespaces).isEmpty }) {
-                    Text("A profile needs at least one variable to be saved.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+    @ViewBuilder
+    private var detail: some View {
+        if let index = profiles.firstIndex(where: { $0.id == selectedID }) {
+            profileDetail($profiles[index])
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "person.badge.key")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.tertiary)
+                Text(profiles.isEmpty ? "No workspace profiles" : "No profile selected")
+                    .font(.headline)
+                Text("A profile is a named set of environment variables injected into every pane opened in a workspace it's assigned to — e.g. one CLAUDE_CONFIG_DIR per Claude account. Assign profiles from the workspace context menu or inspector.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+                if profiles.isEmpty {
+                    Button("Add Profile", action: addProfile)
                 }
             }
-        } header: {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+        }
+    }
+
+    private func profileDetail(_ profile: Binding<EditableProfile>) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
+                Text("Name")
+                    .foregroundStyle(.secondary)
                 TextField(
                     "Profile name",
                     text: Binding(
@@ -118,22 +156,39 @@ struct ProfilesSettingsView: View {
                         set: { profile.wrappedValue.name = sanitizedName($0) }
                     )
                 )
-                .textFieldStyle(.plain)
-                .font(.subheadline.weight(.semibold))
-
-                Spacer()
-
-                Button {
-                    profiles.removeAll { $0.id == profile.wrappedValue.id }
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Delete profile")
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 240)
             }
+
+            Text("Environment Variables")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if profile.wrappedValue.vars.isEmpty {
+                Text("No variables yet — a profile needs at least one to be saved.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(profile.vars) { $variable in
+                            varRow($variable, in: profile)
+                        }
+                    }
+                }
+            }
+
+            Button {
+                profile.wrappedValue.vars.append(EditableVar(key: "", value: ""))
+            } label: {
+                Label("Add Variable", systemImage: "plus")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+
+            Spacer(minLength: 0)
         }
+        .padding(14)
     }
 
     private func varRow(
@@ -150,26 +205,28 @@ struct ProfilesSettingsView: View {
                 )
             )
             .textFieldStyle(.roundedBorder)
-            .font(.system(.body, design: .monospaced))
-            .frame(width: 200)
+            .font(.system(size: 12, design: .monospaced))
+            .frame(width: 180)
 
             Text("=")
                 .foregroundStyle(.tertiary)
 
             TextField("value (leading ~ expands at spawn)", text: variable.value)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
 
             Button {
                 profile.wrappedValue.vars.removeAll { $0.id == variable.wrappedValue.id }
             } label: {
                 Image(systemName: "minus.circle")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("Remove variable")
         }
     }
+
+    // MARK: - Model plumbing
 
     private func sanitizedName(_ raw: String) -> String {
         raw.filter { $0 != ":" && $0 != "=" }
@@ -188,6 +245,7 @@ struct ProfilesSettingsView: View {
                     .map { EditableVar(key: $0.key, value: $0.value) }
             )
         }
+        selectedID = profiles.first?.id
         loaded = true
     }
 
@@ -208,15 +266,27 @@ struct ProfilesSettingsView: View {
 
     private func addProfile() {
         let existing = Set(profiles.map(\.name))
-        var name = "profile-\(profiles.count + 1)"
         var counter = profiles.count + 1
+        var name = "profile-\(counter)"
         while existing.contains(name) {
             counter += 1
             name = "profile-\(counter)"
         }
-        profiles.append(EditableProfile(
+        let profile = EditableProfile(
             name: name,
             vars: [EditableVar(key: "", value: "")]
-        ))
+        )
+        profiles.append(profile)
+        selectedID = profile.id
+    }
+
+    private func removeSelectedProfile() {
+        guard let selectedID,
+              let index = profiles.firstIndex(where: { $0.id == selectedID })
+        else { return }
+        profiles.remove(at: index)
+        self.selectedID = profiles.indices.contains(index)
+            ? profiles[index].id
+            : profiles.last?.id
     }
 }
