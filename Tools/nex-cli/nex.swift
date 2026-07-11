@@ -19,8 +19,9 @@
 //   nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane id
-//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
+//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--json]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+//   nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 //   nex group create <name> [--color blue]
 //   nex group rename <name-or-id> <new-name>
 //   nex group delete <name-or-id> [--cascade]
@@ -204,8 +205,9 @@ func printUsage() {
       nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane id
-      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
+      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--json]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+      nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
       nex group create <name> [--color blue]
       nex group rename <name-or-id> <new-name>
       nex group delete <name-or-id> [--cascade]
@@ -516,6 +518,23 @@ func decodeReply(
 ) -> [String: Any] {
     let data = readReplyOrExit(payload, command: command, readTimeoutOverride: readTimeoutOverride)
     return parseReplyOrExit(data, command: command)
+}
+
+/// Round-trip variant for batch commands (bulk `workspace delete`) that
+/// must keep going after a single `ok:false`. Transport failure, an
+/// empty reply, and invalid JSON stay fatal for the whole batch — they
+/// mean the socket is dead or the app is too old, so no later id would
+/// fare better. A well-formed `{ok:false}` is *returned* (never exits)
+/// so the caller records the per-id failure and moves on.
+func decodeReplyAllowingFailure(
+    _ payload: [String: Any], command: String
+) -> [String: Any] {
+    let data = readReplyOrExit(payload, command: command)
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("\(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    return json
 }
 
 /// Default read timeout (seconds) for request/response commands.
@@ -2687,7 +2706,7 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace create|move [...]\n", stderr)
+        fputs("Usage: nex workspace create|move|delete [...]\n", stderr)
         exit(1)
     }
 
@@ -2697,8 +2716,9 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         let path = parseFlag("--path", from: &args)
         let color = parseFlag("--color", from: &args)
         let group = parseFlag("--group", from: &args)
+        let json = popSwitch("--json", from: &args)
 
-        var payload = [
+        var payload: [String: Any] = [
             "command": "workspace-create"
         ]
         if let name { payload["name"] = name }
@@ -2706,7 +2726,24 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         if let color { payload["color"] = color }
         if let group { payload["group"] = group }
 
-        sendJSON(payload)
+        // Request/response (matches `pane create` / `workspace delete`):
+        // returns the newly created workspace's id so scripts can chain.
+        let reply = decodeReply(payload, command: "nex workspace create")
+        if json {
+            if let data = try? JSONSerialization.data(
+                withJSONObject: reply, options: [.sortedKeys]
+            ), let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        } else {
+            let wsName = (reply["workspace_name"] as? String) ?? (name ?? "Workspace")
+            let wsID = (reply["workspace_id"] as? String) ?? "?"
+            if let grp = reply["group"] as? String {
+                print("created workspace \(wsName) (\(wsID)) in group \(grp)")
+            } else {
+                print("created workspace \(wsName) (\(wsID))")
+            }
+        }
 
     case "move":
         guard let nameOrID = args.popFirst() else {
@@ -2743,9 +2780,98 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
 
         sendJSONAny(payload)
 
+    case "delete":
+        // `--force`/`-y` bypass the server's running-agents guard: without
+        // it, deleting a workspace that still has active agents is refused
+        // (mirrors the app-quit warning). Popped unconditionally (not
+        // short-circuited) so both are consumed when passed together.
+        let forceFlag = popSwitch("--force", from: &args)
+        let yFlag = popSwitch("-y", from: &args)
+        let force = forceFlag || yFlag
+        let prune = popSwitch("--prune-worktree", from: &args)
+        let json = popSwitch("--json", from: &args)
+
+        // Everything left must be bare name-or-id targets. Reject stray
+        // flags so a typo can't be silently swallowed as an id.
+        let targets = Array(args)
+        if let bad = targets.first(where: { $0.hasPrefix("-") }) {
+            fputs("Unknown option for workspace delete: \(bad)\n", stderr)
+            fputs("Usage: nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]\n", stderr)
+            exit(1)
+        }
+        // Dedupe exact-duplicate ids, preserving first-seen order, so a
+        // repeated argument doesn't resolve to "not found" the 2nd time.
+        var seen = Set<String>()
+        let ids = targets.filter { seen.insert($0).inserted }
+        guard !ids.isEmpty else {
+            fputs("Usage: nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]\n", stderr)
+            exit(1)
+        }
+
+        var results: [[String: Any]] = []
+        var anyFailed = false
+        for id in ids {
+            let reply = decodeReplyAllowingFailure(
+                ["command": "workspace-delete", "name": id, "force": force],
+                command: "nex workspace delete"
+            )
+            let ok = (reply["ok"] as? Bool) ?? false
+            let wsName = (reply["workspace_name"] as? String) ?? id
+            var record: [String: Any] = ["id": id, "ok": ok]
+
+            if ok {
+                if let wsID = reply["workspace_id"] as? String { record["workspace_id"] = wsID }
+                record["workspace_name"] = wsName
+                let path = reply["path"] as? String
+                if let path { record["path"] = path }
+
+                if !json { print("deleted workspace \(wsName)") }
+
+                if prune {
+                    if let path {
+                        let (removed, message) = pruneWorktree(path: path)
+                        record["worktree_pruned"] = removed
+                        if !removed { record["worktree_error"] = message }
+                        if !json {
+                            if removed { print("  \(message)") }
+                            else { fputs("Warning: \(message)\n", stderr) }
+                        }
+                    } else {
+                        let message = "workspace \(wsName) had no panes; no directory to prune"
+                        record["worktree_pruned"] = false
+                        record["worktree_error"] = message
+                        if !json { fputs("Warning: \(message)\n", stderr) }
+                    }
+                }
+            } else {
+                anyFailed = true
+                let err = (reply["error"] as? String) ?? "unknown error"
+                record["error"] = err
+                // Surface the running-agents count from a guard refusal so
+                // `--json` consumers can act on it (the human path already
+                // has it in the error string).
+                if let activeAgents = reply["active_agents"] as? Int {
+                    record["active_agents"] = activeAgents
+                }
+                if !json { fputs("nex workspace delete: \(err)\n", stderr) }
+            }
+            results.append(record)
+        }
+
+        if json {
+            // Compact single-line array to match the CLI's other
+            // list-style `--json` output (pane list, graft status, etc).
+            if let data = try? JSONSerialization.data(
+                withJSONObject: results, options: [.sortedKeys]
+            ), let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        }
+        if anyFailed { exit(1) }
+
     default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: create, move\n", stderr)
+        fputs("Valid actions: create, move, delete\n", stderr)
         exit(1)
     }
 }
@@ -3492,11 +3618,13 @@ struct DoctorReport {
     }
 }
 
-/// Minimal subprocess runner — captures stdout + exit code. Doctor
-/// uses it for `pgrep`; we keep it scoped to doctor since the rest
-/// of the CLI talks to the app over the socket and doesn't shell out.
+/// Minimal subprocess runner — captures stdout, stderr, and exit code.
+/// `doctor` uses it for `ps`; `workspace delete --prune-worktree` uses
+/// it to shell out to `git worktree remove` (and to resolve the
+/// worktree root), surfacing git's own stderr in the warning it prints.
 struct ProcessResult {
     let stdout: String
+    let stderr: String
     let exitCode: Int32
 }
 
@@ -3536,13 +3664,55 @@ func runProcess(_ path: String, args: [String]) -> ProcessResult {
             group.leave()
         }
         group.wait()
-        _ = stderrData
         task.waitUntilExit()
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-        return ProcessResult(stdout: stdout, exitCode: task.terminationStatus)
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        return ProcessResult(stdout: stdout, stderr: stderr, exitCode: task.terminationStatus)
     } catch {
-        return ProcessResult(stdout: "", exitCode: -1)
+        return ProcessResult(stdout: "", stderr: "\(error.localizedDescription)", exitCode: -1)
     }
+}
+
+/// Best-effort removal of the git worktree backing a just-deleted
+/// workspace (`nex workspace delete --prune-worktree`). `path` is the
+/// deleted workspace's directory (a shell pane's *current* cwd); we
+/// resolve it to the worktree root via `git rev-parse --show-toplevel`
+/// (so a pane cwd'd into a subdirectory still works), then run
+/// `git worktree remove` from the *main* worktree so git isn't invoked
+/// from inside the tree it's removing. Deliberately non-forcing: git
+/// refuses a dirty or locked worktree and the primary checkout, and a
+/// non-repo path fails to resolve — every failure is returned as a
+/// message the caller prints as a `Warning:` (git's own stderr is
+/// folded in). The workspace stays deleted regardless. Returns
+/// `(removed, message)`.
+func pruneWorktree(path: String) -> (removed: Bool, message: String) {
+    let env = "/usr/bin/env"
+    let top = runProcess(env, args: ["git", "-C", path, "rev-parse", "--show-toplevel"])
+    guard top.exitCode == 0 else {
+        let detail = top.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (false, "not a git worktree, skipped prune: \(path)" + (detail.isEmpty ? "" : " (\(detail))"))
+    }
+    let root = top.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Resolve the main worktree so `git worktree remove` runs from
+    // outside the target. `--git-common-dir` is `<main>/.git`; its
+    // parent is the main worktree. Fall back to the root itself if the
+    // lookup fails (older git / unusual layout).
+    let common = runProcess(env, args: ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    let runDir: String
+    if common.exitCode == 0 {
+        let commonDir = common.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        runDir = (commonDir as NSString).deletingLastPathComponent
+    } else {
+        runDir = root
+    }
+
+    let remove = runProcess(env, args: ["git", "-C", runDir, "worktree", "remove", root])
+    if remove.exitCode == 0 {
+        return (true, "removed worktree: \(root)")
+    }
+    let detail = remove.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (false, "git worktree remove failed for \(root)" + (detail.isEmpty ? "" : ": \(detail)"))
 }
 
 // MARK: - Main

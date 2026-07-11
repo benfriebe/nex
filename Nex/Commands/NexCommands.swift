@@ -473,9 +473,16 @@ final class PaneShortcutMonitor {
               let focusedID = workspace.focusedPaneID
         else { return false }
 
-        // Last pane — close the workspace instead
+        // Last pane — close the workspace instead. Warn first if it has
+        // active agents (same gate as the sidebar Delete item), so ⌘W
+        // can't silently terminate a running session.
         if workspace.panes.count <= 1 {
-            store.send(.deleteWorkspace(id))
+            if WorkspaceDeleteGate.shouldDelete(
+                workspaceName: workspace.name,
+                activeAgentCount: workspace.activeAgentCount
+            ) {
+                store.send(.deleteWorkspace(id))
+            }
             return true
         }
 
