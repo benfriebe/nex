@@ -1052,9 +1052,9 @@ struct AppReducer {
                     color: resolvedColor
                 )
                 if let newProfileName {
-                    // Same normalization as `.setProfile`: trim, empty → nil.
-                    let trimmed = newProfileName.trimmingCharacters(in: .whitespaces)
-                    workspace.profileName = trimmed.isEmpty ? nil : trimmed
+                    // Same normalization as `.setProfile`: trim; empty or
+                    // the built-in "default" baseline → nil.
+                    workspace.profileName = WorkspaceProfilesClient.normalizedAssignment(newProfileName)
                 }
 
                 // If exactly one repo, start the first pane in that repo's directory
@@ -1146,7 +1146,9 @@ struct AppReducer {
                 return .merge(
                     [
                         .run { _ in
-                            let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                            let env = workspaceProfiles.resolveEnv(
+                                profileName ?? WorkspaceProfilesClient.defaultProfileName
+                            )
                             await surfaceManager.createSurface(paneID: paneID, workingDirectory: cwd, backgroundOpacity: opacity, env: env)
                         },
                         .send(.persistState)
@@ -2039,14 +2041,14 @@ struct AppReducer {
                             // PTY that's already on the right account.
                             var envCache: [String: [String: String]] = [:]
                             for pane in shellPanes {
-                                var env: [String: String] = [:]
-                                if let profile = pane.profile {
-                                    if let cached = envCache[profile] {
-                                        env = cached
-                                    } else {
-                                        env = workspaceProfiles.resolveEnv(profile)
-                                        envCache[profile] = env
-                                    }
+                                let profile = pane.profile
+                                    ?? WorkspaceProfilesClient.defaultProfileName
+                                let env: [String: String]
+                                if let cached = envCache[profile] {
+                                    env = cached
+                                } else {
+                                    env = workspaceProfiles.resolveEnv(profile)
+                                    envCache[profile] = env
                                 }
                                 await surfaceManager.createSurface(
                                     paneID: pane.id,

@@ -108,7 +108,7 @@ struct ProfilesSettingsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .disabled(selectedID == nil)
+                .disabled(selectedID == nil || isDefaultSelected)
                 .help("Remove selected profile")
 
                 Spacer()
@@ -144,7 +144,8 @@ struct ProfilesSettingsView: View {
     }
 
     private func profileDetail(_ profile: Binding<EditableProfile>) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let isDefault = profile.wrappedValue.name == WorkspaceProfilesClient.defaultProfileName
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Name")
                     .foregroundStyle(.secondary)
@@ -152,13 +153,26 @@ struct ProfilesSettingsView: View {
                     "Profile name",
                     text: Binding(
                         get: { profile.wrappedValue.name },
-                        // Names can't contain ":" or "=" (they'd break the
-                        // `profile = name:KEY=value` line format).
-                        set: { profile.wrappedValue.name = sanitizedName($0) }
+                        set: { newValue in
+                            // Names can't contain ":" or "=" (they'd break
+                            // the `profile = name:KEY=value` line format),
+                            // and the built-in default name is reserved.
+                            let sanitized = sanitizedName(newValue)
+                            guard sanitized != WorkspaceProfilesClient.defaultProfileName
+                            else { return }
+                            profile.wrappedValue.name = sanitized
+                        }
                     )
                 )
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 240)
+                .disabled(isDefault)
+            }
+
+            if isDefault {
+                Text("Built-in baseline — applies to every workspace without an explicit profile.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             Text("Environment Variables")
@@ -251,6 +265,11 @@ struct ProfilesSettingsView: View {
 
     // MARK: - Model plumbing
 
+    private var isDefaultSelected: Bool {
+        profiles.first(where: { $0.id == selectedID })?.name
+            == WorkspaceProfilesClient.defaultProfileName
+    }
+
     private func sanitizedName(_ raw: String) -> String {
         raw.filter { $0 != ":" && $0 != "=" }
     }
@@ -260,7 +279,7 @@ struct ProfilesSettingsView: View {
             fromFile: KeybindingService.configPath,
             expandTilde: false
         )
-        profiles = parsed.map { profile in
+        var editable = parsed.map { profile in
             EditableProfile(
                 name: profile.name,
                 vars: profile.env
@@ -271,18 +290,37 @@ struct ProfilesSettingsView: View {
                     .map { EditableVar(key: $0.key, value: $0.value) }
             )
         }
+        // The built-in default always exists and leads the list — virtual
+        // (synthesized here) until the user gives it vars.
+        if let defaultIndex = editable.firstIndex(where: {
+            $0.name == WorkspaceProfilesClient.defaultProfileName
+        }) {
+            editable.insert(editable.remove(at: defaultIndex), at: 0)
+        } else {
+            editable.insert(
+                EditableProfile(name: WorkspaceProfilesClient.defaultProfileName, vars: []),
+                at: 0
+            )
+        }
+        profiles = editable
         selectedID = profiles.first?.id
         loaded = true
     }
 
     private func persist() {
-        let toWrite = profiles.map { profile in
+        let toWrite: [ConfigParser.Profile] = profiles.compactMap { profile in
             var env = Dictionary(
                 profile.vars
                     .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
                     .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
                 uniquingKeysWith: { _, last in last }
             )
+            // The built-in default stays out of the config while it has no
+            // vars of its own (it's re-synthesized on load), keeping the
+            // user's file free of a redundant marker-only line.
+            if profile.name == WorkspaceProfilesClient.defaultProfileName, env.isEmpty {
+                return nil
+            }
             // Serialize the marker so a name-only profile still has a line
             // in the file (the format needs one line per variable, and a
             // profile with zero lines wouldn't survive a round-trip).
@@ -311,7 +349,8 @@ struct ProfilesSettingsView: View {
 
     private func removeSelectedProfile() {
         guard let selectedID,
-              let index = profiles.firstIndex(where: { $0.id == selectedID })
+              let index = profiles.firstIndex(where: { $0.id == selectedID }),
+              profiles[index].name != WorkspaceProfilesClient.defaultProfileName
         else { return }
         profiles.remove(at: index)
         self.selectedID = profiles.indices.contains(index)

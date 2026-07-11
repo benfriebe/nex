@@ -8,6 +8,14 @@ import os.log
 /// is tiny, and this keeps newly spawned panes fresh without a file watcher.
 /// Live PTYs are unaffected: env is injected only at surface spawn.
 struct WorkspaceProfilesClient {
+    /// The built-in baseline profile every workspace is on when no explicit
+    /// profile is assigned. It always exists (virtual until the user adds
+    /// vars to it in Settings or the config file) and is stored as a nil
+    /// `profileName`, so "default", `--clear`, and a fresh workspace are the
+    /// same state. Unassigned panes therefore still get `NEX_PROFILE=default`
+    /// plus whatever vars the user defines under `default`.
+    static let defaultProfileName = "default"
+
     /// The env dict to inject for a workspace assigned profile `name`: the
     /// profile's parsed vars plus `NEX_PROFILE=<name>`. The marker is always
     /// present — even when the profile has no definitions in the config — so
@@ -15,6 +23,14 @@ struct WorkspaceProfilesClient {
     var resolveEnv: @Sendable (_ name: String) -> [String: String]
     /// Profile names in order of first appearance (drives the pickers).
     var listProfiles: @Sendable () -> [String]
+
+    /// Normalize a user-supplied assignment (socket, CLI, UI): trim; empty
+    /// or the built-in default name → nil (the stored baseline).
+    static func normalizedAssignment(_ raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespaces)
+        guard let trimmed, !trimmed.isEmpty, trimmed != defaultProfileName else { return nil }
+        return trimmed
+    }
 }
 
 extension WorkspaceProfilesClient: DependencyKey {
@@ -38,7 +54,9 @@ extension WorkspaceProfilesClient: DependencyKey {
     static func resolveEnv(_ name: String, configPath: String) -> [String: String] {
         let profiles = ConfigParser.parseProfiles(fromFile: configPath)
         var env = profiles.first(where: { $0.name == name })?.env ?? [:]
-        if env.isEmpty {
+        if env.isEmpty, name != defaultProfileName {
+            // The virtual default has no definitions unless customized —
+            // that's the expected state, not a misconfiguration.
             logger.warning("Workspace profile '\(name)' has no definitions in config")
         }
         // Merged last: a config line spoofing NEX_PROFILE loses to the

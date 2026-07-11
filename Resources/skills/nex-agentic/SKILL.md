@@ -247,6 +247,14 @@ and the injection survives restart: restored panes respawn with the
 profile env, so auto-resumed agent sessions (`claude --resume`) stay
 on their workspace's account.
 
+The built-in **`default` profile** is the baseline: a workspace with no
+explicit assignment is on `default`, so every pane always carries
+`NEX_PROFILE` (`default` unless assigned). It always exists (virtual
+until customized), can't be renamed or deleted in Settings, and adding
+vars to it (Settings → Profiles or `profile = default:KEY=value` lines)
+applies them to every unassigned workspace. Selecting `default` in the
+UI, `nex workspace profile <ws> default`, and `--clear` are equivalent.
+
 Rules worth knowing:
 
 - **Spawn-time only.** Assignment changes never touch live PTYs; open

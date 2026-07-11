@@ -933,15 +933,18 @@ struct WorkspaceListView: View {
     /// list is always fresh without a file watcher. Items are Toggles so
     /// the active assignment gets a native checkmark; an assigned name
     /// missing from the config is appended so the tick never disappears.
+    /// The built-in "default" baseline leads the list — every workspace is
+    /// on it unless another profile is assigned (stored as nil).
     private func profileMenu(workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
         Menu("Profile") {
             let current = workspaceStore.profileName
-            Toggle("None", isOn: Binding(
+            Toggle(WorkspaceProfilesClient.defaultProfileName, isOn: Binding(
                 get: { current == nil },
                 set: { _ in workspaceStore.send(.setProfile(nil)) }
             ))
             let profiles: [String] = {
                 var list = workspaceProfiles.listProfiles()
+                    .filter { $0 != WorkspaceProfilesClient.defaultProfileName }
                 if let current, !list.contains(current) {
                     list.append(current)
                 }

@@ -108,6 +108,21 @@ struct WorkspaceProfileTests {
         }
     }
 
+    @Test func setProfileDefaultNormalizesToNil() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.profileName = "work"
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Selecting the built-in baseline stores nil — "default", --clear,
+        // and a fresh workspace are the same state.
+        await store.send(.setProfile("default")) { state in
+            #expect(state.profileName == nil)
+        }
+    }
+
     // MARK: - Env resolution at spawn (WorkspaceFeature)
 
     @Test func splitPaneResolvesProfileEnv() async {
@@ -134,7 +149,7 @@ struct WorkspaceProfileTests {
         #expect(resolved.value == ["work"])
     }
 
-    @Test func splitPaneWithoutProfileDoesNotResolve() async {
+    @Test func splitPaneWithoutProfileResolvesDefault() async {
         let workspace = WorkspaceFeature.State(name: "Test")
         let sourceID = workspace.panes.first!.id
         let resolved = LockIsolated<[String]>([])
@@ -147,14 +162,16 @@ struct WorkspaceProfileTests {
             $0.uuid = .constant(Self.paneID1)
             $0.workspaceProfiles.resolveEnv = { name in
                 resolved.withValue { $0.append(name) }
-                return [:]
+                return ["NEX_PROFILE": name]
             }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
+        // No assigned profile means the built-in default baseline — every
+        // pane still gets NEX_PROFILE (=default) injected.
         await store.send(.splitPane(direction: .horizontal, sourcePaneID: sourceID))
         await store.finish()
-        #expect(resolved.value.isEmpty)
+        #expect(resolved.value == ["default"])
     }
 
     @Test func createPaneResolvesProfileEnv() async {
@@ -421,8 +438,9 @@ struct WorkspaceProfileTests {
         ))
         // `.persistState` is sent at the end of the same effect that spawns
         // the restored surfaces, so receiving it means the spawn loop (and
-        // its resolveEnv calls) completed.
+        // its resolveEnv calls) completed. The profile-less ws3 resolves
+        // the built-in default baseline — once, via the same cache.
         await store.receive(\.persistState)
-        #expect(resolved.value == ["work", "personal"])
+        #expect(resolved.value == ["work", "personal", "default"])
     }
 }

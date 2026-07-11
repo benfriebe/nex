@@ -861,8 +861,7 @@ extension AppReducer {
         // assignment would mutate a dead local. The surface effect at the
         // bottom of this handler resolves env from this value.
         if let profile {
-            let trimmed = profile.trimmingCharacters(in: .whitespaces)
-            seeded.profileName = trimmed.isEmpty ? nil : trimmed
+            seeded.profileName = WorkspaceProfilesClient.normalizedAssignment(profile)
         }
         // Capture the anchor for `.nearSelection` BEFORE overwriting
         // `activeWorkspaceID` — the previously active workspace is what
@@ -921,7 +920,9 @@ extension AppReducer {
         // needs to fire alongside.
         return .merge(
             .run { _ in
-                let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                let env = workspaceProfiles.resolveEnv(
+                    profileName ?? WorkspaceProfilesClient.defaultProfileName
+                )
                 await surfaceManager.createSurface(
                     paneID: paneID,
                     workingDirectory: cwd,

@@ -28,7 +28,9 @@ struct SurfaceContainerView: NSViewRepresentable {
 
         // Create surface lazily if it doesn't exist yet
         if surfaceManager.surface(for: paneID) == nil {
-            let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+            let env = workspaceProfiles.resolveEnv(
+                profileName ?? WorkspaceProfilesClient.defaultProfileName
+            )
             surfaceManager.createSurface(
                 paneID: paneID,
                 workingDirectory: workingDirectory,

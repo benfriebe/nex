@@ -480,9 +480,9 @@ struct WorkspaceFeature {
 
             case .setProfile(let raw):
                 // Single normalization choke point for every entry path
-                // (socket, CLI, UI): trim, empty → nil (= no profile).
-                let trimmed = raw?.trimmingCharacters(in: .whitespaces)
-                state.profileName = (trimmed?.isEmpty == false) ? trimmed : nil
+                // (socket, CLI, UI): trim; empty or the built-in "default"
+                // baseline → nil.
+                state.profileName = WorkspaceProfilesClient.normalizedAssignment(raw)
                 return .none
 
             case .addLabel(let raw):
@@ -524,7 +524,9 @@ struct WorkspaceFeature {
                 let opacity = ghosttyConfig.backgroundOpacity
                 let profileName = state.profileName
                 return .run { _ in
-                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                    let env = workspaceProfiles.resolveEnv(
+                        profileName ?? WorkspaceProfilesClient.defaultProfileName
+                    )
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: resolvedDir,
@@ -558,7 +560,9 @@ struct WorkspaceFeature {
                 let opacity = ghosttyConfig.backgroundOpacity
                 let profileName = state.profileName
                 return .run { _ in
-                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                    let env = workspaceProfiles.resolveEnv(
+                        profileName ?? WorkspaceProfilesClient.defaultProfileName
+                    )
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,
@@ -597,7 +601,9 @@ struct WorkspaceFeature {
                 let opacity = ghosttyConfig.backgroundOpacity
                 let profileName = state.profileName
                 return .run { _ in
-                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                    let env = workspaceProfiles.resolveEnv(
+                        profileName ?? WorkspaceProfilesClient.defaultProfileName
+                    )
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,
@@ -1436,7 +1442,9 @@ struct WorkspaceFeature {
                                 MarkdownFindController.shared.close(paneID: paneID)
                             }
                         }
-                        let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                        let env = workspaceProfiles.resolveEnv(
+                            profileName ?? WorkspaceProfilesClient.defaultProfileName
+                        )
                         await surfaceManager.createSurface(
                             paneID: paneID,
                             workingDirectory: cwd,
@@ -1756,7 +1764,9 @@ struct WorkspaceFeature {
                     // The profile env is baked into the spawned PTY, so the
                     // `claude --resume` typed below inherits it — a reopened
                     // agent stays on the workspace's account.
-                    let env = profileName.map { workspaceProfiles.resolveEnv($0) } ?? [:]
+                    let env = workspaceProfiles.resolveEnv(
+                        profileName ?? WorkspaceProfilesClient.defaultProfileName
+                    )
                     await surfaceManager.createSurface(
                         paneID: newPaneID,
                         workingDirectory: newPane.workingDirectory,

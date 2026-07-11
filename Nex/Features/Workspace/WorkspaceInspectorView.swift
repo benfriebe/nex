@@ -173,39 +173,28 @@ struct WorkspaceInspectorView: View {
 
     /// Workspace-profile assignment. Applies to panes spawned after the
     /// change — live PTYs keep the env they were born with.
-    @ViewBuilder
     private func profilePicker(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
-        if availableProfiles.isEmpty, workspace.profileName == nil {
-            Picker("Profile", selection: .constant(String?.none)) {
-                Text("None").tag(String?.none)
+        // The built-in "default" baseline leads the list (nil assignment);
+        // an assigned-but-missing name stays selectable so the picker never
+        // shows blank after a profile is removed from the config.
+        let options: [String] = {
+            var list = [WorkspaceProfilesClient.defaultProfileName]
+                + availableProfiles.filter { $0 != WorkspaceProfilesClient.defaultProfileName }
+            if let assigned = workspace.profileName, !list.contains(assigned) {
+                list.append(assigned)
             }
-            .pickerStyle(.menu)
-            .font(.caption)
-            .disabled(true)
-            Text("Define profiles in Settings → Profiles")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        } else {
-            // Keep an assigned-but-missing name selectable so the picker
-            // never shows blank after a profile is removed from the config.
-            let options: [String] = {
-                if let assigned = workspace.profileName, !availableProfiles.contains(assigned) {
-                    return availableProfiles + [assigned]
-                }
-                return availableProfiles
-            }()
-            Picker("Profile", selection: Binding(
-                get: { workspace.profileName },
-                set: { store.send(.workspaces(.element(id: activeID, action: .setProfile($0)))) }
-            )) {
-                Text("None").tag(String?.none)
-                ForEach(options, id: \.self) { name in
-                    Text(name).tag(String?.some(name))
-                }
+            return list
+        }()
+        return Picker("Profile", selection: Binding(
+            get: { workspace.profileName ?? WorkspaceProfilesClient.defaultProfileName },
+            set: { store.send(.workspaces(.element(id: activeID, action: .setProfile($0)))) }
+        )) {
+            ForEach(options, id: \.self) { name in
+                Text(name).tag(name)
             }
-            .pickerStyle(.menu)
-            .font(.caption)
         }
+        .pickerStyle(.menu)
+        .font(.caption)
     }
 
     private func repoSection(_ workspace: WorkspaceFeature.State, activeID: UUID) -> some View {
