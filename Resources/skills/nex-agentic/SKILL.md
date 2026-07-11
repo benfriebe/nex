@@ -258,11 +258,11 @@ UI, `nex workspace profile <ws> default`, and `--clear` are equivalent.
 Rules worth knowing:
 
 - **Spawn-time only.** Assignment changes never touch live PTYs; open
-  a fresh pane after assigning. Two corollaries: `pane
-  move-to-workspace` moves a live PTY, so the pane keeps its birth env
-  even when the destination workspace has a different profile; and a
-  workspace created from the GUI sheet spawns its first pane before
-  any profile is assigned — assign, then open a new pane.
+  a fresh pane after assigning. Corollary: `pane move-to-workspace`
+  moves a live PTY, so the pane keeps its birth env even when the
+  destination workspace has a different profile. Workspaces created
+  with a profile up front (the New Workspace sheet's Profile picker or
+  `workspace create --profile`) spawn their first pane already on it.
 - Profile definitions are re-read from the config file on every spawn,
   so editing values applies to new panes without restarting Nex.
 - Profile names cannot contain `:` or `=`; values may contain both.
