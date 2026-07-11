@@ -82,6 +82,7 @@ struct ProfilesSettingsView: View {
                         systemImage: "person.badge.key"
                     )
                     .tag(profile.id)
+                    .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.inset)
@@ -164,16 +165,11 @@ struct ProfilesSettingsView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            if profile.wrappedValue.vars.isEmpty {
-                Text("No variables yet — a profile needs at least one to be saved.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(profile.vars) { $variable in
-                            varRow($variable, in: profile)
-                        }
+            ScrollView {
+                VStack(spacing: 6) {
+                    markerRow(profile)
+                    ForEach(profile.vars) { $variable in
+                        varRow($variable, in: profile)
                     }
                 }
             }
@@ -189,6 +185,33 @@ struct ProfilesSettingsView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
+    }
+
+    /// The locked NEX_PROFILE row shown first on every profile. The marker
+    /// is injected automatically at spawn and always matches the profile
+    /// name, so it's displayed as an uneditable value derived live from the
+    /// name field rather than stored in the editable model.
+    private func markerRow(_ profile: Binding<EditableProfile>) -> some View {
+        HStack(spacing: 6) {
+            TextField("", text: .constant("NEX_PROFILE"))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(width: 180)
+                .disabled(true)
+
+            Text("=")
+                .foregroundStyle(.tertiary)
+
+            TextField("", text: .constant(profile.wrappedValue.name))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .disabled(true)
+
+            Image(systemName: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .help("Injected automatically — always matches the profile name")
+        }
     }
 
     private func varRow(
@@ -241,6 +264,9 @@ struct ProfilesSettingsView: View {
             EditableProfile(
                 name: profile.name,
                 vars: profile.env
+                    // The marker is derived from the name (locked row), so a
+                    // stored NEX_PROFILE line never becomes an editable row.
+                    .filter { $0.key != "NEX_PROFILE" }
                     .sorted(by: { $0.key < $1.key })
                     .map { EditableVar(key: $0.key, value: $0.value) }
             )
@@ -251,15 +277,19 @@ struct ProfilesSettingsView: View {
 
     private func persist() {
         let toWrite = profiles.map { profile in
-            ConfigParser.Profile(
-                name: profile.name,
-                env: Dictionary(
-                    profile.vars
-                        .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
-                        .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
-                    uniquingKeysWith: { _, last in last }
-                )
+            var env = Dictionary(
+                profile.vars
+                    .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
+                uniquingKeysWith: { _, last in last }
             )
+            // Serialize the marker so a name-only profile still has a line
+            // in the file (the format needs one line per variable, and a
+            // profile with zero lines wouldn't survive a round-trip).
+            // resolveEnv overrides it with the canonical name at spawn
+            // regardless of what's stored.
+            env["NEX_PROFILE"] = profile.name.trimmingCharacters(in: .whitespaces)
+            return ConfigParser.Profile(name: profile.name, env: env)
         }
         ConfigParser.writeProfiles(toWrite, toFile: KeybindingService.configPath)
     }
@@ -272,10 +302,9 @@ struct ProfilesSettingsView: View {
             counter += 1
             name = "profile-\(counter)"
         }
-        let profile = EditableProfile(
-            name: name,
-            vars: [EditableVar(key: "", value: "")]
-        )
+        // New profiles start with just the locked NEX_PROFILE marker —
+        // enough to persist and be assignable; add real vars as needed.
+        let profile = EditableProfile(name: name, vars: [])
         profiles.append(profile)
         selectedID = profile.id
     }

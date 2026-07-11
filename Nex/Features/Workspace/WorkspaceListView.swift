@@ -930,15 +930,30 @@ struct WorkspaceListView: View {
     /// "Profile ▸" submenu — assigns a workspace profile (named env-var set
     /// from ~/.config/nex/config) to panes spawned in this workspace from
     /// now on. Menu content is built at right-click time, so the profile
-    /// list is always fresh without a file watcher.
+    /// list is always fresh without a file watcher. Items are Toggles so
+    /// the active assignment gets a native checkmark; an assigned name
+    /// missing from the config is appended so the tick never disappears.
     private func profileMenu(workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
         Menu("Profile") {
-            Button("None") { workspaceStore.send(.setProfile(nil)) }
-            let profiles = workspaceProfiles.listProfiles()
+            let current = workspaceStore.profileName
+            Toggle("None", isOn: Binding(
+                get: { current == nil },
+                set: { _ in workspaceStore.send(.setProfile(nil)) }
+            ))
+            let profiles: [String] = {
+                var list = workspaceProfiles.listProfiles()
+                if let current, !list.contains(current) {
+                    list.append(current)
+                }
+                return list
+            }()
             if !profiles.isEmpty {
                 Divider()
                 ForEach(profiles, id: \.self) { name in
-                    Button(name) { workspaceStore.send(.setProfile(name)) }
+                    Toggle(name, isOn: Binding(
+                        get: { current == name },
+                        set: { _ in workspaceStore.send(.setProfile(name)) }
+                    ))
                 }
             }
         }
