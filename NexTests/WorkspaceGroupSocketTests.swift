@@ -164,6 +164,53 @@ struct WorkspaceGroupSocketTests {
         #expect((sink.payloads[0]["groups"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    /// The defensive tail in `handleGroupList`: a group that exists in
+    /// `state.groups` but is missing from `topLevelOrder` (a recoverable
+    /// ordering inconsistency) must still surface — appended after the
+    /// sidebar-ordered groups, in state order — so the CLI never hides it.
+    @Test func socketGroupListAppendsGroupsMissingFromTopLevelOrder() async {
+        let ws1 = Self.makeWorkspace(id: Self.ws1ID, name: "Alpha")
+        let placed = WorkspaceGroup(
+            id: Self.groupAID, name: "Placed", childOrder: [Self.ws1ID]
+        )
+        let unplaced = WorkspaceGroup(
+            id: Self.groupBID, name: "Unplaced", childOrder: []
+        )
+        // topLevelOrder references only the placed group; `unplaced`
+        // lives in state.groups but is absent from the sidebar order.
+        let store = makeStore(
+            workspaces: [ws1],
+            groups: [placed, unplaced],
+            topLevelOrder: [.group(Self.groupAID)]
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.groupList, reply: makeCaptureHandle(sink)))
+
+        let groups = sink.payloads[0]["groups"] as? [[String: Any]] ?? []
+        #expect(groups.count == 2)
+        #expect(groups[0]["name"] as? String == "Placed")
+        #expect(groups[1]["name"] as? String == "Unplaced")
+    }
+
+    /// A corrupted `topLevelOrder` holding a duplicate `.group(id)` must
+    /// not list that group twice — both the sidebar-order scan and the
+    /// state-order append go through the same `seen` filter.
+    @Test func socketGroupListDeduplicatesRepeatedTopLevelGroup() async {
+        let group = WorkspaceGroup(id: Self.groupAID, name: "Solo", childOrder: [])
+        let store = makeStore(
+            groups: [group],
+            topLevelOrder: [.group(Self.groupAID), .group(Self.groupAID)]
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.groupList, reply: makeCaptureHandle(sink)))
+
+        let groups = sink.payloads[0]["groups"] as? [[String: Any]] ?? []
+        #expect(groups.count == 1)
+        #expect(groups[0]["id"] as? String == Self.groupAID.uuidString)
+    }
+
     @Test func socketGroupCreateSpawnsGroup() async {
         let store = makeStore()
 

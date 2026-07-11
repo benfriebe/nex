@@ -976,8 +976,15 @@ extension AppReducer {
     ) {
         guard let reply else { return }
 
-        var orderedGroupIDs = state.topLevelOrder.compactMap(\.groupID)
-        var seenGroupIDs = Set(orderedGroupIDs)
+        // Route both the sidebar-order scan and the state-order append
+        // through the same `seen` filter so a corrupted `topLevelOrder`
+        // holding a duplicate `.group(id)` can't list a group twice.
+        var orderedGroupIDs: [UUID] = []
+        var seenGroupIDs = Set<UUID>()
+        for groupID in state.topLevelOrder.compactMap(\.groupID)
+            where seenGroupIDs.insert(groupID).inserted {
+            orderedGroupIDs.append(groupID)
+        }
         for group in state.groups where seenGroupIDs.insert(group.id).inserted {
             orderedGroupIDs.append(group.id)
         }
