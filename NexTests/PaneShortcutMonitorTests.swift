@@ -157,6 +157,123 @@ struct PaneShortcutMonitorTests {
         #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
     }
 
+    // MARK: - Web pane priority layer (issue #229)
+
+    /// Two-pane workspace where one pane is a web pane. The leaf order
+    /// (first/second) drives focus-prev/next traversal, so callers place
+    /// the web pane in the leaf position the test needs.
+    private static func makeWebAndShellWorkspace(
+        firstPaneID: UUID,
+        secondPaneID: UUID,
+        webPaneID: UUID,
+        focusedPaneID: UUID
+    ) -> WorkspaceFeature.State {
+        WorkspaceFeature.State(
+            id: wsID, name: "Test", slug: "test", color: .blue,
+            panes: [
+                Pane(id: firstPaneID, type: firstPaneID == webPaneID ? .web : .shell),
+                Pane(id: secondPaneID, type: secondPaneID == webPaneID ? .web : .shell)
+            ],
+            layout: .split(.horizontal, ratio: 0.5, first: .leaf(firstPaneID), second: .leaf(secondPaneID)),
+            focusedPaneID: focusedPaneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+    }
+
+    @Test func cmdOpenBracketInWebPaneFocusesPreviousPane() {
+        // Issue #229: ⌘[ used to be swallowed by the web priority layer
+        // (back). It now falls through to focus-previous even inside a
+        // web pane. Web pane is the focused second leaf; ⌘[ moves to the
+        // first (shell) leaf.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID2, focusedPaneID: Self.paneID2
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(keyEvent(keyCode: 33, modifierFlags: .command))
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
+    @Test func cmdCloseBracketInWebPaneFocusesNextPane() {
+        // Web pane is the focused first leaf; ⌘] moves to the second
+        // (shell) leaf instead of triggering forward.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID1, focusedPaneID: Self.paneID1
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(keyEvent(keyCode: 30, modifierFlags: .command))
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID2)
+    }
+
+    @Test func cmdLeftArrowInWebPaneIsConsumedForBack() {
+        // ⌘← is the new back binding: the priority layer consumes it and
+        // does NOT change pane focus.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID2, focusedPaneID: Self.paneID2
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(
+            keyEvent(keyCode: 123, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID2)
+    }
+
+    @Test func cmdRightArrowInWebPaneIsConsumedForForward() {
+        // ⌘→ is the new forward binding: consumed, focus unchanged.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID1, focusedPaneID: Self.paneID1
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(
+            keyEvent(keyCode: 124, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
+    @Test func cmdArrowInShellPaneIsNotConsumed() {
+        // The web back/forward binding is web-pane-only. In a shell pane
+        // plain ⌘← / ⌘→ have no default binding, so the monitor must
+        // defer (return false) and leave line-navigation to the terminal
+        // — no regression for non-web panes.
+        let ws = Self.makeTwoPaneWorkspace() // both shell, focus paneID1
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handledLeft = monitor.handleKeyEvent(
+            keyEvent(keyCode: 123, modifierFlags: [.command, .numericPad, .function])
+        )
+        let handledRight = monitor.handleKeyEvent(
+            keyEvent(keyCode: 124, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handledLeft == false)
+        #expect(handledRight == false)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
     // MARK: - Open web pane (menu bar action)
 
     @Test func cmdShiftOIsNotConsumedByMonitor() {

@@ -156,7 +156,7 @@ struct WebPaneChrome: View {
             .buttonStyle(.plain)
             .disabled(!canGoBack)
             .opacity(canGoBack ? 0.8 : 0.3)
-            .help("Back (⌘[)")
+            .help("Back (⌘←)")
 
             Button(action: onForward) {
                 Image(systemName: "chevron.right")
@@ -167,7 +167,7 @@ struct WebPaneChrome: View {
             .buttonStyle(.plain)
             .disabled(!canGoForward)
             .opacity(canGoForward ? 0.8 : 0.3)
-            .help("Forward (⌘])")
+            .help("Forward (⌘→)")
 
             Button(action: onReload) {
                 Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
