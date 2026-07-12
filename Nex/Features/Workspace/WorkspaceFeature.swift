@@ -111,6 +111,17 @@ struct WorkspaceFeature {
             focusedPaneID.flatMap { panes[id: $0] }
         }
 
+        /// Count of in-progress agents in this workspace — panes (visible
+        /// or parked) whose status is not `.idle`, i.e. `.running` or
+        /// `.waitingForInput`. Matches the per-workspace tally in
+        /// `AppReducer.State.activeAgentSummary`; drives the
+        /// running-agents guard on workspace deletion (CLI `--force`
+        /// gate + the GUI "Delete anyway?" dialog).
+        var activeAgentCount: Int {
+            panes.reduce(into: 0) { $0 += $1.status != .idle ? 1 : 0 }
+                + parkedPanes.reduce(into: 0) { $0 += $1.status != .idle ? 1 : 0 }
+        }
+
         init(
             id: UUID = UUID(),
             name: String,

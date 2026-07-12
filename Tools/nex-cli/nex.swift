@@ -19,9 +19,12 @@
 //   nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane id
-//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>]
+//   nex workspace list [--json] [--no-header]
+//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+//   nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 //   nex workspace profile <name-or-id> (<profile> | --clear)
+//   nex group list [--json] [--no-header]
 //   nex group create <name> [--color blue]
 //   nex group rename <name-or-id> <new-name>
 //   nex group delete <name-or-id> [--cascade]
@@ -205,9 +208,12 @@ func printUsage() {
       nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane id
-      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>]
+      nex workspace list [--json] [--no-header]
+      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+      nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
       nex workspace profile <name-or-id> (<profile> | --clear)
+      nex group list [--json] [--no-header]
       nex group create <name> [--color blue]
       nex group rename <name-or-id> <new-name>
       nex group delete <name-or-id> [--cascade]
@@ -353,6 +359,48 @@ func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
     """, stream)
 }
 
+func printPaneCaptureUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+    Prints a pane's terminal contents to stdout. Without --target, captures the
+    calling pane (requires NEX_PANE_ID).
+
+    Options:
+      --target <name-or-uuid>     Pane to read (UUID = global, label needs scope).
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --lines N                   Limit to the last N lines (positive integer).
+      --scrollback                Include the full scrollback, not just the viewport.
+      -h, --help                  Show this help.
+
+    The target is flag-only: a bare positional argument is rejected on purpose so
+    `nex pane capture <uuid>` can't silently fall back to capturing the caller.
+    Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneListUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane list [--workspace <name-or-uuid> | --current] [--json] [--no-header]
+
+    Lists panes as a table (or a JSON array with --json).
+
+    Options:
+      --workspace <name-or-uuid>  Only panes in this workspace.
+      --current                   Only the calling pane's workspace (requires NEX_PANE_ID).
+      --json                      Print a JSON array instead of the table.
+      --no-header                 Omit the table header row.
+      -h, --help                  Show this help.
+
+    --workspace and --current are mutually exclusive. This command takes no
+    positional arguments. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
 /// Send a pane-mutation command (`split` / `create` / `name`) and print
 /// the structured `{ok,...}` reply. Exits non-zero on transport failure,
 /// empty reply (Nex too old for request/response on this command),
@@ -411,6 +459,36 @@ func extractPositionalTail(from args: inout ArraySlice<String>) -> [String] {
     let tail = Array(args[args.index(after: idx)...])
     args = args[..<idx]
     return tail
+}
+
+/// After a subcommand has consumed every flag it recognises, reject
+/// whatever is left so a stray positional or a mistyped flag fails loudly
+/// instead of being silently dropped (issue #237). Silent fallthrough is
+/// especially dangerous for verbs whose no-target default is "the calling
+/// pane" (e.g. `pane capture`): `nex pane capture <uuid>` would otherwise
+/// drop the positional and capture the caller's own pane with exit 0.
+///
+/// `positionalHint` is appended to the unexpected-positional message to
+/// point the caller at the flag they meant to use (e.g.
+/// "target panes with --target <name-or-uuid>"). `usage`, when supplied,
+/// prints the subcommand's usage block to stderr before exiting.
+/// A no-op when `args` is empty, so callers can invoke it unconditionally.
+func rejectLeftoverArgs(
+    _ args: ArraySlice<String>,
+    command: String,
+    positionalHint: String? = nil,
+    usage: ((UnsafeMutablePointer<FILE>) -> Void)? = nil
+) {
+    guard let first = args.first else { return }
+    if first.hasPrefix("-") {
+        fputs("\(command): unknown option \(first)\n", stderr)
+    } else if let positionalHint {
+        fputs("\(command): unexpected argument '\(first)' — \(positionalHint)\n", stderr)
+    } else {
+        fputs("\(command): unexpected argument '\(first)'\n", stderr)
+    }
+    usage?(stderr)
+    exit(1)
 }
 
 func requirePaneID() -> String {
@@ -518,6 +596,23 @@ func decodeReply(
 ) -> [String: Any] {
     let data = readReplyOrExit(payload, command: command, readTimeoutOverride: readTimeoutOverride)
     return parseReplyOrExit(data, command: command)
+}
+
+/// Round-trip variant for batch commands (bulk `workspace delete`) that
+/// must keep going after a single `ok:false`. Transport failure, an
+/// empty reply, and invalid JSON stay fatal for the whole batch — they
+/// mean the socket is dead or the app is too old, so no later id would
+/// fare better. A well-formed `{ok:false}` is *returned* (never exits)
+/// so the caller records the per-id failure and moves on.
+func decodeReplyAllowingFailure(
+    _ payload: [String: Any], command: String
+) -> [String: Any] {
+    let data = readReplyOrExit(payload, command: command)
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fputs("\(command): invalid JSON response\n", stderr)
+        exit(1)
+    }
+    return json
 }
 
 /// Default read timeout (seconds) for request/response commands.
@@ -846,6 +941,9 @@ func handlePane(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        // `pane split` takes no positionals; reject stray args / unknown
+        // flags instead of silently dropping them (issue #237).
+        rejectLeftoverArgs(args, command: "nex pane split", usage: printPaneSplitUsage)
         let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         guard target != nil || workspace != nil || originPaneID != nil else {
             fputs("nex pane split: requires --target <name-or-uuid> or --workspace <name-or-id> when called from outside a Nex pane\n", stderr)
@@ -871,6 +969,9 @@ func handlePane(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        // `pane create` takes no positionals; reject stray args / unknown
+        // flags instead of silently dropping them (issue #237).
+        rejectLeftoverArgs(args, command: "nex pane create", usage: printPaneCreateUsage)
         let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         guard target != nil || workspace != nil || originPaneID != nil else {
             fputs("nex pane create: requires --workspace <name-or-id> or --target <name-or-uuid> when called from outside a Nex pane\n", stderr)
@@ -2519,10 +2620,17 @@ private func sendWebReplyAndPrintCookiesDelete(_ payload: [String: Any]) {
 // MARK: - pane list
 
 func handlePaneList(_ args: inout ArraySlice<String>) {
+    if args.contains("--help") || args.contains("-h") {
+        printPaneListUsage(stream: stdout)
+        exit(0)
+    }
     let workspace = parseFlag("--workspace", from: &args)
     let currentOnly = popSwitch("--current", from: &args)
     let asJSON = popSwitch("--json", from: &args)
     let noHeader = popSwitch("--no-header", from: &args)
+    // `pane list` takes no positionals; reject stray args and unknown
+    // flags rather than silently ignoring them (issue #237).
+    rejectLeftoverArgs(args, command: "nex pane list", usage: printPaneListUsage)
 
     if workspace != nil, currentOnly {
         fputs("pane list: --workspace and --current are mutually exclusive\n", stderr)
@@ -2638,10 +2746,22 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
 // MARK: - pane capture
 
 func handlePaneCapture(_ args: inout ArraySlice<String>) {
+    if args.contains("--help") || args.contains("-h") {
+        printPaneCaptureUsage(stream: stdout)
+        exit(0)
+    }
     let target = parseFlag("--target", from: &args)
     let workspace = parseFlag("--workspace", from: &args)
     let linesArg = parseFlag("--lines", from: &args)
     let scrollback = popSwitch("--scrollback", from: &args)
+    // The target is flag-only. Reject any stray positional or unknown
+    // flag so `nex pane capture <uuid>` fails loudly instead of silently
+    // falling back to capturing the calling pane (issue #237).
+    rejectLeftoverArgs(
+        args, command: "nex pane capture",
+        positionalHint: "target panes with --target <name-or-uuid>",
+        usage: printPaneCaptureUsage
+    )
 
     var lines: Int?
     if let linesArg {
@@ -2689,19 +2809,39 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace create|move|profile [...]\n", stderr)
+        fputs("Usage: nex workspace list|create|move|delete|profile [...]\n", stderr)
         exit(1)
     }
 
     switch action {
+    case "list":
+        let asJSON = popSwitch("--json", from: &args)
+        let noHeader = popSwitch("--no-header", from: &args)
+        guard args.isEmpty else {
+            fputs("Usage: nex workspace list [--json] [--no-header]\n", stderr)
+            exit(1)
+        }
+
+        let json = decodeReply(["command": "workspace-list"], command: "nex workspace list")
+        let workspaces = (json["workspaces"] as? [[String: Any]]) ?? []
+        if asJSON {
+            if let out = try? JSONSerialization.data(withJSONObject: workspaces, options: [.sortedKeys]),
+               let string = String(data: out, encoding: .utf8) {
+                print(string)
+            }
+            return
+        }
+        printWorkspaceTable(workspaces, noHeader: noHeader)
+
     case "create":
         let name = parseFlag("--name", from: &args)
         let path = parseFlag("--path", from: &args)
         let color = parseFlag("--color", from: &args)
         let group = parseFlag("--group", from: &args)
         let profile = parseFlag("--profile", from: &args)
+        let json = popSwitch("--json", from: &args)
 
-        var payload = [
+        var payload: [String: Any] = [
             "command": "workspace-create"
         ]
         if let name { payload["name"] = name }
@@ -2710,7 +2850,24 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         if let group { payload["group"] = group }
         if let profile { payload["profile"] = profile }
 
-        sendJSON(payload)
+        // Request/response (matches `pane create` / `workspace delete`):
+        // returns the newly created workspace's id so scripts can chain.
+        let reply = decodeReply(payload, command: "nex workspace create")
+        if json {
+            if let data = try? JSONSerialization.data(
+                withJSONObject: reply, options: [.sortedKeys]
+            ), let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        } else {
+            let wsName = (reply["workspace_name"] as? String) ?? (name ?? "Workspace")
+            let wsID = (reply["workspace_id"] as? String) ?? "?"
+            if let grp = reply["group"] as? String {
+                print("created workspace \(wsName) (\(wsID)) in group \(grp)")
+            } else {
+                print("created workspace \(wsName) (\(wsID))")
+            }
+        }
 
     case "move":
         guard let nameOrID = args.popFirst() else {
@@ -2747,6 +2904,95 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
 
         sendJSONAny(payload)
 
+    case "delete":
+        // `--force`/`-y` bypass the server's running-agents guard: without
+        // it, deleting a workspace that still has active agents is refused
+        // (mirrors the app-quit warning). Popped unconditionally (not
+        // short-circuited) so both are consumed when passed together.
+        let forceFlag = popSwitch("--force", from: &args)
+        let yFlag = popSwitch("-y", from: &args)
+        let force = forceFlag || yFlag
+        let prune = popSwitch("--prune-worktree", from: &args)
+        let json = popSwitch("--json", from: &args)
+
+        // Everything left must be bare name-or-id targets. Reject stray
+        // flags so a typo can't be silently swallowed as an id.
+        let targets = Array(args)
+        if let bad = targets.first(where: { $0.hasPrefix("-") }) {
+            fputs("Unknown option for workspace delete: \(bad)\n", stderr)
+            fputs("Usage: nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]\n", stderr)
+            exit(1)
+        }
+        // Dedupe exact-duplicate ids, preserving first-seen order, so a
+        // repeated argument doesn't resolve to "not found" the 2nd time.
+        var seen = Set<String>()
+        let ids = targets.filter { seen.insert($0).inserted }
+        guard !ids.isEmpty else {
+            fputs("Usage: nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]\n", stderr)
+            exit(1)
+        }
+
+        var results: [[String: Any]] = []
+        var anyFailed = false
+        for id in ids {
+            let reply = decodeReplyAllowingFailure(
+                ["command": "workspace-delete", "name": id, "force": force],
+                command: "nex workspace delete"
+            )
+            let ok = (reply["ok"] as? Bool) ?? false
+            let wsName = (reply["workspace_name"] as? String) ?? id
+            var record: [String: Any] = ["id": id, "ok": ok]
+
+            if ok {
+                if let wsID = reply["workspace_id"] as? String { record["workspace_id"] = wsID }
+                record["workspace_name"] = wsName
+                let path = reply["path"] as? String
+                if let path { record["path"] = path }
+
+                if !json { print("deleted workspace \(wsName)") }
+
+                if prune {
+                    if let path {
+                        let (removed, message) = pruneWorktree(path: path)
+                        record["worktree_pruned"] = removed
+                        if !removed { record["worktree_error"] = message }
+                        if !json {
+                            if removed { print("  \(message)") }
+                            else { fputs("Warning: \(message)\n", stderr) }
+                        }
+                    } else {
+                        let message = "workspace \(wsName) had no panes; no directory to prune"
+                        record["worktree_pruned"] = false
+                        record["worktree_error"] = message
+                        if !json { fputs("Warning: \(message)\n", stderr) }
+                    }
+                }
+            } else {
+                anyFailed = true
+                let err = (reply["error"] as? String) ?? "unknown error"
+                record["error"] = err
+                // Surface the running-agents count from a guard refusal so
+                // `--json` consumers can act on it (the human path already
+                // has it in the error string).
+                if let activeAgents = reply["active_agents"] as? Int {
+                    record["active_agents"] = activeAgents
+                }
+                if !json { fputs("nex workspace delete: \(err)\n", stderr) }
+            }
+            results.append(record)
+        }
+
+        if json {
+            // Compact single-line array to match the CLI's other
+            // list-style `--json` output (pane list, graft status, etc).
+            if let data = try? JSONSerialization.data(
+                withJSONObject: results, options: [.sortedKeys]
+            ), let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        }
+        if anyFailed { exit(1) }
+
     case "profile":
         guard let nameOrID = args.popFirst() else {
             fputs("Usage: nex workspace profile <name-or-id> (<profile> | --clear)\n", stderr)
@@ -2777,18 +3023,86 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
 
     default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: create, move, profile\n", stderr)
+        fputs("Valid actions: list, create, move, delete, profile\n", stderr)
         exit(1)
+    }
+}
+
+/// Render `workspace-list` as ID, NAME, GROUP, PANES, ACTIVE. Workspaces
+/// keep their sidebar order; `GROUP` is `-` for top-level workspaces and
+/// `ACTIVE` marks the currently focused workspace.
+func printWorkspaceTable(_ workspaces: [[String: Any]], noHeader: Bool) {
+    func shortUUID(_ value: String) -> String {
+        guard value.count >= 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
+    }
+
+    struct Row {
+        let id: String
+        let name: String
+        let group: String
+        let panes: String
+        let active: String
+    }
+
+    let rows: [Row] = workspaces.map { entry in
+        Row(
+            id: shortUUID((entry["id"] as? String) ?? ""),
+            name: (entry["name"] as? String) ?? "",
+            group: (entry["group_name"] as? String) ?? "-",
+            panes: String((entry["pane_count"] as? Int) ?? 0),
+            active: ((entry["is_active"] as? Bool) ?? false) ? "●" : "-"
+        )
+    }
+
+    let headers = ["ID", "NAME", "GROUP", "PANES", "ACTIVE"]
+    var widths = headers.map(\.count)
+    for row in rows {
+        widths[0] = max(widths[0], row.id.count)
+        widths[1] = max(widths[1], row.name.count)
+        widths[2] = max(widths[2], row.group.count)
+        widths[3] = max(widths[3], row.panes.count)
+    }
+
+    func pad(_ value: String, _ width: Int) -> String {
+        if value.count >= width { return value }
+        return value + String(repeating: " ", count: width - value.count)
+    }
+
+    if !noHeader {
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(headers[4])")
+    }
+    for row in rows {
+        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.group, widths[2]))  \(pad(row.panes, widths[3]))  \(row.active)")
     }
 }
 
 func handleGroup(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex group create|rename|delete [...]\n", stderr)
+        fputs("Usage: nex group list|create|rename|delete [...]\n", stderr)
         exit(1)
     }
 
     switch action {
+    case "list":
+        let asJSON = popSwitch("--json", from: &args)
+        let noHeader = popSwitch("--no-header", from: &args)
+        guard args.isEmpty else {
+            fputs("Usage: nex group list [--json] [--no-header]\n", stderr)
+            exit(1)
+        }
+
+        let json = decodeReply(["command": "group-list"], command: "nex group list")
+        let groups = (json["groups"] as? [[String: Any]]) ?? []
+        if asJSON {
+            if let out = try? JSONSerialization.data(withJSONObject: groups, options: [.sortedKeys]),
+               let string = String(data: out, encoding: .utf8) {
+                print(string)
+            }
+            return
+        }
+        printGroupTable(groups, noHeader: noHeader)
+
     case "create":
         guard let name = args.popFirst() else {
             fputs("Usage: nex group create <name> [--color blue]\n", stderr)
@@ -2828,8 +3142,59 @@ func handleGroup(_ args: inout ArraySlice<String>) {
 
     default:
         fputs("Unknown group action: \(action)\n", stderr)
-        fputs("Valid actions: create, rename, delete\n", stderr)
+        fputs("Valid actions: list, create, rename, delete\n", stderr)
         exit(1)
+    }
+}
+
+/// Render `group-list` as ID, NAME, COLOR, WORKSPACES. Member workspaces
+/// retain their sidebar order and display as `name (short-id)` pairs.
+func printGroupTable(_ groups: [[String: Any]], noHeader: Bool) {
+    struct Row {
+        let id: String
+        let name: String
+        let color: String
+        let workspaces: String
+    }
+
+    func shortUUID(_ value: String) -> String {
+        guard value.count >= 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
+    }
+
+    let rows: [Row] = groups.map { entry in
+        let members = (entry["workspaces"] as? [[String: Any]]) ?? []
+        let memberText = members.map { member in
+            let id = shortUUID((member["id"] as? String) ?? "")
+            let name = (member["name"] as? String) ?? ""
+            return name.isEmpty ? id : "\(name) (\(id))"
+        }.joined(separator: ", ")
+        return Row(
+            id: shortUUID((entry["id"] as? String) ?? ""),
+            name: (entry["name"] as? String) ?? "",
+            color: (entry["color"] as? String) ?? "-",
+            workspaces: memberText.isEmpty ? "-" : memberText
+        )
+    }
+
+    let headers = ["ID", "NAME", "COLOR", "WORKSPACES"]
+    var widths = headers.map(\.count)
+    for row in rows {
+        widths[0] = max(widths[0], row.id.count)
+        widths[1] = max(widths[1], row.name.count)
+        widths[2] = max(widths[2], row.color.count)
+    }
+
+    func pad(_ value: String, _ width: Int) -> String {
+        if value.count >= width { return value }
+        return value + String(repeating: " ", count: width - value.count)
+    }
+
+    if !noHeader {
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(headers[3])")
+    }
+    for row in rows {
+        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.color, widths[2]))  \(row.workspaces)")
     }
 }
 
@@ -3524,11 +3889,13 @@ struct DoctorReport {
     }
 }
 
-/// Minimal subprocess runner — captures stdout + exit code. Doctor
-/// uses it for `pgrep`; we keep it scoped to doctor since the rest
-/// of the CLI talks to the app over the socket and doesn't shell out.
+/// Minimal subprocess runner — captures stdout, stderr, and exit code.
+/// `doctor` uses it for `ps`; `workspace delete --prune-worktree` uses
+/// it to shell out to `git worktree remove` (and to resolve the
+/// worktree root), surfacing git's own stderr in the warning it prints.
 struct ProcessResult {
     let stdout: String
+    let stderr: String
     let exitCode: Int32
 }
 
@@ -3568,13 +3935,55 @@ func runProcess(_ path: String, args: [String]) -> ProcessResult {
             group.leave()
         }
         group.wait()
-        _ = stderrData
         task.waitUntilExit()
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-        return ProcessResult(stdout: stdout, exitCode: task.terminationStatus)
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        return ProcessResult(stdout: stdout, stderr: stderr, exitCode: task.terminationStatus)
     } catch {
-        return ProcessResult(stdout: "", exitCode: -1)
+        return ProcessResult(stdout: "", stderr: "\(error.localizedDescription)", exitCode: -1)
     }
+}
+
+/// Best-effort removal of the git worktree backing a just-deleted
+/// workspace (`nex workspace delete --prune-worktree`). `path` is the
+/// deleted workspace's directory (a shell pane's *current* cwd); we
+/// resolve it to the worktree root via `git rev-parse --show-toplevel`
+/// (so a pane cwd'd into a subdirectory still works), then run
+/// `git worktree remove` from the *main* worktree so git isn't invoked
+/// from inside the tree it's removing. Deliberately non-forcing: git
+/// refuses a dirty or locked worktree and the primary checkout, and a
+/// non-repo path fails to resolve — every failure is returned as a
+/// message the caller prints as a `Warning:` (git's own stderr is
+/// folded in). The workspace stays deleted regardless. Returns
+/// `(removed, message)`.
+func pruneWorktree(path: String) -> (removed: Bool, message: String) {
+    let env = "/usr/bin/env"
+    let top = runProcess(env, args: ["git", "-C", path, "rev-parse", "--show-toplevel"])
+    guard top.exitCode == 0 else {
+        let detail = top.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (false, "not a git worktree, skipped prune: \(path)" + (detail.isEmpty ? "" : " (\(detail))"))
+    }
+    let root = top.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Resolve the main worktree so `git worktree remove` runs from
+    // outside the target. `--git-common-dir` is `<main>/.git`; its
+    // parent is the main worktree. Fall back to the root itself if the
+    // lookup fails (older git / unusual layout).
+    let common = runProcess(env, args: ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    let runDir: String
+    if common.exitCode == 0 {
+        let commonDir = common.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        runDir = (commonDir as NSString).deletingLastPathComponent
+    } else {
+        runDir = root
+    }
+
+    let remove = runProcess(env, args: ["git", "-C", runDir, "worktree", "remove", root])
+    if remove.exitCode == 0 {
+        return (true, "removed worktree: \(root)")
+    }
+    let detail = remove.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (false, "git worktree remove failed for \(root)" + (detail.isEmpty ? "" : ": \(detail)"))
 }
 
 // MARK: - Main

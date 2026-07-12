@@ -115,8 +115,23 @@ nex pane name [--target <name-or-uuid>] [--workspace <name-or-uuid>] <label>
 # escape sequences, partial input, paste-safe structured content).
 nex pane send [--bare] [--json] --target <label-or-uuid> [--workspace <name-or-uuid>] <command...>
 
-# List panes (only command that returns data — use for reconciliation)
+# List panes (read-only inventory — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
+
+# Read another pane's terminal contents as text (viewport, or full
+# scrollback with --scrollback). WITHOUT --target it captures the CALLING
+# pane — always pass --target to read a worker. The target is flag-only:
+# a bare `nex pane capture <uuid>` is rejected, not treated as --target.
+nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+# Move a pane to another workspace (creates it with --create).
+nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+
+# List workspace groups and their ordered member workspaces
+nex group list [--json] [--no-header]
+
+# List every workspace (grouped + top-level) with its parent group
+nex workspace list [--json] [--no-header]
 
 # Print current pane's UUID (local; no socket). Exit 1 if not in Nex.
 nex pane id
@@ -150,12 +165,12 @@ by default to avoid stderr spam when Nex is closed; set
 
 ### `pane list` — reconcile with live state
 
-`pane list` is the only Nex command that returns data. Use it whenever a
-coordinator needs to know what panes actually exist right now — panes can
-be closed by the user, crash, or be moved between workspaces. `pane send`
-exits non-zero with a structured error on a missing/ambiguous target,
-but checking `pane list` first lets a coordinator skip
-sends to dead workers and surface a clearer message.
+`pane list` is Nex's read-only pane inventory. Use it whenever a coordinator
+needs to know what panes actually exist right now — panes can be closed by
+the user, crash, or be moved between workspaces. `pane send` exits non-zero
+with a structured error on a missing/ambiguous target, but checking
+`pane list` first lets a coordinator skip sends to dead workers and surface
+a clearer message.
 
 ```bash
 # Human-readable (default)
@@ -173,6 +188,7 @@ nex pane list --workspace nex
 
 Each JSON entry includes: `id`, `label`, `type` (`shell` / `markdown` /
 `scratchpad` / `diff` / `web`), `title`, `workspace_id`, `workspace_name`,
+optional `group_id` and `group_name` (both absent for top-level workspaces),
 `working_directory`, `git_branch`, `status` (`idle`/`running`/
 `waitingForInput`), `agent_session_id`, `is_focused`,
 `is_active_workspace`, `created_at`, `last_activity_at`.
@@ -200,7 +216,48 @@ nex pane list --json | jq -r '.[] | select(.label | startswith("worker-"))
 
 # Find a specific pane's UUID before a `pane send`
 uuid=$(nex pane list --json | jq -r '.[] | select(.label == "build") | .id')
+
+# Find my workspace's group (`top-level` means it has no parent group)
+nex pane list --json | jq -r --arg pane "$NEX_PANE_ID" \
+  '.[] | select(.id == $pane) | .group_name // "top-level"'
 ```
+
+### `group list` — inspect workspace grouping
+
+Use `group list` when an orchestrator needs the full sidebar grouping rather
+than the parent of one pane's workspace. Groups and member workspaces retain
+their sidebar order.
+
+```bash
+# Human-readable group table
+nex group list
+
+# JSON for scripts; an empty state is []
+nex group list --json
+```
+
+Each JSON group includes `id`, `name`, optional `color`, and `workspaces`.
+Each `workspaces` entry contains the member workspace's `id` and `name`.
+
+### `workspace list` — inventory every workspace
+
+`group list` only shows *grouped* workspaces. When an orchestrator needs the
+full workspace inventory (top-level and grouped together, in sidebar order),
+use `workspace list`. Unlike the sidebar itself, members of a collapsed group
+are still listed.
+
+```bash
+# Human-readable table (ID, NAME, GROUP, PANES, ACTIVE)
+nex workspace list
+
+# JSON for scripts; an empty state is []
+nex workspace list --json
+```
+
+Each JSON entry includes `id`, `name`, `color`, `pane_count`, `is_active`,
+and optional `group_id` / `group_name` (both absent for a top-level
+workspace). The `group_name` field matches the one on `pane list`, so
+`.group_name // "top-level"` answers "which group is this workspace in".
 
 ### Event Commands (Agent Lifecycle)
 
@@ -222,8 +279,39 @@ not `claude --resume` a session that has already exited.
 ### Workspace Commands
 
 ```bash
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--profile <name>]
+# Create a workspace (request/response). Replies with the new workspace's
+# id — `created workspace <name> (<uuid>)`, or the raw {ok,workspace_id,
+# workspace_name,group?} object with --json — so a coordinator can capture
+# the id to target it later. --group creates the group if missing.
+# --profile assigns a workspace profile (env-var injection into every pane).
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--profile <name>] [--json]
+
+# Assign or clear a workspace's profile (fire-and-forget). Applies to the
+# NEXT pane spawned in the workspace; existing panes keep their env.
 nex workspace profile <name-or-id> (<profile> | --clear)
+
+# Delete one or more workspaces by name-or-id (request/response). Deletes
+# outright — no CLI prompt — closing any remaining panes. Refuses to
+# delete the last remaining workspace. Exits non-zero if any delete fails.
+#   --force / -y      delete even if the workspace has RUNNING AGENTS.
+#                     Without it, a workspace with active agents
+#                     (running/waiting panes) is refused (mirrors the
+#                     app-quit warning); the reply carries `active_agents`.
+#                     In the GUI this is a "Delete anyway?" dialog with a
+#                     "Don't ask again" checkbox instead.
+#   --prune-worktree  also `git worktree remove` the deleted workspace's
+#                     directory. Best-effort + non-forcing: git refuses a
+#                     dirty/locked worktree or the main checkout (a Warning,
+#                     not a failure). An *empty* workspace has no directory
+#                     to prune — delete it before closing its panes if you
+#                     want the worktree reclaimed automatically.
+#   --json            compact per-id result array: each row has `id` (the
+#                     arg as typed), `ok`, and on success `workspace_id`,
+#                     `workspace_name`, `path?`, `worktree_pruned?`,
+#                     `worktree_error?` — or `error` on failure.
+# Exit code reflects DELETES only: a prune that git refuses is a Warning,
+# not a failure, so the command still exits 0 if the workspace was deleted.
+nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 ```
 
 ### Workspace Profiles (multi-account env injection)

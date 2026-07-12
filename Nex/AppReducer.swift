@@ -102,13 +102,7 @@ struct AppReducer {
             var agentCount = 0
             var workspaceCount = 0
             for workspace in workspaces {
-                let visible = workspace.panes.reduce(into: 0) { acc, pane in
-                    if pane.status != .idle { acc += 1 }
-                }
-                let parked = workspace.parkedPanes.reduce(into: 0) { acc, pane in
-                    if pane.status != .idle { acc += 1 }
-                }
-                let count = visible + parked
+                let count = workspace.activeAgentCount
                 if count > 0 {
                     agentCount += count
                     workspaceCount += 1
@@ -367,7 +361,7 @@ struct AppReducer {
 
     enum Action: Equatable {
         case appLaunched
-        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil, profileName: String? = nil)
+        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil, profileName: String? = nil, id: UUID? = nil)
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
         case moveGroup(id: UUID, toIndex: Int)
@@ -1043,11 +1037,14 @@ struct AppReducer {
                     }
                 )
 
-            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID, let newProfileName):
+            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID, let newProfileName, let id):
                 let previousActiveID = state.activeWorkspaceID
                 let resolvedColor = color ?? state.workspaces.nextRandomColor()
                 var workspace = WorkspaceFeature.State(
-                    id: uuid(),
+                    // `id` is pre-minted by the socket create path so its
+                    // reply can return the new workspace's id; every other
+                    // caller passes nil and gets a fresh uuid here.
+                    id: id ?? uuid(),
                     name: name,
                     color: resolvedColor
                 )

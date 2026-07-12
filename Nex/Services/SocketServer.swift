@@ -57,13 +57,23 @@ enum SocketMessage: Equatable {
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
+    case workspaceList
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?, profile: String? = nil)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
+    /// Delete a single workspace by name-or-id. Request/response
+    /// (`replyCommandAllowlist`) — the CLI loops one request per id for
+    /// bulk `nex workspace delete a b c`, and reads back the deleted
+    /// workspace's directory so `--prune-worktree` can remove it.
+    /// `force` (from `--force`/`-y`) bypasses the running-agents guard:
+    /// without it, deleting a workspace that still has active agents is
+    /// refused (mirrors the app-quit warning).
+    case workspaceDelete(nameOrID: String, force: Bool)
     /// `nex workspace profile <name-or-id> (<profile> | --clear)`.
     /// `profile` nil = clear. Fire-and-forget (matches `workspace-move`).
     case workspaceProfile(nameOrID: String, profile: String?)
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
+    case groupList
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
@@ -311,9 +321,11 @@ enum SocketMessage: Equatable {
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
+    "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
+    "workspace-create", "workspace-delete",
     "graft-start", "graft-stop", "graft-status",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
@@ -722,6 +734,8 @@ final class SocketServer: Sendable {
         // Group/workspace-management fields
         var newName: String?
         var cascade: Bool?
+        /// `workspace-delete --force`/`-y` — bypass the running-agents guard.
+        var force: Bool?
         var index: Int?
         var group: String?
         /// `workspace-create --profile` / `workspace-profile` — the
@@ -823,7 +837,7 @@ final class SocketServer: Sendable {
             case sessionID = "session_id"
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
-            case cascade, index, group, profile
+            case cascade, force, index, group, profile
             case workspace, scope
             case reuse
             case repoPath = "repo_path"
@@ -893,6 +907,10 @@ final class SocketServer: Sendable {
             ), wire)
         }
 
+        if wire.command == "workspace-list" {
+            return (.workspaceList, wire)
+        }
+
         if wire.command == "workspace-move" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             // `group` nil = top-level; empty-string is normalised to
@@ -902,11 +920,20 @@ final class SocketServer: Sendable {
             return (.workspaceMove(nameOrID: nameOrID, group: group, index: wire.index), wire)
         }
 
+        if wire.command == "workspace-delete" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.workspaceDelete(nameOrID: nameOrID, force: wire.force ?? false), wire)
+        }
+
         if wire.command == "workspace-profile" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             // Empty/missing profile = clear the assignment.
             let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
             return (.workspaceProfile(nameOrID: nameOrID, profile: profile), wire)
+        }
+
+        if wire.command == "group-list" {
+            return (.groupList, wire)
         }
 
         if wire.command == "group-create" {

@@ -382,6 +382,10 @@ extension AppReducer {
 
                 // MARK: Workspace commands
 
+                case .workspaceList:
+                    handleWorkspaceList(state: state, reply: reply)
+                    return .none
+
                 case .workspaceCreate(let name, let path, let color, let group, let profile):
                     return handleSocketWorkspaceCreate(
                         &state,
@@ -389,7 +393,8 @@ extension AppReducer {
                         path: path,
                         color: color,
                         group: group,
-                        profile: profile
+                        profile: profile,
+                        reply: reply
                     )
 
                 case .workspaceMove(let nameOrID, let group, let index):
@@ -400,6 +405,14 @@ extension AppReducer {
                         index: index
                     )
 
+                case .workspaceDelete(let nameOrID, let force):
+                    return handleWorkspaceDelete(
+                        state: state,
+                        nameOrID: nameOrID,
+                        force: force,
+                        reply: reply
+                    )
+
                 case .workspaceProfile(let nameOrID, let profile):
                     // UUID-wins / unique-name / ambiguous→no-op semantics
                     // come from `resolveWorkspace`, matching workspace-move.
@@ -408,6 +421,10 @@ extension AppReducer {
                         id: workspace.id,
                         action: .setProfile(profile)
                     )))
+
+                case .groupList:
+                    handleGroupList(state: state, reply: reply)
+                    return .none
 
                 case .groupCreate(let name, let color):
                     return handleSocketGroupCreate(&state, name: name, color: color)
@@ -812,20 +829,44 @@ extension AppReducer {
         path: String?,
         color: WorkspaceColor?,
         group: String?,
-        profile: String? = nil
+        profile: String? = nil,
+        reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        let createEffect: Effect<Action> = .send(.createWorkspace(
-            name: name ?? "Workspace",
-            color: color,
-            workingDirectory: path,
-            profileName: profile
-        ))
+        let workspaceName = name ?? "Workspace"
+
+        /// Success ack: `{ok, workspace_id, workspace_name, group?}`.
+        /// `reply == nil` is the legacy fire-and-forget path.
+        func succeed(id: UUID, group groupName: String? = nil) {
+            var payload: [String: Any] = [
+                "ok": true,
+                "workspace_id": id.uuidString,
+                "workspace_name": workspaceName
+            ]
+            if let groupName { payload["group"] = groupName }
+            reply?.send(payload)
+            reply?.close()
+        }
+
         // A missing `group` OR a group that's all whitespace falls
         // back to the top-level create path. Whitespace-only names
         // wouldn't survive the existing `createGroup` trim check
         // anyway, so treat them as "no group specified."
         let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmedGroup, !trimmedGroup.isEmpty else { return createEffect }
+        guard let trimmedGroup, !trimmedGroup.isEmpty else {
+            // Top-level create. Pre-mint the id (after this guard, so the
+            // uuid sequence is unchanged for the ambiguity/error paths)
+            // and thread it so `.createWorkspace` uses the same one the
+            // reply reports.
+            let newID = uuid()
+            succeed(id: newID)
+            return .send(.createWorkspace(
+                name: workspaceName,
+                color: color,
+                workingDirectory: path,
+                profileName: profile,
+                id: newID
+            ))
+        }
 
         // Resolve BEFORE any state mutation so an ambiguous-name
         // match can cleanly abort the whole message. `resolveGroup`
@@ -839,6 +880,8 @@ extension AppReducer {
             // create a third. The user needs to disambiguate (e.g.
             // by passing a UUID) or rename one of the existing
             // groups first.
+            reply?.send(["ok": false, "error": "group name is ambiguous: \(trimmedGroup) (use the id or rename an existing group)"])
+            reply?.close()
             return .none
         }
 
@@ -850,7 +893,7 @@ extension AppReducer {
         let newWorkspaceID = uuid()
         let workspace = WorkspaceFeature.State(
             id: newWorkspaceID,
-            name: name ?? "Workspace",
+            name: workspaceName,
             color: color ?? state.workspaces.nextRandomColor()
         )
         var seeded = workspace
@@ -908,6 +951,8 @@ extension AppReducer {
             }
         }()
 
+        succeed(id: newWorkspaceID, group: trimmedGroup)
+
         // Create the initial surface for the workspace, then move it
         // under the resolved group, then persist. Mirrors the
         // effects `createWorkspace` would run in the non-group path.
@@ -963,6 +1008,90 @@ extension AppReducer {
         ))
     }
 
+    /// Resolve + dispatch a `workspace-delete` request. Mirrors the
+    /// `handlePaneClose` reply shape. Refuses to delete the last
+    /// remaining workspace so the scripting path matches the GUI
+    /// context-menu Delete item, disabled at `workspaces.count <= 1`
+    /// (`WorkspaceListView`). Note this is deliberately stricter than
+    /// the app's runtime invariant — closing the last pane of the only
+    /// workspace via ⌘W does reach zero workspaces — but a bulk
+    /// scripted delete draining every workspace is a footgun worth
+    /// refusing. On success the reply carries the deleted workspace's
+    /// directory (a shell pane's *current* working directory, if any)
+    /// so `nex workspace delete --prune-worktree` can remove the
+    /// underlying git worktree client-side; an empty workspace has no
+    /// pane and therefore no `path`. `reply == nil` is the legacy
+    /// fire-and-forget path — the guards still apply and the delete is
+    /// dispatched on success, dropped silently on failure.
+    ///
+    /// `force` (from `--force`/`-y`) bypasses the running-agents guard:
+    /// unless forced, deleting a workspace that still has active agents
+    /// (panes or parked panes with a non-idle status) is refused, so a
+    /// scripted cleanup can't silently kill live agents. This mirrors
+    /// the app-quit warning; the GUI shows a "Delete anyway?" dialog for
+    /// the same case (see `WorkspaceDeleteGate`), while the CLI's
+    /// explicit `--force` is the scripting equivalent and is honoured
+    /// independent of that dialog's "Don't ask again" setting.
+    func handleWorkspaceDelete(
+        state: State,
+        nameOrID: String,
+        force: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ error: String, extra: [String: Any] = [:]) -> Effect<Action> {
+            reply?.send(["ok": false, "error": error].merging(extra) { _, new in new })
+            reply?.close()
+            return .none
+        }
+
+        guard let workspace = state.resolveWorkspace(nameOrID) else {
+            // `resolveWorkspace` returns nil for both "no match" and a
+            // non-unique name; distinguish them so a scripted bulk
+            // cleanup gets an actionable message instead of a
+            // misleading "not found" on a name that does exist.
+            if UUID(uuidString: nameOrID) == nil,
+               state.workspaces.count(where: { $0.name == nameOrID }) > 1 {
+                return fail("workspace name is ambiguous: \(nameOrID) (use the id)")
+            }
+            return fail("workspace not found: \(nameOrID)")
+        }
+
+        // Match the GUI's `.disabled(store.workspaces.count <= 1)`:
+        // never let a scripted delete drain the app to zero workspaces.
+        guard state.workspaces.count > 1 else {
+            return fail("refusing to delete the last workspace")
+        }
+
+        // Running-agents guard (mirrors the app-quit warning). An
+        // "active agent" is any pane — visible or parked — whose status
+        // is not `.idle`, matching `State.activeAgentSummary`.
+        let activeAgents = workspace.activeAgentCount
+        if !force, activeAgents > 0 {
+            let noun = activeAgents == 1 ? "agent" : "agents"
+            return fail(
+                "workspace \(workspace.name) has \(activeAgents) running \(noun); pass --force to delete anyway",
+                extra: ["active_agents": activeAgents]
+            )
+        }
+
+        var payload: [String: Any] = [
+            "ok": true,
+            "workspace_id": workspace.id.uuidString,
+            "workspace_name": workspace.name
+        ]
+        // Prefer a shell pane's cwd — that's the one rooted in the
+        // worktree. Any pane resolves to the same worktree root, but a
+        // markdown/web first pane may sit elsewhere (e.g. $HOME).
+        let prunePath = workspace.panes.first(where: { $0.type == .shell })?.workingDirectory
+            ?? workspace.panes.first?.workingDirectory
+        if let prunePath {
+            payload["path"] = prunePath
+        }
+        reply?.send(payload)
+        reply?.close()
+        return .send(.deleteWorkspace(workspace.id))
+    }
+
     /// Dispatch `group-create`. Trims + rejects whitespace-only
     /// names to match the existing `.createGroup` reducer handler
     /// — a blank group name would render as empty header chrome
@@ -983,6 +1112,105 @@ extension AppReducer {
         // Scroll the new group header into view (issue #187).
         state.sidebarScrollTarget = .group(newID)
         return .send(.persistState)
+    }
+
+    /// Build and send the read-only `workspace-list` response. Workspaces
+    /// follow sidebar order: top-level entries in `topLevelOrder`, and each
+    /// group's members (regardless of the group's collapse state, unlike
+    /// `visibleWorkspaceOrder`) in child order. Any workspace unreachable
+    /// through `topLevelOrder` (a recoverable ordering inconsistency) is
+    /// appended in state order so the CLI never hides it. Each entry carries
+    /// its parent group's `group_id` / `group_name` (absent for top-level
+    /// workspaces), matching the fields on `pane-list`.
+    func handleWorkspaceList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        var orderedWorkspaceIDs: [UUID] = []
+        var seen = Set<UUID>()
+        for item in state.topLevelOrder {
+            switch item {
+            case .workspace(let id):
+                if state.workspaces[id: id] != nil, seen.insert(id).inserted {
+                    orderedWorkspaceIDs.append(id)
+                }
+            case .group(let groupID):
+                guard let group = state.groups[id: groupID] else { continue }
+                for childID in group.childOrder
+                    where state.workspaces[id: childID] != nil && seen.insert(childID).inserted {
+                    orderedWorkspaceIDs.append(childID)
+                }
+            }
+        }
+        for workspace in state.workspaces where seen.insert(workspace.id).inserted {
+            orderedWorkspaceIDs.append(workspace.id)
+        }
+
+        let workspaces: [[String: Any]] = orderedWorkspaceIDs.compactMap { workspaceID in
+            guard let workspace = state.workspaces[id: workspaceID] else { return nil }
+            var entry: [String: Any] = [
+                "id": workspace.id.uuidString,
+                "name": workspace.name,
+                "color": workspace.color.rawValue,
+                "pane_count": workspace.panes.count,
+                "is_active": workspace.id == state.activeWorkspaceID
+            ]
+            if let groupID = state.groupID(forWorkspace: workspace.id),
+               let group = state.groups[id: groupID] {
+                entry["group_id"] = group.id.uuidString
+                entry["group_name"] = group.name
+            }
+            return entry
+        }
+
+        reply.send(["ok": true, "workspaces": workspaces])
+        reply.close()
+    }
+
+    /// Build and send the read-only `group-list` response. Groups follow
+    /// their header order in the sidebar; any unplaced groups are appended
+    /// in state order so a recoverable ordering inconsistency cannot hide
+    /// them from the CLI. Member workspaces follow each group's child order.
+    func handleGroupList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        // Route both the sidebar-order scan and the state-order append
+        // through the same `seen` filter so a corrupted `topLevelOrder`
+        // holding a duplicate `.group(id)` can't list a group twice.
+        var orderedGroupIDs: [UUID] = []
+        var seenGroupIDs = Set<UUID>()
+        for groupID in state.topLevelOrder.compactMap(\.groupID)
+            where seenGroupIDs.insert(groupID).inserted {
+            orderedGroupIDs.append(groupID)
+        }
+        for group in state.groups where seenGroupIDs.insert(group.id).inserted {
+            orderedGroupIDs.append(group.id)
+        }
+
+        let groups: [[String: Any]] = orderedGroupIDs.compactMap { groupID in
+            guard let group = state.groups[id: groupID] else { return nil }
+            let workspaces: [[String: Any]] = state.workspaces(inGroup: groupID).map { workspace in
+                [
+                    "id": workspace.id.uuidString,
+                    "name": workspace.name
+                ]
+            }
+            var entry: [String: Any] = [
+                "id": group.id.uuidString,
+                "name": group.name,
+                "workspaces": workspaces
+            ]
+            if let color = group.color { entry["color"] = color.rawValue }
+            return entry
+        }
+
+        reply.send(["ok": true, "groups": groups])
+        reply.close()
     }
 
     /// Shared success reply for `pane-split` / `pane-create`: the new
@@ -1127,6 +1355,8 @@ extension AppReducer {
 
         var panes: [[String: Any]] = []
         for workspace in workspaces {
+            let parentGroup = state.groupID(forWorkspace: workspace.id)
+                .flatMap { state.groups[id: $0] }
             for paneID in workspace.layout.allPaneIDs {
                 guard let pane = workspace.panes[id: paneID] else { continue }
                 var entry: [String: Any] = [
@@ -1146,6 +1376,10 @@ extension AppReducer {
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
+                if let parentGroup {
+                    entry["group_id"] = parentGroup.id.uuidString
+                    entry["group_name"] = parentGroup.name
+                }
                 panes.append(entry)
             }
         }

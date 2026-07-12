@@ -355,6 +355,14 @@ struct SocketParsingTests {
 
     // MARK: - parseWireMessage — Workspace commands
 
+    @Test func parseWorkspaceList() {
+        let data = jsonData("""
+        {"command":"workspace-list"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .workspaceList)
+    }
+
     @Test func parseWorkspaceCreateCommand() {
         let data = jsonData("""
         {"command":"workspace-create","name":"Test","path":"/tmp","color":"green"}
@@ -440,6 +448,14 @@ struct SocketParsingTests {
     }
 
     // MARK: - parseWireMessage — Group commands
+
+    @Test func parseGroupList() {
+        let data = jsonData("""
+        {"command":"group-list"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .groupList)
+    }
 
     @Test func parseGroupCreateMinimal() {
         let data = jsonData("""
