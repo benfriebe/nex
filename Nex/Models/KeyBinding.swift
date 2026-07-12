@@ -254,8 +254,9 @@ enum NexAction: String, CaseIterable {
     // fresh web pane from anywhere. The rest ship unbound; the
     // priority layer in `PaneShortcutMonitor` dispatches them directly
     // when the focused pane is a web pane, so the global ⌘L / ⌘R /
-    // ⌘[ / ⌘] / ⌘T / ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every
-    // other pane type.
+    // ⌘← / ⌘→ / ⌘T / ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every
+    // other pane type. (Back/forward moved off ⌘[ / ⌘] to ⌘← / ⌘→ so
+    // ⌘[ / ⌘] stay on focus prev/next even in a web pane — issue #229.)
     case openWebPane = "open_web_pane"
     case webFocusURLBar = "web_focus_url_bar"
     case webBack = "web_back"

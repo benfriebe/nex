@@ -191,11 +191,13 @@ final class PaneShortcutMonitor {
         if store.configHotkey.globalHotkey == trigger { return false }
 
         // Web pane priority layer: when the focused pane is a `.web`
-        // pane, consult a hard-coded ⌘L / ⌘R / ⌘[ / ⌘] map *before*
+        // pane, consult a hard-coded ⌘L / ⌘R / ⌘← / ⌘→ map *before*
         // falling through to the normal keybinding lookup. This way
         // the global defaults (close pane / focus prev / focus next /
         // markdown font) keep working for every other pane type while
-        // web panes get browser-style shortcuts.
+        // web panes get browser-style shortcuts. Back/forward use ⌘← /
+        // ⌘→ (not ⌘[ / ⌘]) so ⌘[ / ⌘] stay free for focus prev/next
+        // even inside a web pane (issue #229).
         if let consumed = handleWebPanePriorityShortcut(
             event: event,
             trigger: trigger,
@@ -215,7 +217,7 @@ final class PaneShortcutMonitor {
     /// Web pane priority layer. Returns:
     /// - `true`  - event consumed by a web action
     /// - `false` - event consumed by an intentional fall-through
-    ///   (e.g. URL bar editing + ⌘[ shouldn't trip back)
+    ///   (e.g. URL bar editing + ⌘← shouldn't trip back)
     /// - `nil`   - not applicable, the main layer should run
     private func handleWebPanePriorityShortcut(
         event _: NSEvent,
@@ -230,9 +232,9 @@ final class PaneShortcutMonitor {
         // ⌘ alone, no shift / ctrl / option.
         let isPlainCommand = trigger.modifiers == .command
         let isCmdShift = trigger.modifiers == [.command, .shift]
-        // ⌘[ / ⌘] — only intercept when the URL bar isn't editing.
-        // The bar is an NSTextField, which becomes the window's
-        // firstResponder via its NSText editor when typing.
+        // ⌘← / ⌘→ (back/forward) — only intercept when the URL bar
+        // isn't editing. The bar is an NSTextField, which becomes the
+        // window's firstResponder via its NSText editor when typing.
         let urlBarIsEditing: Bool = {
             guard let keyWindow = NSApp.keyWindow,
                   let responder = keyWindow.firstResponder else { return false }
@@ -249,14 +251,14 @@ final class PaneShortcutMonitor {
                 action: .webPaneReload(paneID: focusedID, hard: false)
             )))
             return true
-        case (33, true, _): // ⌘[
-            if urlBarIsEditing { return nil } // fall through to focusPreviousPane
+        case (123, true, _): // ⌘← → back
+            if urlBarIsEditing { return nil } // fall through so ⌘← moves the text cursor
             store.send(.workspaces(.element(
                 id: id,
                 action: .webPaneBack(paneID: focusedID)
             )))
             return true
-        case (30, true, _): // ⌘]
+        case (124, true, _): // ⌘→ → forward
             if urlBarIsEditing { return nil }
             store.send(.workspaces(.element(
                 id: id,
