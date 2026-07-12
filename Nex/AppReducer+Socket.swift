@@ -382,6 +382,10 @@ extension AppReducer {
 
                 // MARK: Workspace commands
 
+                case .workspaceList:
+                    handleWorkspaceList(state: state, reply: reply)
+                    return .none
+
                 case .workspaceCreate(let name, let path, let color, let group):
                     return handleSocketWorkspaceCreate(
                         &state,
@@ -407,6 +411,10 @@ extension AppReducer {
                         force: force,
                         reply: reply
                     )
+
+                case .groupList:
+                    handleGroupList(state: state, reply: reply)
+                    return .none
 
                 case .groupCreate(let name, let color):
                     return handleSocketGroupCreate(&state, name: name, color: color)
@@ -1083,6 +1091,105 @@ extension AppReducer {
         return .send(.persistState)
     }
 
+    /// Build and send the read-only `workspace-list` response. Workspaces
+    /// follow sidebar order: top-level entries in `topLevelOrder`, and each
+    /// group's members (regardless of the group's collapse state, unlike
+    /// `visibleWorkspaceOrder`) in child order. Any workspace unreachable
+    /// through `topLevelOrder` (a recoverable ordering inconsistency) is
+    /// appended in state order so the CLI never hides it. Each entry carries
+    /// its parent group's `group_id` / `group_name` (absent for top-level
+    /// workspaces), matching the fields on `pane-list`.
+    func handleWorkspaceList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        var orderedWorkspaceIDs: [UUID] = []
+        var seen = Set<UUID>()
+        for item in state.topLevelOrder {
+            switch item {
+            case .workspace(let id):
+                if state.workspaces[id: id] != nil, seen.insert(id).inserted {
+                    orderedWorkspaceIDs.append(id)
+                }
+            case .group(let groupID):
+                guard let group = state.groups[id: groupID] else { continue }
+                for childID in group.childOrder
+                    where state.workspaces[id: childID] != nil && seen.insert(childID).inserted {
+                    orderedWorkspaceIDs.append(childID)
+                }
+            }
+        }
+        for workspace in state.workspaces where seen.insert(workspace.id).inserted {
+            orderedWorkspaceIDs.append(workspace.id)
+        }
+
+        let workspaces: [[String: Any]] = orderedWorkspaceIDs.compactMap { workspaceID in
+            guard let workspace = state.workspaces[id: workspaceID] else { return nil }
+            var entry: [String: Any] = [
+                "id": workspace.id.uuidString,
+                "name": workspace.name,
+                "color": workspace.color.rawValue,
+                "pane_count": workspace.panes.count,
+                "is_active": workspace.id == state.activeWorkspaceID
+            ]
+            if let groupID = state.groupID(forWorkspace: workspace.id),
+               let group = state.groups[id: groupID] {
+                entry["group_id"] = group.id.uuidString
+                entry["group_name"] = group.name
+            }
+            return entry
+        }
+
+        reply.send(["ok": true, "workspaces": workspaces])
+        reply.close()
+    }
+
+    /// Build and send the read-only `group-list` response. Groups follow
+    /// their header order in the sidebar; any unplaced groups are appended
+    /// in state order so a recoverable ordering inconsistency cannot hide
+    /// them from the CLI. Member workspaces follow each group's child order.
+    func handleGroupList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        // Route both the sidebar-order scan and the state-order append
+        // through the same `seen` filter so a corrupted `topLevelOrder`
+        // holding a duplicate `.group(id)` can't list a group twice.
+        var orderedGroupIDs: [UUID] = []
+        var seenGroupIDs = Set<UUID>()
+        for groupID in state.topLevelOrder.compactMap(\.groupID)
+            where seenGroupIDs.insert(groupID).inserted {
+            orderedGroupIDs.append(groupID)
+        }
+        for group in state.groups where seenGroupIDs.insert(group.id).inserted {
+            orderedGroupIDs.append(group.id)
+        }
+
+        let groups: [[String: Any]] = orderedGroupIDs.compactMap { groupID in
+            guard let group = state.groups[id: groupID] else { return nil }
+            let workspaces: [[String: Any]] = state.workspaces(inGroup: groupID).map { workspace in
+                [
+                    "id": workspace.id.uuidString,
+                    "name": workspace.name
+                ]
+            }
+            var entry: [String: Any] = [
+                "id": group.id.uuidString,
+                "name": group.name,
+                "workspaces": workspaces
+            ]
+            if let color = group.color { entry["color"] = color.rawValue }
+            return entry
+        }
+
+        reply.send(["ok": true, "groups": groups])
+        reply.close()
+    }
+
     /// Shared success reply for `pane-split` / `pane-create`: the new
     /// pane's UUID is minted by the caller and threaded into the
     /// workspace action so the reply can return it before the pane is
@@ -1225,6 +1332,8 @@ extension AppReducer {
 
         var panes: [[String: Any]] = []
         for workspace in workspaces {
+            let parentGroup = state.groupID(forWorkspace: workspace.id)
+                .flatMap { state.groups[id: $0] }
             for paneID in workspace.layout.allPaneIDs {
                 guard let pane = workspace.panes[id: paneID] else { continue }
                 var entry: [String: Any] = [
@@ -1244,6 +1353,10 @@ extension AppReducer {
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
+                if let parentGroup {
+                    entry["group_id"] = parentGroup.id.uuidString
+                    entry["group_name"] = parentGroup.name
+                }
                 panes.append(entry)
             }
         }

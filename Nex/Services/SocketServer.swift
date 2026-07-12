@@ -57,6 +57,7 @@ enum SocketMessage: Equatable {
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
+    case workspaceList
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
     /// Delete a single workspace by name-or-id. Request/response
@@ -69,6 +70,7 @@ enum SocketMessage: Equatable {
     case workspaceDelete(nameOrID: String, force: Bool)
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
+    case groupList
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
@@ -316,6 +318,7 @@ enum SocketMessage: Equatable {
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
+    "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
@@ -894,6 +897,10 @@ final class SocketServer: Sendable {
             ), wire)
         }
 
+        if wire.command == "workspace-list" {
+            return (.workspaceList, wire)
+        }
+
         if wire.command == "workspace-move" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             // `group` nil = top-level; empty-string is normalised to
@@ -906,6 +913,10 @@ final class SocketServer: Sendable {
         if wire.command == "workspace-delete" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             return (.workspaceDelete(nameOrID: nameOrID, force: wire.force ?? false), wire)
+        }
+
+        if wire.command == "group-list" {
+            return (.groupList, wire)
         }
 
         if wire.command == "group-create" {

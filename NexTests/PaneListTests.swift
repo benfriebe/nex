@@ -12,6 +12,7 @@ import Testing
 struct PaneListTests {
     private static let ws1ID = UUID(uuidString: "70000000-0000-0000-0000-000000000001")!
     private static let ws2ID = UUID(uuidString: "70000000-0000-0000-0000-000000000002")!
+    private static let groupID = UUID(uuidString: "70000000-0000-0000-0000-0000000000A1")!
     private static let pane1 = UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!
     private static let pane2 = UUID(uuidString: "00000000-0000-0000-0000-00000000A002")!
     private static let pane3 = UUID(uuidString: "00000000-0000-0000-0000-00000000A003")!
@@ -34,12 +35,15 @@ struct PaneListTests {
 
     private func makeStore(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
-        activeWorkspaceID: UUID?
+        activeWorkspaceID: UUID?,
+        groups: IdentifiedArrayOf<WorkspaceGroup> = [],
+        topLevelOrder: [SidebarID]? = nil
     ) -> TestStoreOf<AppReducer> {
         var appState = AppReducer.State()
         appState.workspaces = workspaces
+        appState.groups = groups
         appState.activeWorkspaceID = activeWorkspaceID
-        appState.topLevelOrder = workspaces.map { .workspace($0.id) }
+        appState.topLevelOrder = topLevelOrder ?? workspaces.map { .workspace($0.id) }
 
         let store = TestStore(initialState: appState) {
             AppReducer()
@@ -176,6 +180,43 @@ struct PaneListTests {
         #expect(panes.count == 2)
         let ids = Set(panes.compactMap { $0["id"] as? String })
         #expect(ids == [Self.pane1.uuidString, Self.pane2.uuidString])
+    }
+
+    @Test func paneListIncludesParentGroupAndOmitsItForTopLevelWorkspace() async {
+        let groupedWorkspace = makeWorkspace(
+            id: Self.ws1ID, name: "alpha",
+            panes: [Pane(id: Self.pane1)]
+        )
+        let topLevelWorkspace = makeWorkspace(
+            id: Self.ws2ID, name: "beta",
+            panes: [Pane(id: Self.pane2)]
+        )
+        let group = WorkspaceGroup(
+            id: Self.groupID,
+            name: "Workers",
+            childOrder: [Self.ws1ID]
+        )
+        let store = makeStore(
+            workspaces: [groupedWorkspace, topLevelWorkspace],
+            activeWorkspaceID: Self.ws1ID,
+            groups: [group],
+            topLevelOrder: [.group(Self.groupID), .workspace(Self.ws2ID)]
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .paneList(paneID: nil, workspace: nil, scope: nil),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        let panes = sink.payloads[0]["panes"] as? [[String: Any]] ?? []
+        let grouped = panes.first(where: { ($0["id"] as? String) == Self.pane1.uuidString })
+        #expect(grouped?["group_id"] as? String == Self.groupID.uuidString)
+        #expect(grouped?["group_name"] as? String == "Workers")
+
+        let topLevel = panes.first(where: { ($0["id"] as? String) == Self.pane2.uuidString })
+        #expect(topLevel?["group_id"] == nil)
+        #expect(topLevel?["group_name"] == nil)
     }
 
     // MARK: - Error paths
