@@ -337,7 +337,7 @@ The app chrome (sidebar, title bar, pane headers, and the bottom status bar) has
 - **Save and share.** Export your styling as a shareable `.nextheme` file or a copy-paste code, and import either back. The recipient's light/dark mode and terminal background are left untouched.
 - **Preset themes.** One-click palettes modelled on popular editor themes: Dracula, Nord, Gruvbox (dark and light), Tokyo Night, Catppuccin Mocha, and Solarized Light.
 
-The **bottom status bar** shows the focused pane's working directory, git branch and diff stats, and the active agent with elapsed time on the left; on the right it shows live CPU / memory / load sparklines (toggle in **Settings > General**) and running / waiting / inactive agent counts, each of which opens a popover to jump straight to that pane.
+The **bottom status bar** shows the focused pane's working directory, git branch and diff stats, and the active agent with elapsed time on the left; on the right it shows live CPU / memory / load sparklines (toggle in **Settings > Appearance**) and running / waiting / inactive agent counts, each of which opens a popover to jump straight to that pane.
 
 The **terminal** theme and background are configured separately (see `theme` and background opacity below).
 

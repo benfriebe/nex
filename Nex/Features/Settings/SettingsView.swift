@@ -222,56 +222,6 @@ private struct GeneralSettingsView: View {
                     }
                 }
 
-                Section("Status bar") {
-                    Toggle("Show system stats", isOn: Binding(
-                        get: { settingsStore.showSystemStats },
-                        set: { settingsStore.send(.setShowSystemStats($0)) }
-                    ))
-                    if settingsStore.showSystemStats {
-                        ForEach(SystemStatKind.allCases) { kind in
-                            Toggle(isOn: Binding(
-                                get: { settingsStore.enabledSystemStats.contains(kind.rawValue) },
-                                set: { settingsStore.send(.setSystemStatEnabled(kind, $0)) }
-                            )) {
-                                Label(kind.displayName, systemImage: kind.systemImage)
-                            }
-                            .padding(.leading, 16)
-                        }
-                        DisclosureGroup("Mini graphs") {
-                            Toggle("Show mini graphs", isOn: Binding(
-                                get: { settingsStore.showSystemStatGraphs },
-                                set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
-                            ))
-                            Picker("Graph style", selection: Binding(
-                                get: { SparklineStyle(rawValue: settingsStore.sparklineStyle) ?? .line },
-                                set: { settingsStore.send(.setSparklineStyle($0.rawValue)) }
-                            )) {
-                                ForEach(SparklineStyle.allCases) { style in
-                                    Text(style.displayName).tag(style)
-                                }
-                            }
-                            ColorPicker("Graph colour", selection: Binding(
-                                get: { Color(chromeHex: settingsStore.sparklineColorHex) ?? chromeTheme.textSecondary },
-                                set: { if let hex = $0.chromeHexString { settingsStore.send(.setSparklineColor(hex)) } }
-                            ), supportsOpacity: false)
-                            HStack {
-                                Text("Graph width")
-                                Slider(value: Binding(
-                                    get: { settingsStore.sparklineWidth },
-                                    set: { settingsStore.send(.setSparklineWidth($0)) }
-                                ), in: 16 ... 80, step: 2)
-                                Text("\(Int(settingsStore.sparklineWidth))")
-                                    .monospacedDigit()
-                                    .frame(width: 32, alignment: .trailing)
-                            }
-                            Button("Reset graph colour") { settingsStore.send(.setSparklineColor("")) }
-                        }
-                    }
-                    Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 Section("Quit") {
                     Toggle("Confirm before quitting", isOn: Binding(
                         get: { settingsStore.confirmQuitWhenActive },
@@ -479,6 +429,56 @@ private struct AppearanceSettingsView: View {
                     value: $store.backgroundOpacity.sending(\.setBackgroundOpacity),
                     in: 0.1 ... 1.0
                 )
+            }
+
+            Section("Status bar") {
+                Toggle("Show system stats", isOn: Binding(
+                    get: { store.showSystemStats },
+                    set: { store.send(.setShowSystemStats($0)) }
+                ))
+                if store.showSystemStats {
+                    ForEach(SystemStatKind.allCases) { kind in
+                        Toggle(isOn: Binding(
+                            get: { store.enabledSystemStats.contains(kind.rawValue) },
+                            set: { store.send(.setSystemStatEnabled(kind, $0)) }
+                        )) {
+                            Label(kind.displayName, systemImage: kind.systemImage)
+                        }
+                        .padding(.leading, 16)
+                    }
+                    DisclosureGroup("Mini graphs") {
+                        Toggle("Show mini graphs", isOn: Binding(
+                            get: { store.showSystemStatGraphs },
+                            set: { store.send(.setShowSystemStatGraphs($0)) }
+                        ))
+                        Picker("Graph style", selection: Binding(
+                            get: { SparklineStyle(rawValue: store.sparklineStyle) ?? .line },
+                            set: { store.send(.setSparklineStyle($0.rawValue)) }
+                        )) {
+                            ForEach(SparklineStyle.allCases) { style in
+                                Text(style.displayName).tag(style)
+                            }
+                        }
+                        ColorPicker("Graph colour", selection: Binding(
+                            get: { Color(chromeHex: store.sparklineColorHex) ?? chromeTheme.textSecondary },
+                            set: { if let hex = $0.chromeHexString { store.send(.setSparklineColor(hex)) } }
+                        ), supportsOpacity: false)
+                        HStack {
+                            Text("Graph width")
+                            Slider(value: Binding(
+                                get: { store.sparklineWidth },
+                                set: { store.send(.setSparklineWidth($0)) }
+                            ), in: 16 ... 80, step: 2)
+                            Text("\(Int(store.sparklineWidth))")
+                                .monospacedDigit()
+                                .frame(width: 32, alignment: .trailing)
+                        }
+                        Button("Reset graph colour") { store.send(.setSparklineColor("")) }
+                    }
+                }
+                Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
