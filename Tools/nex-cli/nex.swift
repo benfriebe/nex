@@ -19,6 +19,7 @@
 //   nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane id
+//   nex workspace list [--json] [--no-header]
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
 //   nex group list [--json] [--no-header]
@@ -205,6 +206,7 @@ func printUsage() {
       nex pane sync exclude --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane id
+      nex workspace list [--json] [--no-header]
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
       nex group list [--json] [--no-header]
@@ -2689,11 +2691,30 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace create|move [...]\n", stderr)
+        fputs("Usage: nex workspace list|create|move [...]\n", stderr)
         exit(1)
     }
 
     switch action {
+    case "list":
+        let asJSON = popSwitch("--json", from: &args)
+        let noHeader = popSwitch("--no-header", from: &args)
+        guard args.isEmpty else {
+            fputs("Usage: nex workspace list [--json] [--no-header]\n", stderr)
+            exit(1)
+        }
+
+        let json = decodeReply(["command": "workspace-list"], command: "nex workspace list")
+        let workspaces = (json["workspaces"] as? [[String: Any]]) ?? []
+        if asJSON {
+            if let out = try? JSONSerialization.data(withJSONObject: workspaces, options: [.sortedKeys]),
+               let string = String(data: out, encoding: .utf8) {
+                print(string)
+            }
+            return
+        }
+        printWorkspaceTable(workspaces, noHeader: noHeader)
+
     case "create":
         let name = parseFlag("--name", from: &args)
         let path = parseFlag("--path", from: &args)
@@ -2747,8 +2768,57 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
 
     default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: create, move\n", stderr)
+        fputs("Valid actions: list, create, move\n", stderr)
         exit(1)
+    }
+}
+
+/// Render `workspace-list` as ID, NAME, GROUP, PANES, ACTIVE. Workspaces
+/// keep their sidebar order; `GROUP` is `-` for top-level workspaces and
+/// `ACTIVE` marks the currently focused workspace.
+func printWorkspaceTable(_ workspaces: [[String: Any]], noHeader: Bool) {
+    func shortUUID(_ value: String) -> String {
+        guard value.count >= 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
+    }
+
+    struct Row {
+        let id: String
+        let name: String
+        let group: String
+        let panes: String
+        let active: String
+    }
+
+    let rows: [Row] = workspaces.map { entry in
+        Row(
+            id: shortUUID((entry["id"] as? String) ?? ""),
+            name: (entry["name"] as? String) ?? "",
+            group: (entry["group_name"] as? String) ?? "-",
+            panes: String((entry["pane_count"] as? Int) ?? 0),
+            active: ((entry["is_active"] as? Bool) ?? false) ? "●" : "-"
+        )
+    }
+
+    let headers = ["ID", "NAME", "GROUP", "PANES", "ACTIVE"]
+    var widths = headers.map(\.count)
+    for row in rows {
+        widths[0] = max(widths[0], row.id.count)
+        widths[1] = max(widths[1], row.name.count)
+        widths[2] = max(widths[2], row.group.count)
+        widths[3] = max(widths[3], row.panes.count)
+    }
+
+    func pad(_ value: String, _ width: Int) -> String {
+        if value.count >= width { return value }
+        return value + String(repeating: " ", count: width - value.count)
+    }
+
+    if !noHeader {
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(headers[4])")
+    }
+    for row in rows {
+        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.group, widths[2]))  \(pad(row.panes, widths[3]))  \(row.active)")
     }
 }
 

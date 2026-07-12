@@ -382,6 +382,10 @@ extension AppReducer {
 
                 // MARK: Workspace commands
 
+                case .workspaceList:
+                    handleWorkspaceList(state: state, reply: reply)
+                    return .none
+
                 case .workspaceCreate(let name, let path, let color, let group):
                     return handleSocketWorkspaceCreate(
                         &state,
@@ -964,6 +968,61 @@ extension AppReducer {
         // Scroll the new group header into view (issue #187).
         state.sidebarScrollTarget = .group(newID)
         return .send(.persistState)
+    }
+
+    /// Build and send the read-only `workspace-list` response. Workspaces
+    /// follow sidebar order: top-level entries in `topLevelOrder`, and each
+    /// group's members (regardless of the group's collapse state, unlike
+    /// `visibleWorkspaceOrder`) in child order. Any workspace unreachable
+    /// through `topLevelOrder` (a recoverable ordering inconsistency) is
+    /// appended in state order so the CLI never hides it. Each entry carries
+    /// its parent group's `group_id` / `group_name` (absent for top-level
+    /// workspaces), matching the fields on `pane-list`.
+    func handleWorkspaceList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        var orderedWorkspaceIDs: [UUID] = []
+        var seen = Set<UUID>()
+        for item in state.topLevelOrder {
+            switch item {
+            case .workspace(let id):
+                if state.workspaces[id: id] != nil, seen.insert(id).inserted {
+                    orderedWorkspaceIDs.append(id)
+                }
+            case .group(let groupID):
+                guard let group = state.groups[id: groupID] else { continue }
+                for childID in group.childOrder
+                    where state.workspaces[id: childID] != nil && seen.insert(childID).inserted {
+                    orderedWorkspaceIDs.append(childID)
+                }
+            }
+        }
+        for workspace in state.workspaces where seen.insert(workspace.id).inserted {
+            orderedWorkspaceIDs.append(workspace.id)
+        }
+
+        let workspaces: [[String: Any]] = orderedWorkspaceIDs.compactMap { workspaceID in
+            guard let workspace = state.workspaces[id: workspaceID] else { return nil }
+            var entry: [String: Any] = [
+                "id": workspace.id.uuidString,
+                "name": workspace.name,
+                "color": workspace.color.rawValue,
+                "pane_count": workspace.panes.count,
+                "is_active": workspace.id == state.activeWorkspaceID
+            ]
+            if let groupID = state.groupID(forWorkspace: workspace.id),
+               let group = state.groups[id: groupID] {
+                entry["group_id"] = group.id.uuidString
+                entry["group_name"] = group.name
+            }
+            return entry
+        }
+
+        reply.send(["ok": true, "workspaces": workspaces])
+        reply.close()
     }
 
     /// Build and send the read-only `group-list` response. Groups follow

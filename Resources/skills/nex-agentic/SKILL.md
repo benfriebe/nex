@@ -121,6 +121,9 @@ nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 # List workspace groups and their ordered member workspaces
 nex group list [--json] [--no-header]
 
+# List every workspace (grouped + top-level) with its parent group
+nex workspace list [--json] [--no-header]
+
 # Print current pane's UUID (local; no socket). Exit 1 if not in Nex.
 nex pane id
 ```
@@ -226,6 +229,26 @@ nex group list --json
 
 Each JSON group includes `id`, `name`, optional `color`, and `workspaces`.
 Each `workspaces` entry contains the member workspace's `id` and `name`.
+
+### `workspace list` — inventory every workspace
+
+`group list` only shows *grouped* workspaces. When an orchestrator needs the
+full workspace inventory (top-level and grouped together, in sidebar order),
+use `workspace list`. Unlike the sidebar itself, members of a collapsed group
+are still listed.
+
+```bash
+# Human-readable table (ID, NAME, GROUP, PANES, ACTIVE)
+nex workspace list
+
+# JSON for scripts; an empty state is []
+nex workspace list --json
+```
+
+Each JSON entry includes `id`, `name`, `color`, `pane_count`, `is_active`,
+and optional `group_id` / `group_name` (both absent for a top-level
+workspace). The `group_name` field matches the one on `pane list`, so
+`.group_name // "top-level"` answers "which group is this workspace in".
 
 ### Event Commands (Agent Lifecycle)
 

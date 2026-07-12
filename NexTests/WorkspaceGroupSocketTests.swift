@@ -211,6 +211,88 @@ struct WorkspaceGroupSocketTests {
         #expect(groups[0]["id"] as? String == Self.groupAID.uuidString)
     }
 
+    // MARK: - workspace-list
+
+    /// Sidebar order: top-level workspace first, then a group's members in
+    /// child order. Each grouped entry carries group_id/group_name; the
+    /// top-level entry omits both. is_active/pane_count reflect state, and a
+    /// workspace missing from topLevelOrder is still appended (never hidden).
+    @Test func socketWorkspaceListOrdersBySidebarAndTagsGroups() async {
+        let top = Self.makeWorkspace(id: Self.ws1ID, name: "Top")
+        let grouped = Self.makeWorkspace(id: Self.ws2ID, name: "Grouped")
+        let orphanID = UUID(uuidString: "60000000-0000-0000-0000-0000000000FF")!
+        let orphan = Self.makeWorkspace(id: orphanID, name: "Orphan")
+        let group = WorkspaceGroup(
+            id: Self.groupAID, name: "Workers", color: .blue, childOrder: [Self.ws2ID]
+        )
+        // Orphan exists in `workspaces` but is absent from `topLevelOrder`.
+        let store = makeStore(
+            workspaces: [top, grouped, orphan],
+            groups: [group],
+            topLevelOrder: [.workspace(Self.ws1ID), .group(Self.groupAID)],
+            activeWorkspaceID: Self.ws2ID
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+
+        #expect(sink.payloads.count == 1)
+        #expect(sink.closedCount == 1)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+
+        let workspaces = sink.payloads[0]["workspaces"] as? [[String: Any]] ?? []
+        #expect(workspaces.compactMap { $0["name"] as? String } == ["Top", "Grouped", "Orphan"])
+
+        let topEntry = workspaces[0]
+        #expect(topEntry["group_id"] == nil)
+        #expect(topEntry["group_name"] == nil)
+        #expect(topEntry["is_active"] as? Bool == false)
+        #expect(topEntry["pane_count"] as? Int == 1)
+        #expect(topEntry["color"] as? String == WorkspaceColor.blue.rawValue)
+
+        let groupedEntry = workspaces[1]
+        #expect(groupedEntry["group_id"] as? String == Self.groupAID.uuidString)
+        #expect(groupedEntry["group_name"] as? String == "Workers")
+        #expect(groupedEntry["is_active"] as? Bool == true)
+
+        // The orphan is appended, and (having no group) omits group fields.
+        #expect(workspaces[2]["group_id"] == nil)
+    }
+
+    /// Unlike `visibleWorkspaceOrder`, `workspace-list` must surface members
+    /// of a COLLAPSED group so the CLI reflects true state, not UI chrome.
+    @Test func socketWorkspaceListIncludesCollapsedGroupMembers() async {
+        let member = Self.makeWorkspace(id: Self.ws1ID, name: "Hidden")
+        let group = WorkspaceGroup(
+            id: Self.groupAID, name: "Collapsed", isCollapsed: true, childOrder: [Self.ws1ID]
+        )
+        let store = makeStore(
+            workspaces: [member],
+            groups: [group],
+            topLevelOrder: [.group(Self.groupAID)]
+        )
+
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+
+        let workspaces = sink.payloads[0]["workspaces"] as? [[String: Any]] ?? []
+        #expect(workspaces.count == 1)
+        #expect(workspaces[0]["name"] as? String == "Hidden")
+        #expect(workspaces[0]["group_name"] as? String == "Collapsed")
+    }
+
+    @Test func socketWorkspaceListEmptyStateRepliesWithEmptyArray() async {
+        let store = makeStore()
+        let sink = CaptureSink()
+
+        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+
+        #expect(sink.payloads.count == 1)
+        #expect(sink.closedCount == 1)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect((sink.payloads[0]["workspaces"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test func socketGroupCreateSpawnsGroup() async {
         let store = makeStore()
 

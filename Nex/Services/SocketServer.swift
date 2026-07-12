@@ -57,6 +57,7 @@ enum SocketMessage: Equatable {
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
+    case workspaceList
     case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
     /// Group commands. Icon-setting is deliberately UI-only: the
@@ -309,7 +310,7 @@ enum SocketMessage: Equatable {
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
-    "group-list",
+    "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name",
     "pane-sync", "pane-sync-exclude",
@@ -883,6 +884,10 @@ final class SocketServer: Sendable {
                 color: color,
                 group: wire.group
             ), wire)
+        }
+
+        if wire.command == "workspace-list" {
+            return (.workspaceList, wire)
         }
 
         if wire.command == "workspace-move" {
