@@ -69,6 +69,62 @@ struct WorkspaceGroupSocketTests {
         return store
     }
 
+    // MARK: - workspace-create request/response
+
+    @Test func socketWorkspaceCreateTopLevelRepliesWithID() async {
+        let store = makeStore()
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .workspaceCreate(name: "Alpha", path: nil, color: .blue, group: nil),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.receive(\.createWorkspace)
+
+        #expect(sink.payloads.count == 1)
+        #expect(sink.closedCount == 1)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect(sink.payloads[0]["workspace_name"] as? String == "Alpha")
+        // The reply's id is the one actually created (pre-minted + threaded).
+        #expect(sink.payloads[0]["workspace_id"] as? String == store.state.workspaces.first?.id.uuidString)
+        #expect(sink.payloads[0]["group"] == nil)
+    }
+
+    @Test func socketWorkspaceCreateIntoGroupRepliesWithGroup() async {
+        let existing = WorkspaceGroup(id: Self.groupAID, name: "Monitors", childOrder: [])
+        let store = makeStore(groups: [existing], topLevelOrder: [.group(Self.groupAID)])
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .workspaceCreate(name: "Alpha", path: "/tmp", color: .blue, group: "Monitors"),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.receive(\.moveWorkspaceToGroup)
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect(sink.payloads[0]["group"] as? String == "Monitors")
+        #expect(sink.payloads[0]["workspace_id"] as? String == store.state.workspaces.first?.id.uuidString)
+        #expect(sink.closedCount == 1)
+    }
+
+    @Test func socketWorkspaceCreateAmbiguousGroupRepliesError() async {
+        let g1 = WorkspaceGroup(id: Self.groupAID, name: "Dup", childOrder: [])
+        let g2 = WorkspaceGroup(id: Self.groupBID, name: "Dup", childOrder: [])
+        let store = makeStore(
+            groups: [g1, g2],
+            topLevelOrder: [.group(Self.groupAID), .group(Self.groupBID)]
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .workspaceCreate(name: "Alpha", path: nil, color: nil, group: "Dup"),
+            reply: makeCaptureHandle(sink)
+        ))
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        #expect((sink.payloads[0]["error"] as? String)?.contains("ambiguous") == true)
+        #expect(sink.closedCount == 1)
+        // No workspace created.
+        #expect(store.state.workspaces.isEmpty)
+    }
+
     // MARK: - resolveGroup / resolveWorkspace
 
     @Test func resolveGroupPrefersUUIDOverName() {

@@ -68,6 +68,9 @@ struct SettingsView: View {
             .onReceive(NotificationCenter.default.publisher(for: QuitGate.confirmQuitChangedNotification)) { _ in
                 store.send(.settings(.refreshConfirmQuitWhenActive))
             }
+            .onReceive(NotificationCenter.default.publisher(for: WorkspaceDeleteGate.confirmChangedNotification)) { _ in
+                store.send(.settings(.refreshConfirmWorkspaceDeleteWhenActive))
+            }
             // Deep-link from a web pane's "Manage favourites…" menu.
             // `pendingSettingsTab` covers cold-open (notification has
             // no listener yet); `.onReceive` covers re-opens of an
@@ -174,6 +177,14 @@ private struct GeneralSettingsView: View {
                         Text("End of list").tag(SidebarPlacement.endOfList)
                     }
                     Text("Where a newly created group is inserted in the sidebar. \"Next to selection\" places it after the active workspace (or its parent group when nested). \"End of list\" always appends it to the bottom.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Confirm before deleting a workspace with active agents", isOn: Binding(
+                        get: { settingsStore.confirmWorkspaceDeleteWhenActive },
+                        set: { settingsStore.send(.setConfirmWorkspaceDeleteWhenActive($0)) }
+                    ))
+                    Text("Show a confirmation dialog when deleting a workspace that still has running or waiting agents, so an accidental delete doesn't lose work. The CLI's `nex workspace delete --force` bypasses this check regardless of this setting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

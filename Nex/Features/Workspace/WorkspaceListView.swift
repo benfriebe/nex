@@ -919,7 +919,13 @@ struct WorkspaceListView: View {
             }
             Divider()
             Button("Delete", role: .destructive) {
-                store.send(.deleteWorkspace(workspaceID))
+                let workspace = store.workspaces[id: workspaceID]
+                if WorkspaceDeleteGate.shouldDelete(
+                    workspaceName: workspace?.name ?? "",
+                    activeAgentCount: workspace?.activeAgentCount ?? 0
+                ) {
+                    store.send(.deleteWorkspace(workspaceID))
+                }
             }
             .disabled(store.workspaces.count <= 1)
         }

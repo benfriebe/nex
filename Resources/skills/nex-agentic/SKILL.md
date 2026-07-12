@@ -118,6 +118,15 @@ nex pane send [--bare] [--json] --target <label-or-uuid> [--workspace <name-or-u
 # List panes (read-only inventory — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 
+# Read another pane's terminal contents as text (viewport, or full
+# scrollback with --scrollback). WITHOUT --target it captures the CALLING
+# pane — always pass --target to read a worker. The target is flag-only:
+# a bare `nex pane capture <uuid>` is rejected, not treated as --target.
+nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+# Move a pane to another workspace (creates it with --create).
+nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+
 # List workspace groups and their ordered member workspaces
 nex group list [--json] [--no-header]
 
@@ -270,7 +279,34 @@ not `claude --resume` a session that has already exited.
 ### Workspace Commands
 
 ```bash
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray]
+# Create a workspace (request/response). Replies with the new workspace's
+# id — `created workspace <name> (<uuid>)`, or the raw {ok,workspace_id,
+# workspace_name,group?} object with --json — so a coordinator can capture
+# the id to target it later. --group creates the group if missing.
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--json]
+
+# Delete one or more workspaces by name-or-id (request/response). Deletes
+# outright — no CLI prompt — closing any remaining panes. Refuses to
+# delete the last remaining workspace. Exits non-zero if any delete fails.
+#   --force / -y      delete even if the workspace has RUNNING AGENTS.
+#                     Without it, a workspace with active agents
+#                     (running/waiting panes) is refused (mirrors the
+#                     app-quit warning); the reply carries `active_agents`.
+#                     In the GUI this is a "Delete anyway?" dialog with a
+#                     "Don't ask again" checkbox instead.
+#   --prune-worktree  also `git worktree remove` the deleted workspace's
+#                     directory. Best-effort + non-forcing: git refuses a
+#                     dirty/locked worktree or the main checkout (a Warning,
+#                     not a failure). An *empty* workspace has no directory
+#                     to prune — delete it before closing its panes if you
+#                     want the worktree reclaimed automatically.
+#   --json            compact per-id result array: each row has `id` (the
+#                     arg as typed), `ok`, and on success `workspace_id`,
+#                     `workspace_name`, `path?`, `worktree_pruned?`,
+#                     `worktree_error?` — or `error` on failure.
+# Exit code reflects DELETES only: a prune that git refuses is a Warning,
+# not a failure, so the command still exits 0 if the workspace was deleted.
+nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 ```
 
 ### File Commands
