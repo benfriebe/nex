@@ -186,6 +186,11 @@ nex pane list --current
 nex pane list --workspace nex
 ```
 
+The default table's `ID` column prints the full pane UUID, so you can
+copy it straight into `--target <uuid>` (the agent session id in
+`SESSION` stays truncated — it's never a `--target`). Scripts should
+still prefer `--json`.
+
 Each JSON entry includes: `id`, `label`, `type` (`shell` / `markdown` /
 `scratchpad` / `diff` / `web`), `title`, `workspace_id`, `workspace_name`,
 optional `group_id` and `group_name` (both absent for top-level workspaces),

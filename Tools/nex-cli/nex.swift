@@ -2668,12 +2668,16 @@ func handlePaneList(_ args: inout ArraySlice<String>) {
 }
 
 /// Render the `pane-list` response as a fixed-width table. Columns:
-/// ID (truncated UUID), LABEL, TYPE, WORKSPACE, STATUS, SESSION, CWD.
+/// ID (full UUID), LABEL, TYPE, WORKSPACE, STATUS, SESSION, CWD.
 ///
-/// We truncate the UUIDs (first 8 + last 4) for readability — both the
-/// pane id and the agent session id; the `--json` output keeps the full
-/// values for scripts. SESSION is `-` when no agent session is attached.
-/// Other fields print at their natural width with a 2-space gutter.
+/// The pane id prints in full so it can be copy-pasted straight into
+/// `--target <uuid>` — `resolvePaneTarget` only accepts a complete UUID,
+/// so a truncated id was unusable as a target (issue #240). The agent
+/// session id is still truncated (first 8 + last 4) since it's never a
+/// `--target` and keeps the row narrower; the `--json` output keeps the
+/// full value for scripts. SESSION is `-` when no agent session is
+/// attached. Other fields print at their natural width with a 2-space
+/// gutter.
 func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     struct Row {
         let id: String
@@ -2693,7 +2697,8 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
     }
 
     let rows: [Row] = panes.map { entry in
-        let shortID = shortUUID((entry["id"] as? String) ?? "")
+        // Full pane UUID so it round-trips through `--target` (issue #240).
+        let fullID = (entry["id"] as? String) ?? ""
         var cwd = (entry["working_directory"] as? String) ?? ""
         if !home.isEmpty, cwd.hasPrefix(home) {
             cwd = "~" + cwd.dropFirst(home.count)
@@ -2701,7 +2706,7 @@ func printPaneTable(_ panes: [[String: Any]], noHeader: Bool) {
         let typeRaw = (entry["type"] as? String) ?? ""
         let sessionRaw = (entry["agent_session_id"] as? String) ?? ""
         return Row(
-            id: shortID,
+            id: fullID,
             label: (entry["label"] as? String) ?? "-",
             type: typeRaw.isEmpty ? "-" : typeRaw,
             workspace: (entry["workspace_name"] as? String) ?? "",
