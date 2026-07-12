@@ -231,7 +231,8 @@ struct ContentView: View {
                                     id: activeID,
                                     action: .webPaneNavigate(paneID: paneID, url: url)
                                 )))
-                            }
+                            },
+                            profileName: workspace.profileName
                         )
                     } else {
                         VStack(spacing: 8) {

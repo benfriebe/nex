@@ -77,6 +77,7 @@
 		62564D224FD57BC3C02100EA /* GitServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E820170ADF2ADB58B8079 /* GitServiceTests.swift */; };
 		62BC1CC522515C8E6A99F508 /* GitHeadWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281BB8BFA202B0E43FC1E2AE /* GitHeadWatcher.swift */; };
 		630837DB73DACFE99190C60D /* WebPaneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B04ED477C0C51A44953A8C /* WebPaneState.swift */; };
+		63C73B3CC0EC644276F19597 /* WorkspaceProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6716078E70D711E23FFD0BD /* WorkspaceProfileTests.swift */; };
 		64D34691D60DD597D0882047 /* SurfaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A24C1FEC6EA31096603326 /* SurfaceManager.swift */; };
 		654B31F33D5872341839A91E /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8908AF59D359222CBC0EF21D /* GameController.framework */; };
 		65FD103A31E7591016424457 /* ChromeStyleTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58B38C97ABA021104E1C5AB /* ChromeStyleTheme.swift */; };
@@ -105,6 +106,7 @@
 		81044184C0ED04C2EC6B1854 /* WebPaneActuatorScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6BA91C8A3C092BFBD95DF /* WebPaneActuatorScript.swift */; };
 		811C87C669F7A920EE05E8DA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 3A812A87D56E4976C8BF532E /* GRDB */; };
 		8132EF9FB6ACF51F7AEB57CE /* NexCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA20CEA0FEF28F3972BCE7D /* NexCommands.swift */; };
+		81B51760F01331F38614C438 /* ProfilesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */; };
 		838F2F85AED6591FE3D2C9C9 /* WebBatchInspectPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998480F19F798025639D20A7 /* WebBatchInspectPanel.swift */; };
 		840B487024194CA181EE42F8 /* AgentLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */; };
 		8BACC3111C7193B1AC30B40B /* PaneLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30D306AA2907696B7A28F9DA /* PaneLayout.swift */; };
@@ -144,6 +146,7 @@
 		B5EDCEE4998F1F0B6F844814 /* AppReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */; };
 		B652FDDE5CE91C5CA1DAC8E2 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21064C4AB47888B6A02CCD73 /* DatabaseMigrationTests.swift */; };
 		B701F36FA68D43170D591F40 /* KeyBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F60DBD29A7E964E6F18A28F /* KeyBindingTests.swift */; };
+		B799502DDF1FE8033F9DDD0A /* WorkspaceProfilesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D03C3A375B6D2A069F11D8D /* WorkspaceProfilesClient.swift */; };
 		B7D2BF4B62D8D6DB71C707B5 /* RecursiveFSWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBD3F55DB0088089F62AFBFA /* RecursiveFSWatcherTests.swift */; };
 		B8B5B666D5CC24071420A966 /* StoragePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45141531B99E3E1B79620ECA /* StoragePanel.swift */; };
 		B8DCB316773E208FABEDA9D7 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */; };
@@ -240,6 +243,7 @@
 		140051AE1CBF1087B5F289F7 /* RecursiveFSWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecursiveFSWatcher.swift; sourceTree = "<group>"; };
 		150E85D36973D18EFF0C764C /* SocketParsingOutsideNexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingOutsideNexTests.swift; sourceTree = "<group>"; };
 		1870562A61E6F66FFE03A8BA /* CommandPaletteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteItem.swift; sourceTree = "<group>"; };
+		1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilesSettingsView.swift; sourceTree = "<group>"; };
 		191592BF0EBCEC22DF9F5745 /* RenamePaneSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenamePaneSheet.swift; sourceTree = "<group>"; };
 		191E820170ADF2ADB58B8079 /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		1A198A2F5EA992907A3031ED /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -311,6 +315,7 @@
 		76D5AF8FEB520FE55ADB0C59 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		77F6BA91C8A3C092BFBD95DF /* WebPaneActuatorScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneActuatorScript.swift; sourceTree = "<group>"; };
 		77FDA3FB200AA7846BCDC7A7 /* EditorServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorServiceTests.swift; sourceTree = "<group>"; };
+		7D03C3A375B6D2A069F11D8D /* WorkspaceProfilesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceProfilesClient.swift; sourceTree = "<group>"; };
 		7DED98594372C8E34542A5C2 /* SplitDividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDividerView.swift; sourceTree = "<group>"; };
 		7ED3289901F70616FC36F80B /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		7F561A2375008B0EC39BF86D /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
@@ -375,6 +380,7 @@
 		CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		D0CED7EFE254E4491327CAE0 /* EditorService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorService.swift; sourceTree = "<group>"; };
 		D2EE3D8224F44E30912F703D /* WindowTitleBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowTitleBar.swift; sourceTree = "<group>"; };
+		D6716078E70D711E23FFD0BD /* WorkspaceProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceProfileTests.swift; sourceTree = "<group>"; };
 		D6B83DC43AEA38B4929307FA /* AppReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducerTests.swift; sourceTree = "<group>"; };
 		D70E36C00A55A87562F4AC1D /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
 		D7BB09519FE46ECBB397354C /* WebPaneActuator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneActuator.swift; sourceTree = "<group>"; };
@@ -498,6 +504,7 @@
 			children = (
 				439174A029FAFE2C252A1B8B /* KeybindingsSettingsView.swift */,
 				9D01D7C0300DB8B0987C7F58 /* LabelPresetsSettingsView.swift */,
+				1910F08438CF57DD0893C407 /* ProfilesSettingsView.swift */,
 				8322D3C28268495A01EA0597 /* SettingsFeature.swift */,
 				523DE37561222E411737C3F8 /* SettingsView.swift */,
 			);
@@ -576,6 +583,7 @@
 				933D5B5E664E30B2E88EE3C7 /* WorkspaceGroupPersistenceTests.swift */,
 				2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */,
 				E9F7D5571F89D43BC6C76928 /* WorkspaceGroupSocketTests.swift */,
+				D6716078E70D711E23FFD0BD /* WorkspaceProfileTests.swift */,
 				11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */,
 			);
 			path = NexTests;
@@ -694,6 +702,7 @@
 				C711FF0D53387D16F50C5EA6 /* UpdaterService.swift */,
 				8C693AF419763177AE1CEA0F /* UserDefaultsClient.swift */,
 				E99FA58E4E44ADAD17A788E2 /* WindowSpacesBinding.swift */,
+				7D03C3A375B6D2A069F11D8D /* WorkspaceProfilesClient.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1038,6 +1047,7 @@
 				F4E3D6023E3546EC2908C4D6 /* WorkspaceGroupPersistenceTests.swift in Sources */,
 				0CB9F718A5EF25AF73DED570 /* WorkspaceGroupRenderTests.swift in Sources */,
 				AF0F22742F34298F1E06A238 /* WorkspaceGroupSocketTests.swift in Sources */,
+				63C73B3CC0EC644276F19597 /* WorkspaceProfileTests.swift in Sources */,
 				1E6354C9BBDF122BF0FB255F /* WorktreeOperationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1118,6 +1128,7 @@
 				1569F35B72EC7C133643190E /* PaneType.swift in Sources */,
 				FF162EE0EAF672FFFCFDF0BE /* PersistenceService.swift in Sources */,
 				CB44792B290665E1AFEAD3E6 /* PresetsFeature.swift in Sources */,
+				81B51760F01331F38614C438 /* ProfilesSettingsView.swift in Sources */,
 				FF3255F9A9213474DC14A2A0 /* QuitGate.swift in Sources */,
 				9443792BCB5BEA5B06312F00 /* RecursiveFSWatcher.swift in Sources */,
 				C052FE23BF089795BB04E10E /* RenamePaneSheet.swift in Sources */,
@@ -1170,6 +1181,7 @@
 				E89E89193A52010164900B00 /* WorkspaceInspectorView.swift in Sources */,
 				13CFD579791838D9D23C9613 /* WorkspaceLabelViews.swift in Sources */,
 				3B60C0FC48A2AAF6282CAB40 /* WorkspaceListView.swift in Sources */,
+				B799502DDF1FE8033F9DDD0A /* WorkspaceProfilesClient.swift in Sources */,
 				8043643CBDD85AF3315BBFE2 /* WorkspaceRowView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

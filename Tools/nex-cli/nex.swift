@@ -20,9 +20,10 @@
 //   nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
 //   nex pane id
 //   nex workspace list [--json] [--no-header]
-//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--json]
+//   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
 //   nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
+//   nex workspace profile <name-or-id> (<profile> | --clear)
 //   nex group list [--json] [--no-header]
 //   nex group create <name> [--color blue]
 //   nex group rename <name-or-id> <new-name>
@@ -208,9 +209,10 @@ func printUsage() {
       nex pane sync include --target <name-or-uuid> [--workspace <name-or-uuid>]
       nex pane id
       nex workspace list [--json] [--no-header]
-      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--json]
+      nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
       nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
+      nex workspace profile <name-or-id> (<profile> | --clear)
       nex group list [--json] [--no-header]
       nex group create <name> [--color blue]
       nex group rename <name-or-id> <new-name>
@@ -2807,7 +2809,7 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace list|create|move|delete [...]\n", stderr)
+        fputs("Usage: nex workspace list|create|move|delete|profile [...]\n", stderr)
         exit(1)
     }
 
@@ -2836,6 +2838,7 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         let path = parseFlag("--path", from: &args)
         let color = parseFlag("--color", from: &args)
         let group = parseFlag("--group", from: &args)
+        let profile = parseFlag("--profile", from: &args)
         let json = popSwitch("--json", from: &args)
 
         var payload: [String: Any] = [
@@ -2845,6 +2848,7 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         if let path { payload["path"] = path }
         if let color { payload["color"] = color }
         if let group { payload["group"] = group }
+        if let profile { payload["profile"] = profile }
 
         // Request/response (matches `pane create` / `workspace delete`):
         // returns the newly created workspace's id so scripts can chain.
@@ -2989,9 +2993,37 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         }
         if anyFailed { exit(1) }
 
+    case "profile":
+        guard let nameOrID = args.popFirst() else {
+            fputs("Usage: nex workspace profile <name-or-id> (<profile> | --clear)\n", stderr)
+            exit(1)
+        }
+        let clear = popSwitch("--clear", from: &args)
+        let profile = args.popFirst()
+        // Exactly one of <profile> / --clear.
+        if clear == (profile != nil) {
+            fputs("workspace profile requires either <profile> or --clear\n", stderr)
+            exit(1)
+        }
+        // Reject trailing tokens — a stray word here would silently pin the
+        // workspace to the wrong profile (account) with no feedback.
+        if !args.isEmpty {
+            fputs("workspace profile: unexpected argument(s): \(args.joined(separator: " "))\n", stderr)
+            exit(1)
+        }
+
+        var payload: [String: String] = [
+            "command": "workspace-profile",
+            "name": nameOrID
+        ]
+        if let profile { payload["profile"] = profile }
+        // `--clear` omits `profile` entirely — the server treats a
+        // missing/empty profile as "clear the assignment".
+        sendJSON(payload)
+
     default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: list, create, move, delete\n", stderr)
+        fputs("Valid actions: list, create, move, delete, profile\n", stderr)
         exit(1)
     }
 }

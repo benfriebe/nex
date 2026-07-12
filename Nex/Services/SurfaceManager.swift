@@ -21,7 +21,8 @@ final class SurfaceManager: Sendable {
         paneID: UUID,
         workingDirectory: String,
         backgroundOpacity: Double = 1.0,
-        command: String? = nil
+        command: String? = nil,
+        env: [String: String] = [:]
     ) {
         // Guard against duplicate creation. Both the TCA effect and
         // SurfaceContainerView.makeNSView can call this; whichever runs
@@ -34,7 +35,8 @@ final class SurfaceManager: Sendable {
             paneID: paneID,
             workingDirectory: workingDirectory,
             backgroundOpacity: backgroundOpacity,
-            command: command
+            command: command,
+            env: env
         )
         lock.withLock {
             surfaces[paneID] = surface

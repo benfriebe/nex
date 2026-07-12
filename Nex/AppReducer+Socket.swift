@@ -386,13 +386,14 @@ extension AppReducer {
                     handleWorkspaceList(state: state, reply: reply)
                     return .none
 
-                case .workspaceCreate(let name, let path, let color, let group):
+                case .workspaceCreate(let name, let path, let color, let group, let profile):
                     return handleSocketWorkspaceCreate(
                         &state,
                         name: name,
                         path: path,
                         color: color,
                         group: group,
+                        profile: profile,
                         reply: reply
                     )
 
@@ -411,6 +412,15 @@ extension AppReducer {
                         force: force,
                         reply: reply
                     )
+
+                case .workspaceProfile(let nameOrID, let profile):
+                    // UUID-wins / unique-name / ambiguous→no-op semantics
+                    // come from `resolveWorkspace`, matching workspace-move.
+                    guard let workspace = state.resolveWorkspace(nameOrID) else { return .none }
+                    return .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .setProfile(profile)
+                    )))
 
                 case .groupList:
                     handleGroupList(state: state, reply: reply)
@@ -819,6 +829,7 @@ extension AppReducer {
         path: String?,
         color: WorkspaceColor?,
         group: String?,
+        profile: String? = nil,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
         let workspaceName = name ?? "Workspace"
@@ -852,6 +863,7 @@ extension AppReducer {
                 name: workspaceName,
                 color: color,
                 workingDirectory: path,
+                profileName: profile,
                 id: newID
             ))
         }
@@ -887,6 +899,12 @@ extension AppReducer {
         var seeded = workspace
         if let path {
             seeded.panes[seeded.panes.startIndex].workingDirectory = path
+        }
+        // Must land before `seeded` is appended into state below — a later
+        // assignment would mutate a dead local. The surface effect at the
+        // bottom of this handler resolves env from this value.
+        if let profile {
+            seeded.profileName = WorkspaceProfilesClient.normalizedAssignment(profile)
         }
         // Capture the anchor for `.nearSelection` BEFORE overwriting
         // `activeWorkspaceID` — the previously active workspace is what
@@ -941,15 +959,20 @@ extension AppReducer {
         let paneID = seeded.panes.first!.id
         let cwd = seeded.panes.first!.workingDirectory
         let opacity = ghosttyConfig.backgroundOpacity
+        let profileName = seeded.profileName
         // `moveWorkspaceToGroup` persists, so an explicit persist
         // here would race it. Only the surface-creation side-effect
         // needs to fire alongside.
         return .merge(
             .run { _ in
+                let env = workspaceProfiles.resolveEnv(
+                    profileName ?? WorkspaceProfilesClient.defaultProfileName
+                )
                 await surfaceManager.createSurface(
                     paneID: paneID,
                     workingDirectory: cwd,
-                    backgroundOpacity: opacity
+                    backgroundOpacity: opacity,
+                    env: env
                 )
             },
             .send(.moveWorkspaceToGroup(

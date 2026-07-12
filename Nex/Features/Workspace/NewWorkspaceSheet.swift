@@ -11,6 +11,7 @@ struct NewWorkspaceSheet: View {
         case name
         case color
         case group
+        case profile
         case removeRepo(UUID)
         case addRepository
         case cancel
@@ -24,8 +25,16 @@ struct NewWorkspaceSheet: View {
     @State private var selectedRepos: [Repo] = []
     @State private var isRepoPickerPresented = false
     @State private var selectedGroupID: UUID?
+    /// Workspace profile for the new workspace. Defaults to the built-in
+    /// baseline; `.setProfile`-style normalization in the reducer maps it
+    /// back to nil.
+    @State private var selectedProfile = WorkspaceProfilesClient.defaultProfileName
+    /// Loaded once per sheet appearance — `listProfiles()` reads the config
+    /// file, which must stay out of the render path.
+    @State private var availableProfiles: [String] = []
     @FocusState private var focusedField: Field?
     @Environment(\.chromeTheme) private var chromeTheme
+    @Dependency(\.workspaceProfiles) private var workspaceProfiles
 
     init(store: StoreOf<AppReducer>) {
         self.store = store
@@ -94,6 +103,23 @@ struct NewWorkspaceSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                HStack {
+                    Text("Profile")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("Profile", selection: $selectedProfile) {
+                        ForEach(profileOptions, id: \.self) { profileName in
+                            Text(profileName).tag(profileName)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .focused($focusedField, equals: .profile)
+                    .onKeyPress(keys: [.tab]) { handleTab($0) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 // Repositories section
                 if !store.repoRegistry.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -153,6 +179,7 @@ struct NewWorkspaceSheet: View {
             .frame(width: 360)
             .background(chromeTheme.surfaceBackground)
             .onAppear {
+                availableProfiles = workspaceProfiles.listProfiles()
                 // Dispatching lets the sheet finish presenting before we
                 // steal first responder. Without this, the TextField
                 // sometimes loses focus back to the window on macOS.
@@ -183,8 +210,15 @@ struct NewWorkspaceSheet: View {
             name: trimmed,
             color: color,
             repos: selectedRepos,
-            groupID: selectedGroupID
+            groupID: selectedGroupID,
+            profileName: selectedProfile
         ))
+    }
+
+    /// Built-in default first, then config-defined profiles.
+    private var profileOptions: [String] {
+        [WorkspaceProfilesClient.defaultProfileName]
+            + availableProfiles.filter { $0 != WorkspaceProfilesClient.defaultProfileName }
     }
 
     private func cycleColor(_ delta: Int) -> KeyPress.Result {
@@ -208,6 +242,7 @@ struct NewWorkspaceSheet: View {
         if !store.groups.isEmpty {
             fields.append(.group)
         }
+        fields.append(.profile)
         if !store.repoRegistry.isEmpty {
             fields.append(contentsOf: selectedRepos.map { Field.removeRepo($0.id) })
             fields.append(.addRepository)

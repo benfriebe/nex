@@ -6,6 +6,7 @@ struct WorkspaceListView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.openSettings) private var openSettings
     @Environment(\.chromeTheme) private var chromeTheme
+    @Dependency(\.workspaceProfiles) private var workspaceProfiles
     @State private var draggedWorkspaceID: UUID?
     /// Group currently being dragged (drag on a group header). Mutually
     /// exclusive with `draggedWorkspaceID`; shares `dragCurrentY` and
@@ -908,6 +909,7 @@ struct WorkspaceListView: View {
                     }
                 }
             }
+            profileMenu(workspaceStore: workspaceStore)
             workspaceChangeIconMenu(workspaceID: workspaceID)
             labelsMenu(workspaceID: workspaceID, workspaceStore: workspaceStore)
             moveToGroupMenu(workspaceID: workspaceID)
@@ -928,6 +930,41 @@ struct WorkspaceListView: View {
                 }
             }
             .disabled(store.workspaces.count <= 1)
+        }
+    }
+
+    /// "Profile ▸" submenu — assigns a workspace profile (named env-var set
+    /// from ~/.config/nex/config) to panes spawned in this workspace from
+    /// now on. Menu content is built at right-click time, so the profile
+    /// list is always fresh without a file watcher. Items are Toggles so
+    /// the active assignment gets a native checkmark; an assigned name
+    /// missing from the config is appended so the tick never disappears.
+    /// The built-in "default" baseline leads the list — every workspace is
+    /// on it unless another profile is assigned (stored as nil).
+    private func profileMenu(workspaceStore: StoreOf<WorkspaceFeature>) -> some View {
+        Menu("Profile") {
+            let current = workspaceStore.profileName
+            Toggle(WorkspaceProfilesClient.defaultProfileName, isOn: Binding(
+                get: { current == nil },
+                set: { _ in workspaceStore.send(.setProfile(nil)) }
+            ))
+            let profiles: [String] = {
+                var list = workspaceProfiles.listProfiles()
+                    .filter { $0 != WorkspaceProfilesClient.defaultProfileName }
+                if let current, !list.contains(current) {
+                    list.append(current)
+                }
+                return list
+            }()
+            if !profiles.isEmpty {
+                Divider()
+                ForEach(profiles, id: \.self) { name in
+                    Toggle(name, isOn: Binding(
+                        get: { current == name },
+                        set: { _ in workspaceStore.send(.setProfile(name)) }
+                    ))
+                }
+            }
         }
     }
 

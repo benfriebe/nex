@@ -283,7 +283,12 @@ not `claude --resume` a session that has already exited.
 # id — `created workspace <name> (<uuid>)`, or the raw {ok,workspace_id,
 # workspace_name,group?} object with --json — so a coordinator can capture
 # the id to target it later. --group creates the group if missing.
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--json]
+# --profile assigns a workspace profile (env-var injection into every pane).
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--profile <name>] [--json]
+
+# Assign or clear a workspace's profile (fire-and-forget). Applies to the
+# NEXT pane spawned in the workspace; existing panes keep their env.
+nex workspace profile <name-or-id> (<profile> | --clear)
 
 # Delete one or more workspaces by name-or-id (request/response). Deletes
 # outright — no CLI prompt — closing any remaining panes. Refuses to
@@ -308,6 +313,57 @@ nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow
 # not a failure, so the command still exits 0 if the workspace was deleted.
 nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 ```
+
+### Workspace Profiles (multi-account env injection)
+
+A workspace profile is a named env-var set defined in
+`~/.config/nex/config`, one variable per line (repeated lines with the
+same name merge, later lines win). Manage them by hand in the config
+file or via **Settings → Profiles** (both write the same lines):
+
+```
+profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work
+profile = personal:CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+```
+
+Assign one to a workspace (`workspace create --profile`, `workspace
+profile`, the inspector picker, or the sidebar context menu) and every
+pane PTY spawned in that workspace from then on gets those vars plus
+`NEX_PROFILE=<name>`. The flagship use case is running multiple Claude
+Code accounts side by side — one workspace per `CLAUDE_CONFIG_DIR` —
+and the injection survives restart: restored panes respawn with the
+profile env, so auto-resumed agent sessions (`claude --resume`) stay
+on their workspace's account.
+
+The built-in **`default` profile** is the baseline: a workspace with no
+explicit assignment is on `default`, so every pane always carries
+`NEX_PROFILE` (`default` unless assigned). It always exists (virtual
+until customized), can't be renamed or deleted in Settings, and adding
+vars to it (Settings → Profiles or `profile = default:KEY=value` lines)
+applies them to every unassigned workspace. Selecting `default` in the
+UI, `nex workspace profile <ws> default`, and `--clear` are equivalent.
+
+Rules worth knowing:
+
+- **Spawn-time only.** Assignment changes never touch live PTYs; open
+  a fresh pane after assigning. Corollary: `pane move-to-workspace`
+  moves a live PTY, so the pane keeps its birth env even when the
+  destination workspace has a different profile. Workspaces created
+  with a profile up front (the New Workspace sheet's Profile picker or
+  `workspace create --profile`) spawn their first pane already on it.
+- Profile definitions are re-read from the config file on every spawn,
+  so editing values applies to new panes without restarting Nex.
+- Profile names cannot contain `:` or `=`; values may contain both.
+  Quotes in values are literal (no stripping). A leading `~` in the
+  value is tilde-expanded.
+- `NEX_PANE_ID` and `PATH` are reserved — profile entries for them are
+  ignored.
+- Assigning a profile with no definitions in the config is allowed
+  (`workspace create --profile` works before the config lines exist);
+  panes then get only `NEX_PROFILE=<name>` and a warning is logged.
+- `workspace profile` is fire-and-forget: an unknown or ambiguous
+  workspace name is a silent no-op (same semantics as `workspace
+  move`). UUIDs always win over names.
 
 ### File Commands
 

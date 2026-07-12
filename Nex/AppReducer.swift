@@ -361,7 +361,7 @@ struct AppReducer {
 
     enum Action: Equatable {
         case appLaunched
-        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil, id: UUID? = nil)
+        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil, profileName: String? = nil, id: UUID? = nil)
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
         case moveGroup(id: UUID, toIndex: Int)
@@ -605,6 +605,7 @@ struct AppReducer {
     @Dependency(\.notificationService) var notificationService
     @Dependency(\.statusBarController) var statusBarController
     @Dependency(\.ghosttyConfig) var ghosttyConfig
+    @Dependency(\.workspaceProfiles) var workspaceProfiles
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.graftService) var graftService
     @Dependency(\.webPaneStore) var webPaneStore
@@ -1036,7 +1037,7 @@ struct AppReducer {
                     }
                 )
 
-            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID, let id):
+            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID, let newProfileName, let id):
                 let previousActiveID = state.activeWorkspaceID
                 let resolvedColor = color ?? state.workspaces.nextRandomColor()
                 var workspace = WorkspaceFeature.State(
@@ -1047,6 +1048,11 @@ struct AppReducer {
                     name: name,
                     color: resolvedColor
                 )
+                if let newProfileName {
+                    // Same normalization as `.setProfile`: trim; empty or
+                    // the built-in "default" baseline → nil.
+                    workspace.profileName = WorkspaceProfilesClient.normalizedAssignment(newProfileName)
+                }
 
                 // If exactly one repo, start the first pane in that repo's directory
                 if repos.count == 1 {
@@ -1126,6 +1132,7 @@ struct AppReducer {
                 let cwd = workspace.panes.first!.workingDirectory
                 let opacity = ghosttyConfig.backgroundOpacity
                 let workspaceID = workspace.id
+                let profileName = workspace.profileName
                 let watcherSeeds: [Effect<Action>] = workspace.repoAssociations.map { assoc in
                     Effect.send(.startHeadWatcher(
                         workspaceID: workspaceID,
@@ -1136,7 +1143,10 @@ struct AppReducer {
                 return .merge(
                     [
                         .run { _ in
-                            await surfaceManager.createSurface(paneID: paneID, workingDirectory: cwd, backgroundOpacity: opacity)
+                            let env = workspaceProfiles.resolveEnv(
+                                profileName ?? WorkspaceProfilesClient.defaultProfileName
+                            )
+                            await surfaceManager.createSurface(paneID: paneID, workingDirectory: cwd, backgroundOpacity: opacity, env: env)
                         },
                         .send(.persistState)
                     ] + watcherSeeds
@@ -2000,8 +2010,9 @@ struct AppReducer {
                 // Create surfaces for shell panes only (markdown panes use WKWebView)
                 let panesToResume = resumablePanes
                 let opacity = ghosttyConfig.backgroundOpacity
-                let shellPanes: [(id: UUID, cwd: String)] = workspaces.flatMap { ws in
-                    ws.panes.filter { $0.type == .shell }.map { (id: $0.id, cwd: $0.workingDirectory) }
+                let shellPanes: [(id: UUID, cwd: String, profile: String?)] = workspaces.flatMap { ws in
+                    ws.panes.filter { $0.type == .shell }
+                        .map { (id: $0.id, cwd: $0.workingDirectory, profile: ws.profileName) }
                 }
                 // Seed HEAD watchers for every persisted RepoAssociation so
                 // sidebar branch/status updates land within ~200ms of any
@@ -2020,11 +2031,27 @@ struct AppReducer {
                 return .merge(
                     [
                         .run { send in
+                            // Resolve each workspace profile once, not per
+                            // pane — resolveEnv re-reads the config file.
+                            // Restored panes carry their workspace's profile
+                            // env so the `claude --resume` below lands in a
+                            // PTY that's already on the right account.
+                            var envCache: [String: [String: String]] = [:]
                             for pane in shellPanes {
+                                let profile = pane.profile
+                                    ?? WorkspaceProfilesClient.defaultProfileName
+                                let env: [String: String]
+                                if let cached = envCache[profile] {
+                                    env = cached
+                                } else {
+                                    env = workspaceProfiles.resolveEnv(profile)
+                                    envCache[profile] = env
+                                }
                                 await surfaceManager.createSurface(
                                     paneID: pane.id,
                                     workingDirectory: pane.cwd,
-                                    backgroundOpacity: opacity
+                                    backgroundOpacity: opacity,
+                                    env: env
                                 )
                             }
 

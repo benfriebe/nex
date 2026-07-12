@@ -58,7 +58,7 @@ enum SocketMessage: Equatable {
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
     case workspaceList
-    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
+    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?, profile: String? = nil)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
     /// Delete a single workspace by name-or-id. Request/response
     /// (`replyCommandAllowlist`) — the CLI loops one request per id for
@@ -68,6 +68,9 @@ enum SocketMessage: Equatable {
     /// without it, deleting a workspace that still has active agents is
     /// refused (mirrors the app-quit warning).
     case workspaceDelete(nameOrID: String, force: Bool)
+    /// `nex workspace profile <name-or-id> (<profile> | --clear)`.
+    /// `profile` nil = clear. Fire-and-forget (matches `workspace-move`).
+    case workspaceProfile(nameOrID: String, profile: String?)
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
     case groupList
@@ -735,6 +738,9 @@ final class SocketServer: Sendable {
         var force: Bool?
         var index: Int?
         var group: String?
+        /// `workspace-create --profile` / `workspace-profile` — the
+        /// workspace-profile name to assign (empty = clear).
+        var profile: String?
         // Request/response — `pane-list` filters
         var workspace: String?
         var scope: String?
@@ -831,7 +837,7 @@ final class SocketServer: Sendable {
             case sessionID = "session_id"
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
-            case cascade, force, index, group
+            case cascade, force, index, group, profile
             case workspace, scope
             case reuse
             case repoPath = "repo_path"
@@ -889,11 +895,15 @@ final class SocketServer: Sendable {
         // require pane_id.
         if wire.command == "workspace-create" {
             let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
+            // Empty-string profile is normalised to nil (= no profile);
+            // `.setProfile` normalises again as the backstop.
+            let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
             return (.workspaceCreate(
                 name: wire.name,
                 path: wire.path,
                 color: color,
-                group: wire.group
+                group: wire.group,
+                profile: profile
             ), wire)
         }
 
@@ -913,6 +923,13 @@ final class SocketServer: Sendable {
         if wire.command == "workspace-delete" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             return (.workspaceDelete(nameOrID: nameOrID, force: wire.force ?? false), wire)
+        }
+
+        if wire.command == "workspace-profile" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            // Empty/missing profile = clear the assignment.
+            let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
+            return (.workspaceProfile(nameOrID: nameOrID, profile: profile), wire)
         }
 
         if wire.command == "group-list" {
