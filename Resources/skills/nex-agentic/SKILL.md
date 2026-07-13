@@ -289,7 +289,18 @@ not `claude --resume` a session that has already exited.
 # workspace_name,group?} object with --json — so a coordinator can capture
 # the id to target it later. --group creates the group if missing.
 # --profile assigns a workspace profile (env-var injection into every pane).
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--profile <name>] [--json]
+# --worktree creates a git worktree inline and opens the workspace's first
+# pane in it — ideal for isolating a fan-out worker on its own branch:
+#   --worktree <name>   worktree dir is <worktree-base-path>/<name>
+#   --branch <name>     branch to create/check out (defaults to <name>)
+#   --repo <path>       source repo (defaults to the CLI's cwd)
+#   --update-main       branch off a fresh origin/<default> (fetches first)
+#   --group <existing>  composes with --worktree, but the group must already
+#                       exist (an unknown/ambiguous name is rejected — it
+#                       won't create one, to avoid orphaning it on failure)
+# The reply adds `worktree_path` + `branch`; the create runs with a longer
+# read timeout so a slow `git fetch` isn't a spurious failure.
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--profile <name>] [--worktree <name> [--branch <name>] [--repo <path>] [--update-main]] [--json]
 
 # Assign or clear a workspace's profile (fire-and-forget). Applies to the
 # NEXT pane spawned in the workspace; existing panes keep their env.

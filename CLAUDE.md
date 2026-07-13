@@ -130,7 +130,7 @@ make check
 
 ### Keybindings
 - **Config file**: `~/.config/nex/config` — Ghostty-style `key = value` syntax. General settings: `focus-follows-mouse`, `focus-follows-mouse-delay`, `theme`, `tcp-port`. Keybindings: `keybind = super+d=split_right`. Workspace profiles: `profile = <name>:<KEY>=<value>` (one var per line; repeated lines merge by name, later wins). Parsed by `ConfigParser`, loaded by `KeybindingService`.
-- **Data model** (`KeyBinding.swift`): `KeyTrigger` (keyCode + modifiers), `NexAction` (48 bindable actions, including the web-pane verbs and the default-unbound `open_diff` / `toggle_sync_input`), `KeyBindingMap` (trigger → action dictionary with sorted lookups).
+- **Data model** (`KeyBinding.swift`): `KeyTrigger` (keyCode + modifiers), `NexAction` (51 bindable actions, including the web-pane verbs and the default-unbound `open_diff` / `toggle_sync_input` / `web_zoom_in` / `web_zoom_out` / `web_zoom_reset`), `KeyBindingMap` (trigger → action dictionary with sorted lookups).
 - **Two dispatch layers**: SwiftUI `Commands` (`NexCommands`) handles menu bar shortcuts; `PaneShortcutMonitor` (NSEvent local monitor) handles pane-context shortcuts. Both read from `AppReducer.State.keybindings`.
 - **Settings UI** (`KeybindingsSettingsView`): table grouped by category with key recorder sheet, per-action reset, and reset-all. Changes are persisted to the config file.
 - **Conditional shortcuts**: `toggle_markdown_edit` only fires for markdown panes, `close_search` only when search is active, `close_pane` deletes workspace when it's the last pane.
