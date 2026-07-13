@@ -21,6 +21,7 @@
 //   nex pane id
 //   nex workspace list [--json] [--no-header]
 //   nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
+//   nex workspace create --worktree <name> [--branch <name>] [--repo <path>] [--update-main]  (issue #222)
 //   nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
 //   nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 //   nex workspace profile <name-or-id> (<profile> | --clear)
@@ -210,6 +211,7 @@ func printUsage() {
       nex pane id
       nex workspace list [--json] [--no-header]
       nex workspace create [--name "..."] [--path /dir] [--color blue] [--group <name>] [--profile <name>] [--json]
+      nex workspace create --worktree <name> [--branch <name>] [--repo <path>] [--update-main] [--group <existing>]
       nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
       nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
       nex workspace profile <name-or-id> (<profile> | --clear)
@@ -2844,6 +2846,15 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         let color = parseFlag("--color", from: &args)
         let group = parseFlag("--group", from: &args)
         let profile = parseFlag("--profile", from: &args)
+        // Inline worktree flow (issue #222): `--worktree <name>` creates a
+        // git worktree and opens the new workspace's first pane in it.
+        // `--branch` defaults to the worktree name; `--repo` is the source
+        // repo (defaults to the CLI's cwd); `--update-main` fetches and
+        // branches off `origin/<default>`.
+        let worktree = parseFlag("--worktree", from: &args)
+        let branch = parseFlag("--branch", from: &args)
+        let repo = parseFlag("--repo", from: &args)
+        let updateMain = popSwitch("--update-main", from: &args)
         let json = popSwitch("--json", from: &args)
 
         var payload: [String: Any] = [
@@ -2854,10 +2865,23 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         if let color { payload["color"] = color }
         if let group { payload["group"] = group }
         if let profile { payload["profile"] = profile }
+        if let worktree {
+            payload["worktree"] = worktree
+            if let branch { payload["branch"] = branch }
+            if updateMain { payload["update_main"] = true }
+            // Always send the source repo so the app can branch from it.
+            // Default to the CLI's cwd when --repo is omitted.
+            payload["repo"] = repo ?? FileManager.default.currentDirectoryPath
+        }
 
         // Request/response (matches `pane create` / `workspace delete`):
         // returns the newly created workspace's id so scripts can chain.
-        let reply = decodeReply(payload, command: "nex workspace create")
+        // The worktree path replies only after `git worktree add` (and, with
+        // --update-main, a network `git fetch`) completes — well past the 5s
+        // default. Extend the read timeout so a slow-but-succeeding create
+        // isn't reported as a spurious failure (review of #222).
+        let createTimeout: Int? = (worktree != nil) ? 120 : nil
+        let reply = decodeReply(payload, command: "nex workspace create", readTimeoutOverride: createTimeout)
         if json {
             if let data = try? JSONSerialization.data(
                 withJSONObject: reply, options: [.sortedKeys]
@@ -2867,7 +2891,11 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         } else {
             let wsName = (reply["workspace_name"] as? String) ?? (name ?? "Workspace")
             let wsID = (reply["workspace_id"] as? String) ?? "?"
-            if let grp = reply["group"] as? String {
+            if let wt = reply["worktree_path"] as? String {
+                let br = (reply["branch"] as? String) ?? "?"
+                let inGroup = (reply["group"] as? String).map { " in group \($0)" } ?? ""
+                print("created workspace \(wsName) (\(wsID))\(inGroup) with worktree \(wt) on branch \(br)")
+            } else if let grp = reply["group"] as? String {
                 print("created workspace \(wsName) (\(wsID)) in group \(grp)")
             } else {
                 print("created workspace \(wsName) (\(wsID))")

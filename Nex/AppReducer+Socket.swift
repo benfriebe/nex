@@ -386,7 +386,7 @@ extension AppReducer {
                     handleWorkspaceList(state: state, reply: reply)
                     return .none
 
-                case .workspaceCreate(let name, let path, let color, let group, let profile):
+                case .workspaceCreate(let name, let path, let color, let group, let profile, let worktree, let branch, let updateMain, let repo):
                     return handleSocketWorkspaceCreate(
                         &state,
                         name: name,
@@ -394,6 +394,10 @@ extension AppReducer {
                         color: color,
                         group: group,
                         profile: profile,
+                        worktree: worktree,
+                        branch: branch,
+                        updateMain: updateMain,
+                        repo: repo,
                         reply: reply
                     )
 
@@ -830,6 +834,10 @@ extension AppReducer {
         color: WorkspaceColor?,
         group: String?,
         profile: String? = nil,
+        worktree: String? = nil,
+        branch: String? = nil,
+        updateMain: Bool = false,
+        repo: String? = nil,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
         let workspaceName = name ?? "Workspace"
@@ -845,6 +853,109 @@ extension AppReducer {
             if let groupName { payload["group"] = groupName }
             reply?.send(payload)
             reply?.close()
+        }
+
+        // Inline worktree flow (issue #222). When `--worktree` is set, create
+        // the worktree first (async), then dispatch `.createWorkspace` with
+        // the resolved seed so the first pane opens in it. `--group` composes
+        // with an *existing* group (mirrors the GUI, which only offers
+        // existing groups): the resolved group id is threaded into
+        // `.createWorkspace`. An unknown or ambiguous group name is rejected
+        // — the worktree path does not create groups (that would leave an
+        // orphaned empty group if the async worktree add then fails).
+        if let worktree, !worktree.isEmpty {
+            let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var resolvedGroupID: UUID?
+            if let trimmedGroup, !trimmedGroup.isEmpty {
+                if let existingGroup = state.resolveGroup(trimmedGroup) {
+                    resolvedGroupID = existingGroup.id
+                } else if state.groups.contains(where: { $0.name == trimmedGroup }) {
+                    reply?.send(["ok": false, "error": "group name is ambiguous: \(trimmedGroup) (use the id or rename an existing group)"])
+                    reply?.close()
+                    return .none
+                } else {
+                    reply?.send(["ok": false, "error": "unknown group: \(trimmedGroup) — --worktree only supports existing groups; create it first (`nex group create`) or omit --group"])
+                    reply?.close()
+                    return .none
+                }
+            }
+            // The CLI always sends the source repo path (cwd fallback) when
+            // `--worktree` is set. Guard defensively.
+            guard let repoPathRaw = repo ?? path, !repoPathRaw.isEmpty else {
+                reply?.send(["ok": false, "error": "--worktree requires a source repo (pass --repo <path>)"])
+                reply?.close()
+                return .none
+            }
+            let sourceRepoPath = (repoPathRaw as NSString).standardizingPath
+
+            // Sanitize names — same single source of truth as the GUI/inspector.
+            let worktreeBranch = (branch?.isEmpty == false) ? branch! : worktree
+            guard let folderName = WorkspaceFeature.State.sanitizedGitName(from: worktree) else {
+                reply?.send(["ok": false, "error": "\"\(worktree)\" isn't a usable worktree name"])
+                reply?.close()
+                return .none
+            }
+            guard let safeBranch = WorkspaceFeature.State.sanitizedGitName(from: worktreeBranch) else {
+                reply?.send(["ok": false, "error": "\"\(worktreeBranch)\" isn't a usable branch name"])
+                reply?.close()
+                return .none
+            }
+
+            // Find or mint the source Repo so `.createWorkspace` can register
+            // it and attach a worktree association.
+            let sourceRepo: Repo = if let existing = state.repoRegistry.first(where: {
+                ($0.path as NSString).standardizingPath == sourceRepoPath
+            }) {
+                existing
+            } else {
+                Repo(
+                    id: uuid(),
+                    path: sourceRepoPath,
+                    name: (sourceRepoPath as NSString).lastPathComponent
+                )
+            }
+
+            let basePath = state.settings.resolvedWorktreeBasePath(forRepoPath: sourceRepoPath)
+            let worktreePath = "\(basePath)/\(folderName)"
+            let newID = uuid()
+            let colorValue = color
+            let profileValue = profile
+            let wsName = workspaceName
+            let groupID = resolvedGroupID
+            let groupName = (resolvedGroupID != nil) ? trimmedGroup : nil
+            return .run { [gitService] send in
+                do {
+                    try await performWorktreeAdd(
+                        gitService: gitService,
+                        repoPath: sourceRepoPath,
+                        worktreePath: worktreePath,
+                        branch: safeBranch,
+                        updateMain: updateMain
+                    )
+                    await send(.createWorkspace(
+                        name: wsName,
+                        color: colorValue,
+                        repos: [sourceRepo],
+                        groupID: groupID,
+                        profileName: profileValue,
+                        id: newID,
+                        worktree: WorktreeSeed(path: worktreePath, branchName: safeBranch)
+                    ))
+                    var payload: [String: Any] = [
+                        "ok": true,
+                        "workspace_id": newID.uuidString,
+                        "workspace_name": wsName,
+                        "worktree_path": worktreePath,
+                        "branch": safeBranch
+                    ]
+                    if let groupName { payload["group"] = groupName }
+                    reply?.send(payload)
+                    reply?.close()
+                } catch {
+                    reply?.send(["ok": false, "error": worktreeErrorMessage(error)])
+                    reply?.close()
+                }
+            }
         }
 
         // A missing `group` OR a group that's all whitespace falls

@@ -36,6 +36,18 @@ struct GitService {
     var getCurrentBranch: @Sendable (_ path: String) async throws -> String?
     var getStatus: @Sendable (_ path: String) async throws -> RepoGitStatus
     var createWorktree: @Sendable (_ repoPath: String, _ worktreePath: String, _ branchName: String) async throws -> Void
+    /// `git worktree add -b <branch> <path> <baseRef>` — creates the
+    /// worktree on a new branch based on an explicit ref (e.g.
+    /// `origin/main`) rather than the current HEAD. Used by the
+    /// "update main first" inline-worktree flow (issue #222).
+    var createWorktreeFromBase: @Sendable (_ repoPath: String, _ worktreePath: String, _ branchName: String, _ baseRef: String) async throws -> Void
+    /// The repository's default branch name (e.g. `main`), resolved from
+    /// `origin/HEAD`. Falls back to `main` when there is no remote HEAD
+    /// symref. Used to base a fresh worktree on `origin/<default>`.
+    var defaultBranch: @Sendable (_ repoPath: String) async throws -> String
+    /// `git fetch <remote>` — refresh remote-tracking refs before
+    /// branching a worktree off the freshly-updated default branch.
+    var fetch: @Sendable (_ repoPath: String, _ remote: String) async throws -> Void
     var removeWorktree: @Sendable (_ repoPath: String, _ worktreePath: String) async throws -> Void
     var listWorktrees: @Sendable (_ repoPath: String) async throws -> [WorktreeInfo]
     var pruneWorktrees: @Sendable (_ repoPath: String) async throws -> Void
@@ -172,6 +184,47 @@ extension GitService {
             } catch {
                 _ = try runGit(args: ["worktree", "add", "-b", branchName, worktreePath], at: repoPath)
             }
+        },
+
+        createWorktreeFromBase: { repoPath, worktreePath, branchName, baseRef in
+            _ = try runGit(args: ["worktree", "add", "-b", branchName, worktreePath, baseRef], at: repoPath)
+        },
+
+        defaultBranch: { repoPath in
+            // Query the remote directly: `git ls-remote --symref origin HEAD`
+            // prints `ref: refs/heads/<default>\tHEAD`. This is robust where
+            // the *local* `origin/HEAD` symref is unset — which is common,
+            // and a plain `git fetch` does NOT create it — so a repo whose
+            // default is `master`/`develop` resolves correctly instead of
+            // wrongly falling back to `main` (review of #222).
+            if let out = try? runGit(args: ["ls-remote", "--symref", "origin", "HEAD"], at: repoPath) {
+                for line in out.split(separator: "\n") where line.hasPrefix("ref:") {
+                    let rest = line.dropFirst("ref:".count)
+                    let ref = rest.split(whereSeparator: { $0 == " " || $0 == "\t" }).first.map(String.init) ?? ""
+                    if ref.hasPrefix("refs/heads/") {
+                        return String(ref.dropFirst("refs/heads/".count))
+                    }
+                }
+            }
+            // Offline / no remote: fall back to the local `origin/HEAD`
+            // symref (`refs/remotes/origin/main` → `main`), then `main`.
+            if let output = try? runGit(
+                args: ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                at: repoPath
+            ) {
+                let ref = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !ref.isEmpty {
+                    if let slash = ref.firstIndex(of: "/") {
+                        return String(ref[ref.index(after: slash)...])
+                    }
+                    return ref
+                }
+            }
+            return "main"
+        },
+
+        fetch: { repoPath, remote in
+            _ = try runGit(args: ["fetch", remote], at: repoPath)
         },
 
         removeWorktree: { repoPath, worktreePath in
@@ -502,6 +555,9 @@ extension GitService: DependencyKey {
             getCurrentBranch: unimplemented("GitService.getCurrentBranch"),
             getStatus: unimplemented("GitService.getStatus"),
             createWorktree: unimplemented("GitService.createWorktree"),
+            createWorktreeFromBase: unimplemented("GitService.createWorktreeFromBase"),
+            defaultBranch: unimplemented("GitService.defaultBranch", placeholder: "main"),
+            fetch: unimplemented("GitService.fetch"),
             removeWorktree: unimplemented("GitService.removeWorktree"),
             listWorktrees: unimplemented("GitService.listWorktrees"),
             pruneWorktrees: unimplemented("GitService.pruneWorktrees"),
