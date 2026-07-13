@@ -545,6 +545,28 @@ extension AppReducer {
     }
 }
 
+/// Create a git worktree for the inline new-workspace flow (issue #222).
+/// When `updateMain` is set, resolve the repo's default branch, `git fetch`
+/// the remote, and branch the worktree off `origin/<default>` so it starts
+/// from the freshly-updated ref rather than the local HEAD. Otherwise branch
+/// off the current HEAD via the plain `createWorktree`. Throws on failure so
+/// the caller can surface `worktreeErrorMessage(_:)`.
+func performWorktreeAdd(
+    gitService: GitService,
+    repoPath: String,
+    worktreePath: String,
+    branch: String,
+    updateMain: Bool
+) async throws {
+    if updateMain {
+        let defaultBranch = try await gitService.defaultBranch(repoPath)
+        try await gitService.fetch(repoPath, "origin")
+        try await gitService.createWorktreeFromBase(repoPath, worktreePath, branch, "origin/\(defaultBranch)")
+    } else {
+        try await gitService.createWorktree(repoPath, worktreePath, branch)
+    }
+}
+
 /// Turn a worktree-creation error into a message worth showing the user.
 /// `GitServiceError` is not `LocalizedError`, so `localizedDescription`
 /// yields the useless "operation couldn't be completed" string and drops the

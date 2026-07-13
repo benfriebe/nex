@@ -14,6 +14,10 @@ struct NewWorkspaceSheet: View {
         case profile
         case removeRepo(UUID)
         case addRepository
+        case worktreeToggle
+        case worktreeName
+        case worktreeBranch
+        case updateMain
         case cancel
         case create
     }
@@ -32,6 +36,20 @@ struct NewWorkspaceSheet: View {
     /// Loaded once per sheet appearance — `listProfiles()` reads the config
     /// file, which must stay out of the render path.
     @State private var availableProfiles: [String] = []
+    // Inline worktree creation (issue #222). Only offered when exactly one
+    // repo is selected (there must be a single repo to branch from).
+    @State private var createWorktree = false
+    @State private var worktreeName = ""
+    @State private var worktreeBranch = ""
+    /// Tracks whether the user hand-edited the branch, so we stop mirroring
+    /// the worktree name into it (mirrors `CreateWorktreeSheet`).
+    @State private var branchEdited = false
+    @State private var updateMain = false
+    /// True while the async worktree create is in flight. Disables the Create
+    /// button so a second click can't race the same `git worktree add`
+    /// (review of #222). Reset when `worktreeCreationError` surfaces (the
+    /// sheet stays open on failure); on success the sheet is dismissed.
+    @State private var isSubmittingWorktree = false
     @FocusState private var focusedField: Field?
     @Environment(\.chromeTheme) private var chromeTheme
     @Dependency(\.workspaceProfiles) private var workspaceProfiles
@@ -158,8 +176,23 @@ struct NewWorkspaceSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // Inline worktree creation (issue #222). Requires exactly one
+                // selected repo to branch from.
+                if selectedRepos.count == 1 {
+                    worktreeSection
+                }
+
+                if let error = store.worktreeCreationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 HStack {
                     Button("Cancel") {
+                        store.send(.dismissWorktreeCreationError)
                         store.send(.dismissNewWorkspaceSheet)
                     }
                     .keyboardShortcut(.cancelAction)
@@ -170,7 +203,7 @@ struct NewWorkspaceSheet: View {
 
                     Button("Create", action: create)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(!isCreateEnabled)
+                        .disabled(!isCreateEnabled || isSubmittingWorktree)
                         .focused($focusedField, equals: .create)
                         .onKeyPress(keys: [.tab]) { handleTab($0) }
                 }
@@ -178,6 +211,12 @@ struct NewWorkspaceSheet: View {
             .padding(20)
             .frame(width: 360)
             .background(chromeTheme.surfaceBackground)
+            // A surfaced worktree error means the async create finished and
+            // failed — re-enable Create so the user can fix the input and
+            // retry (review of #222).
+            .onChange(of: store.worktreeCreationError) { _, error in
+                if error != nil { isSubmittingWorktree = false }
+            }
             .onAppear {
                 availableProfiles = workspaceProfiles.listProfiles()
                 // Dispatching lets the sheet finish presenting before we
@@ -206,6 +245,28 @@ struct NewWorkspaceSheet: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
+        // Inline worktree route (issue #222): validate + create the worktree,
+        // then the workspace's first pane opens in it. On success the reducer
+        // dismisses the sheet; on failure it surfaces `worktreeCreationError`
+        // (shown inline) and keeps the sheet open.
+        if createWorktree, let repo = selectedRepos.first, selectedRepos.count == 1 {
+            // Guard against a second submit while the first `git worktree add`
+            // is still running (review of #222).
+            guard !isSubmittingWorktree else { return }
+            isSubmittingWorktree = true
+            store.send(.createWorkspaceWithWorktree(
+                name: trimmed,
+                color: color,
+                repo: repo,
+                worktreeName: worktreeName,
+                branchName: worktreeBranch,
+                updateMain: updateMain,
+                groupID: selectedGroupID,
+                profileName: selectedProfile
+            ))
+            return
+        }
+
         store.send(.createWorkspace(
             name: trimmed,
             color: color,
@@ -213,6 +274,83 @@ struct NewWorkspaceSheet: View {
             groupID: selectedGroupID,
             profileName: selectedProfile
         ))
+    }
+
+    /// Optional "create a git worktree" section, revealed when a single repo
+    /// is selected. Mirrors `CreateWorktreeSheet`: sanitized live preview and
+    /// worktree-name → branch-name mirroring until the branch is hand-edited.
+    private var worktreeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $createWorktree) {
+                Text("Create git worktree")
+                    .font(.system(size: 12))
+            }
+            .toggleStyle(.checkbox)
+            .focused($focusedField, equals: .worktreeToggle)
+            .onKeyPress(keys: [.tab]) { handleTab($0) }
+
+            if createWorktree {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Worktree name")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $worktreeName)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .worktreeName)
+                        .onChange(of: worktreeName) { _, new in
+                            if !branchEdited { worktreeBranch = new }
+                        }
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Branch name")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $worktreeBranch)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .worktreeBranch)
+                        .onChange(of: worktreeBranch) { _, new in
+                            branchEdited = (new != worktreeName)
+                        }
+                        // Enter-to-create parity with `CreateWorktreeSheet`.
+                        .onSubmit { if isCreateEnabled { create() } }
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
+                }
+
+                Toggle(isOn: $updateMain) {
+                    Text("Update main first (fetch + branch off origin)")
+                        .font(.system(size: 12))
+                }
+                .toggleStyle(.checkbox)
+                .focused($focusedField, equals: .updateMain)
+                .onKeyPress(keys: [.tab]) { handleTab($0) }
+
+                // Live preview of what will actually be created — names are
+                // sanitized (spaces/unsafe chars → hyphens) so the user sees
+                // the real folder + branch up front (issue #218).
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(worktreeBasePath)/\(sanitizedWorktreeName ?? "<name>")")
+                    Text("branch: \(sanitizedWorktreeBranch ?? "<branch>")")
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var worktreeBasePath: String {
+        store.settings.resolvedWorktreeBasePath(forRepoPath: selectedRepos.first?.path)
+    }
+
+    private var sanitizedWorktreeName: String? {
+        WorkspaceFeature.State.sanitizedGitName(from: worktreeName)
+    }
+
+    private var sanitizedWorktreeBranch: String? {
+        WorkspaceFeature.State.sanitizedGitName(from: worktreeBranch)
     }
 
     /// Built-in default first, then config-defined profiles.
@@ -247,6 +385,12 @@ struct NewWorkspaceSheet: View {
             fields.append(contentsOf: selectedRepos.map { Field.removeRepo($0.id) })
             fields.append(.addRepository)
         }
+        if selectedRepos.count == 1 {
+            fields.append(.worktreeToggle)
+            if createWorktree {
+                fields.append(contentsOf: [.worktreeName, .worktreeBranch, .updateMain])
+            }
+        }
         fields.append(.cancel)
         if isCreateEnabled {
             fields.append(.create)
@@ -255,7 +399,13 @@ struct NewWorkspaceSheet: View {
     }
 
     private var isCreateEnabled: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        // When creating a worktree, both the folder and branch must sanitize
+        // to something usable, otherwise the create button stays disabled.
+        if createWorktree, selectedRepos.count == 1 {
+            return sanitizedWorktreeName != nil && sanitizedWorktreeBranch != nil
+        }
+        return true
     }
 
     /// Move focus off the row being deleted before mutating the array, so

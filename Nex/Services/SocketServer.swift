@@ -58,7 +58,12 @@ enum SocketMessage: Equatable {
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Workspace commands
     case workspaceList
-    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?, profile: String? = nil)
+    // `worktree` (issue #222): when non-nil, create a git worktree named
+    // this and open the new workspace's first pane in it. `branch` is the
+    // branch name (defaults to `worktree`); `updateMain` fetches + branches
+    // off `origin/<default>`; `repo` is the source repo path (defaults to
+    // the CLI's cwd, always sent by the CLI when `worktree` is set).
+    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?, profile: String? = nil, worktree: String? = nil, branch: String? = nil, updateMain: Bool = false, repo: String? = nil)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
     /// Delete a single workspace by name-or-id. Request/response
     /// (`replyCommandAllowlist`) — the CLI loops one request per id for
@@ -829,6 +834,15 @@ final class SocketServer: Sendable {
         /// `pane-sync-exclude` — true to exclude the target pane,
         /// false to re-include. Required for that command.
         var excluded: Bool?
+        /// `workspace-create --worktree <name>` (issue #222) — the worktree
+        /// / branch folder name to create and open the first pane in.
+        var worktree: String?
+        /// `workspace-create --branch <name>` — branch name for the new
+        /// worktree (defaults to `worktree` when omitted).
+        var branch: String?
+        /// `workspace-create --update-main` — fetch + branch the worktree
+        /// off `origin/<default>` rather than the current HEAD.
+        var updateMain: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -865,6 +879,8 @@ final class SocketServer: Sendable {
             case block, behavior
             case script
             case action, excluded
+            case worktree, branch
+            case updateMain = "update_main"
         }
     }
 
@@ -898,12 +914,22 @@ final class SocketServer: Sendable {
             // Empty-string profile is normalised to nil (= no profile);
             // `.setProfile` normalises again as the backstop.
             let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
+            // Worktree fields (issue #222). Empty strings normalise to nil so
+            // a serialised-but-unset field can't accidentally trigger the
+            // worktree path or an empty branch name.
+            let worktree = (wire.worktree?.isEmpty == true) ? nil : wire.worktree
+            let branch = (wire.branch?.isEmpty == true) ? nil : wire.branch
+            let repo = (wire.repo?.isEmpty == true) ? nil : wire.repo
             return (.workspaceCreate(
                 name: wire.name,
                 path: wire.path,
                 color: color,
                 group: wire.group,
-                profile: profile
+                profile: profile,
+                worktree: worktree,
+                branch: branch,
+                updateMain: wire.updateMain ?? false,
+                repo: repo
             ), wire)
         }
 

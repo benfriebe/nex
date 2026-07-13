@@ -1,3 +1,4 @@
+import Clocks
 import ComposableArchitecture
 import Foundation
 @testable import Nex
@@ -276,6 +277,150 @@ struct WorktreeOperationTests {
         )) { state in
             state.workspaces[id: wsID]?.repoAssociations = []
         }
+    }
+
+    // MARK: - Inline worktree on new workspace (issue #222)
+
+    @Test func createWorkspaceWithWorktreeOpensFirstPaneInWorktree() async {
+        let repo = Repo(id: UUID(), path: "/code/repo", name: "repo")
+
+        let received = LockIsolated<(path: String, branch: String)?>(nil)
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.createWorktree = { _, path, branch in
+                received.setValue((path, branch))
+            }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspaceWithWorktree(
+            name: "Feature",
+            color: .blue,
+            repo: repo,
+            worktreeName: "my feature",
+            branchName: "my feature",
+            updateMain: false
+        ))
+
+        let basePath = SettingsFeature.State().resolvedWorktreeBasePath(forRepoPath: "/code/repo")
+        let expectedPath = "\(basePath)/my-feature"
+        // Names must be sanitized before reaching git.
+        #expect(received.value?.path == expectedPath)
+        #expect(received.value?.branch == "my-feature")
+
+        await store.receive(\.createWorkspace) { state in
+            #expect(state.workspaces.count == 1)
+            let ws = state.workspaces.first!
+            // First pane opens in the worktree, not the repo root.
+            #expect(ws.panes.first?.workingDirectory == expectedPath)
+            // The association points at the worktree path + branch.
+            #expect(ws.repoAssociations.count == 1)
+            #expect(ws.repoAssociations.first?.worktreePath == expectedPath)
+            #expect(ws.repoAssociations.first?.branchName == "my-feature")
+            #expect(state.worktreeCreationError == nil)
+        }
+    }
+
+    @Test func createWorkspaceWithWorktreeRejectsUnusableNameWithoutShellingOut() async {
+        let repo = Repo(id: UUID(), path: "/code/repo", name: "repo")
+        let gitCalled = LockIsolated(false)
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.gitService.createWorktree = { _, _, _ in gitCalled.setValue(true) }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspaceWithWorktree(
+            name: "Feature",
+            color: .blue,
+            repo: repo,
+            worktreeName: "!!!",
+            branchName: "!!!",
+            updateMain: false
+        )) { state in
+            #expect(state.worktreeCreationError != nil)
+        }
+        // No workspace created, no git shell-out.
+        #expect(store.state.workspaces.isEmpty)
+        #expect(gitCalled.value == false)
+    }
+
+    @Test func createWorkspaceWithWorktreeUpdateMainBranchesOffOrigin() async {
+        let repo = Repo(id: UUID(), path: "/code/repo", name: "repo")
+
+        let fetched = LockIsolated(false)
+        let plainCreate = LockIsolated(false)
+        let baseRef = LockIsolated<String?>(nil)
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .incrementing
+            $0.gitService.defaultBranch = { _ in "main" }
+            $0.gitService.fetch = { _, _ in fetched.setValue(true) }
+            $0.gitService.createWorktreeFromBase = { _, _, _, ref in baseRef.setValue(ref) }
+            $0.gitService.createWorktree = { _, _, _ in plainCreate.setValue(true) }
+            $0.gitService.getStatus = { _ in .clean }
+            $0.gitService.getCurrentBranch = { _ in nil }
+            $0.continuousClock = ImmediateClock()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspaceWithWorktree(
+            name: "Feature",
+            color: .blue,
+            repo: repo,
+            worktreeName: "feat",
+            branchName: "feat",
+            updateMain: true
+        ))
+
+        await store.receive(\.createWorkspace)
+
+        #expect(fetched.value == true)
+        #expect(baseRef.value == "origin/main")
+        // The update-main path must NOT use the plain HEAD-based create.
+        #expect(plainCreate.value == false)
+    }
+
+    @Test func createWorkspaceWithWorktreeSurfacesGitFailure() async {
+        let repo = Repo(id: UUID(), path: "/code/repo", name: "repo")
+        let store = TestStore(initialState: AppReducer.State()) {
+            AppReducer()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.gitService.createWorktree = { _, _, _ in
+                throw GitServiceError.commandFailed(
+                    command: "git worktree add",
+                    exitCode: 128,
+                    stderr: "fatal: '/code/wt/feat' already exists"
+                )
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.createWorkspaceWithWorktree(
+            name: "Feature",
+            color: .blue,
+            repo: repo,
+            worktreeName: "feat",
+            branchName: "feat",
+            updateMain: false
+        ))
+
+        await store.receive(\.worktreeCreationFailed) { state in
+            #expect(state.worktreeCreationError == "fatal: '/code/wt/feat' already exists")
+        }
+        // No workspace created on failure.
+        #expect(store.state.workspaces.isEmpty)
     }
 
     @Test func removeWorktreeAssociationWithoutDelete() async {
