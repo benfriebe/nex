@@ -55,6 +55,15 @@ enum SocketMessage: Equatable {
     /// `{ok:false,error:...}` (issue #98).
     case paneSendKey(paneID: UUID?, target: String, key: String, workspace: String?)
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
+    /// Move a pane so it sits adjacent to another pane on a given edge —
+    /// the CLI form of GUI drag-and-drop (`nex pane move --target X
+    /// --below Y`). `target` is the pane being moved (X), `anchor` is the
+    /// pane it docks against (Y), both name-or-UUID and resolved within
+    /// the same workspace; `zone` is the edge of Y that X lands on. Same
+    /// scoping as `paneName` (callable from outside a Nex pane), so
+    /// `paneID` is the optional caller pane used only for label scoping.
+    /// Request/response (see `replyCommandAllowlist`).
+    case paneMoveAdjacent(paneID: UUID?, target: String, anchor: String, zone: PaneLayout.DropZone, workspace: String?)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
     /// Resize a pane against its immediate split sibling by adjusting the
     /// enclosing split's ratio. `paneID` (from `NEX_PANE_ID`) and/or
@@ -340,7 +349,7 @@ enum SocketMessage: Equatable {
 private let replyCommandAllowlist: Set<String> = [
     "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
-    "pane-split", "pane-create", "pane-name", "pane-resize",
+    "pane-split", "pane-create", "pane-name", "pane-resize", "pane-move-adjacent",
     "pane-sync", "pane-sync-exclude",
     "workspace-create", "workspace-delete",
     "graft-start", "graft-stop", "graft-status",
@@ -861,6 +870,12 @@ final class SocketServer: Sendable {
         /// `pane-resize --grow`/`--shrink` — signed share adjustment
         /// (grow positive, shrink negative). Mutually exclusive with `ratio`.
         var delta: Double?
+        /// `pane-move-adjacent` — the anchor pane (name-or-UUID) the moved
+        /// pane docks against.
+        var anchor: String?
+        /// `pane-move-adjacent` — the edge of the anchor to dock on:
+        /// `above` / `below` / `left-of` / `right-of`.
+        var zone: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -900,6 +915,7 @@ final class SocketServer: Sendable {
             case worktree, branch
             case updateMain = "update_main"
             case ratio, delta
+            case anchor, zone
         }
     }
 
@@ -1491,6 +1507,24 @@ final class SocketServer: Sendable {
             return (.paneResize(
                 paneID: scope.paneID, target: scope.target,
                 workspace: scope.workspace, ratio: wire.ratio, delta: wire.delta
+            ), wire)
+        }
+
+        if wire.command == "pane-move-adjacent" {
+            // `target` (moved pane) and `anchor` (dock pane) are both
+            // mandatory; `zone` names the edge. `paneID` is the optional
+            // caller pane, used only to scope label resolution.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let anchor = (wire.anchor?.isEmpty == true) ? nil : wire.anchor
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let zoneMap: [String: PaneLayout.DropZone] = [
+                "above": .top, "below": .bottom, "left-of": .left, "right-of": .right
+            ]
+            guard let target, let anchor, let zone = zoneMap[wire.zone ?? ""] else { return nil }
+            return (.paneMoveAdjacent(
+                paneID: paneID, target: target, anchor: anchor,
+                zone: zone, workspace: workspace
             ), wire)
         }
 

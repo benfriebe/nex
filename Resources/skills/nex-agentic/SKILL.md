@@ -131,6 +131,15 @@ nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 # a bare `nex pane capture <uuid>` is rejected, not treated as --target.
 nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
 
+# Move a pane so it docks against another pane (CLI form of GUI
+# drag-drop). --below stacks the target under the anchor; --above /
+# --left-of / --right-of are the other edges. Both panes resolve within
+# the same workspace. Pairs with `pane resize` for full layout control.
+nex pane move --target <name-or-uuid> (--above|--below|--left-of|--right-of) <anchor> [--workspace <name-or-uuid>] [--json]
+
+# Move the calling pane toward its neighbour (directional form).
+nex pane move <left|right|up|down>
+
 # Move a pane to another workspace (creates it with --create).
 nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 
@@ -703,7 +712,8 @@ Smoke tests can still use `data:` URLs for navigation, `capture
 ### Key Behaviors
 
 - **Target resolution** for `pane send` / `pane send-key` / `pane close` /
-  `pane capture` / `pane split` / `pane create` / `pane name` / `pane resize`:
+  `pane capture` / `pane split` / `pane create` / `pane name` / `pane resize` /
+  `pane move --target`:
   UUIDs are matched globally. Labels are scoped to the sender's own
   workspace (via `NEX_PANE_ID`) unless `--workspace <name-or-id>` is
   passed; a bare label without either explicit or implicit scope is

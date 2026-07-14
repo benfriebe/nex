@@ -103,4 +103,42 @@ struct SocketParsingOutsideNexTests {
     func resizeNoAnchorRejected() {
         #expect(Self.parseFirst(#"{"command":"pane-resize","ratio":0.6}"#) == nil)
     }
+
+    // MARK: pane-move-adjacent (issue #241)
+
+    @Test("pane-move-adjacent: accepted with target + anchor + zone")
+    func moveAdjacentAccepted() {
+        let msg = Self.parseFirst(#"{"command":"pane-move-adjacent","target":"x","anchor":"y","zone":"below"}"#)
+        #expect(msg == .paneMoveAdjacent(paneID: nil, target: "x", anchor: "y", zone: .bottom, workspace: nil))
+    }
+
+    @Test("pane-move-adjacent: each zone maps to the right DropZone")
+    func moveAdjacentZones() {
+        func zone(_ z: String) -> PaneLayout.DropZone? {
+            if case .paneMoveAdjacent(_, _, _, let dz, _) =
+                Self.parseFirst("{\"command\":\"pane-move-adjacent\",\"target\":\"x\",\"anchor\":\"y\",\"zone\":\"\(z)\"}") {
+                return dz
+            }
+            return nil
+        }
+        #expect(zone("above") == .top)
+        #expect(zone("below") == .bottom)
+        #expect(zone("left-of") == .left)
+        #expect(zone("right-of") == .right)
+    }
+
+    @Test("pane-move-adjacent: rejected with an unknown zone")
+    func moveAdjacentBadZone() {
+        #expect(Self.parseFirst(#"{"command":"pane-move-adjacent","target":"x","anchor":"y","zone":"sideways"}"#) == nil)
+    }
+
+    @Test("pane-move-adjacent: rejected without a target")
+    func moveAdjacentNoTarget() {
+        #expect(Self.parseFirst(#"{"command":"pane-move-adjacent","anchor":"y","zone":"below"}"#) == nil)
+    }
+
+    @Test("pane-move-adjacent: rejected without an anchor")
+    func moveAdjacentNoAnchor() {
+        #expect(Self.parseFirst(#"{"command":"pane-move-adjacent","target":"x","zone":"below"}"#) == nil)
+    }
 }

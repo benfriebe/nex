@@ -13,6 +13,7 @@
 //   nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
 //   nex pane send-key --target <name-or-uuid> [--workspace <name-or-uuid>] <key>
 //   nex pane move [left|right|up|down]
+//   nex pane move --target X (--above|--below|--left-of|--right-of) Y
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 //   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 //   nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
@@ -204,6 +205,7 @@ func printUsage() {
       nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
       nex pane send-key --target <name-or-uuid> [--workspace <name-or-uuid>] <key>
       nex pane move [left|right|up|down]
+      nex pane move --target X (--above|--below|--left-of|--right-of) Y
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
       nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
       nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
@@ -359,6 +361,34 @@ func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
     Without --target the calling pane is renamed (requires NEX_PANE_ID). The new
     label is the sole positional argument. Exit codes: 0 on success, non-zero on
     failure.
+    \n
+    """, stream)
+}
+
+func printPaneMoveUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane move <left|right|up|down>                    # move the calling pane
+      nex pane move --target X --below Y                    # dock pane X under pane Y
+      nex pane move --target X --right-of Y                 # dock pane X beside pane Y
+
+    The directional form moves the calling pane (requires NEX_PANE_ID) toward its
+    neighbour. The adjacent form is the CLI equivalent of GUI drag-and-drop: it
+    re-parents pane X onto an edge of pane Y (both name-or-uuid, resolved in the
+    same workspace).
+
+    Adjacent options:
+      --target <name-or-uuid>     Pane to move (X). Required for the adjacent form.
+      --above <name-or-uuid>      Dock X above the anchor (Y).
+      --below <name-or-uuid>      Dock X below the anchor.
+      --left-of <name-or-uuid>    Dock X to the left of the anchor.
+      --right-of <name-or-uuid>   Dock X to the right of the anchor.
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --json                      Print the structured reply instead of the ack.
+      -h, --help                  Show this help.
+
+    Exactly one edge (--above / --below / --left-of / --right-of) is required for
+    the adjacent form. Exit codes: 0 on success, non-zero on failure.
     \n
     """, stream)
 }
@@ -1501,9 +1531,88 @@ func handlePane(_ args: inout ArraySlice<String>) {
         print(ack)
 
     case "move":
+        if args.contains("--help") || args.contains("-h") {
+            printPaneMoveUsage(stream: stdout)
+            exit(0)
+        }
+        // Issue #241: two forms.
+        //  1. Directional (existing): `nex pane move <left|right|up|down>`
+        //     moves the caller pane toward its neighbour.
+        //  2. Adjacent (new): `nex pane move --target X --below Y` docks
+        //     pane X on an edge of pane Y — the CLI form of GUI drag-drop.
+        // Detect the adjacent form by --target or any zone flag.
+        let moveTarget = parseFlag("--target", from: &args)
+        let zoneFlags: [(String, String?)] = [
+            ("above", parseFlag("--above", from: &args)),
+            ("below", parseFlag("--below", from: &args)),
+            ("left-of", parseFlag("--left-of", from: &args)),
+            ("right-of", parseFlag("--right-of", from: &args))
+        ]
+        let givenZones = zoneFlags.filter { $0.1 != nil }
+        if moveTarget != nil || !givenZones.isEmpty {
+            let workspace = parseFlag("--workspace", from: &args)
+            let asJSON = popSwitch("--json", from: &args)
+            guard let moveTarget else {
+                fputs("nex pane move: the adjacent form requires --target <name-or-uuid>\n", stderr)
+                printPaneMoveUsage(stream: stderr)
+                exit(1)
+            }
+            guard givenZones.count == 1, let zoneName = givenZones.first?.0,
+                  let anchor = givenZones.first?.1 else {
+                fputs("nex pane move: exactly one of --above / --below / --left-of / --right-of <anchor> is required\n", stderr)
+                printPaneMoveUsage(stream: stderr)
+                exit(1)
+            }
+            rejectLeftoverArgs(
+                args, command: "pane move",
+                positionalHint: "dock a pane with --target X --below/--above/--left-of/--right-of Y",
+                usage: printPaneMoveUsage
+            )
+            var payload: [String: Any] = [
+                "command": "pane-move-adjacent",
+                "target": moveTarget,
+                "anchor": anchor,
+                "zone": zoneName
+            ]
+            if let workspace { payload["workspace"] = workspace }
+            if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+               !originPaneID.isEmpty {
+                payload["pane_id"] = originPaneID
+            }
+            guard let replyData = sendJSONAndReadReply(payload) else {
+                printTransportFailure(command: "nex pane move")
+                exit(1)
+            }
+            if replyData.isEmpty {
+                fputs("nex pane move: empty reply (Nex version may not support this command)\n", stderr)
+                exit(1)
+            }
+            let json = parseReplyOrExit(replyData, command: "nex pane move")
+            if asJSON {
+                var clean = json
+                clean.removeValue(forKey: "ok")
+                if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+                   let s = String(data: data, encoding: .utf8) {
+                    print(s)
+                }
+                return
+            }
+            let movedID = (json["pane_id"] as? String) ?? moveTarget
+            let anchorID = (json["anchor_id"] as? String) ?? anchor
+            let label = json["label"] as? String
+            let ws = json["workspace_name"] as? String
+            var ack = "moved \(movedID)"
+            if let label { ack += " (\(label))" }
+            ack += " \(zoneName) \(anchorID)"
+            if let ws { ack += " in workspace \(ws)" }
+            print(ack)
+            return
+        }
+
+        // Directional form (unchanged).
         let paneID = requirePaneID()
         guard let direction = args.popFirst() else {
-            fputs("Usage: nex pane move [left|right|up|down]\n", stderr)
+            printPaneMoveUsage(stream: stderr)
             exit(1)
         }
         let validDirections: Set = ["left", "right", "up", "down"]

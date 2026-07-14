@@ -252,6 +252,17 @@ extension AppReducer {
                         reply: reply
                     )
 
+                case let .paneMoveAdjacent(paneID, target, anchor, zone, workspace):
+                    return handlePaneMoveAdjacent(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        anchor: anchor,
+                        zone: zone,
+                        workspaceFilter: workspace,
+                        reply: reply
+                    )
+
                 case .paneMoveToWorkspace(let paneID, let toWorkspace, let create):
                     // Find source workspace
                     guard let sourceWS = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
@@ -2007,6 +2018,82 @@ extension AppReducer {
         }
 
         return .send(.persistState)
+    }
+
+    /// Dispatch `pane-move-adjacent` (issue #241): the CLI form of GUI
+    /// drag-and-drop. Resolves the moved pane (`target`) and the anchor
+    /// pane it docks against (`anchor`) — both within the *same* workspace
+    /// — then reuses `WorkspaceFeature.Action.movePane` to re-parent the
+    /// moved pane onto the given `zone` edge of the anchor.
+    func handlePaneMoveAdjacent(
+        state: inout State,
+        paneID: UUID?,
+        target: String,
+        anchor: String,
+        zone: PaneLayout.DropZone,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let movedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            movedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // The anchor must live in the *same* workspace as the moved pane
+        // (movePane operates on a single workspace's layout).
+        guard let anchorID = resolvePaneInWorkspace(workspace, ref: anchor) else {
+            reply?.error("no pane matching '\(anchor)' in workspace '\(workspace.name)'")
+            return .none
+        }
+        if anchorID == movedID {
+            reply?.error("cannot move a pane adjacent to itself")
+            return .none
+        }
+
+        let zoneName = switch zone {
+        case .top: "above"
+        case .bottom: "below"
+        case .left: "left-of"
+        case .right: "right-of"
+        }
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": movedID.uuidString,
+                "anchor_id": anchorID.uuidString,
+                "zone": zoneName,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name
+            ]
+            if let label = workspace.panes[id: movedID]?.label { payload["label"] = label }
+            reply.sendAndClose(payload)
+        }
+
+        return .merge(
+            .send(.workspaces(.element(
+                id: workspace.id,
+                action: .movePane(paneID: movedID, targetPaneID: anchorID, zone: zone)
+            ))),
+            .send(.persistState)
+        )
+    }
+
+    /// Resolve a pane reference (UUID or unique label) to a concrete pane
+    /// id *within a single workspace*. Used for the `pane-move-adjacent`
+    /// anchor, which must share the moved pane's workspace.
+    private func resolvePaneInWorkspace(_ ws: WorkspaceFeature.State, ref: String) -> UUID? {
+        if let uuid = UUID(uuidString: ref) {
+            return ws.panes[id: uuid] != nil ? uuid : nil
+        }
+        let matches = ws.panes.filter { $0.label == ref }
+        return matches.count == 1 ? matches.first?.id : nil
     }
 
     // MARK: - Sync-input socket handlers (issue #121)
