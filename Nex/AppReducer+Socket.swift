@@ -241,6 +241,17 @@ extension AppReducer {
                         id: workspace.id, action: .movePaneInDirection(direction)
                     )))
 
+                case let .paneResize(paneID, target, workspace, ratio, delta):
+                    return handlePaneResize(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspace,
+                        ratio: ratio,
+                        delta: delta,
+                        reply: reply
+                    )
+
                 case .paneMoveToWorkspace(let paneID, let toWorkspace, let create):
                     // Find source workspace
                     guard let sourceWS = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
@@ -1911,6 +1922,87 @@ extension AppReducer {
                 "workspace_name": workspace.name
             ]
             if let newLabel { payload["label"] = newLabel }
+            reply.sendAndClose(payload)
+        }
+
+        return .send(.persistState)
+    }
+
+    /// Dispatch `pane-resize` (issue #241). Resolves the target pane, maps
+    /// it to the enclosing split's `splitPath`, translates the requested
+    /// pane *share* (absolute `--ratio` or relative `--grow`/`--shrink`
+    /// `delta`) into the split's stored first-child ratio, and applies it.
+    /// Because the split ratio is always the first child's fraction, a
+    /// second-child pane's share is `1 - ratio`. Effective share clamps to
+    /// `[0.1, 0.9]` (same bounds `updatingSplitRatio` enforces).
+    func handlePaneResize(
+        state: inout State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        ratio: Double?,
+        delta: Double?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // While a pane is zoomed the live layout is a single leaf (the real
+        // tree is parked in `savedLayout`), so a resize can't map to a
+        // split. Give a specific error instead of the misleading
+        // "only pane in its workspace" below.
+        if workspace.zoomedPaneID != nil {
+            reply?.error("cannot resize while a pane is zoomed — un-zoom first")
+            return .none
+        }
+
+        guard let enclosing = workspace.layout.enclosingSplitPath(of: resolvedID) else {
+            reply?.error("pane \(resolvedID.uuidString) has no sibling to resize against (it is the only pane in its workspace)")
+            return .none
+        }
+
+        // Translate the desired pane share into a first-child ratio.
+        let desiredShare: Double
+        if let ratio {
+            desiredShare = ratio
+        } else if let delta {
+            let currentRatio = workspace.layout.ratio(atPath: enclosing.path) ?? 0.5
+            let currentShare = enclosing.paneIsFirst ? currentRatio : (1 - currentRatio)
+            desiredShare = currentShare + delta
+        } else {
+            reply?.error("pane resize requires --ratio or --grow/--shrink")
+            return .none
+        }
+
+        let clampedShare = min(max(desiredShare, 0.1), 0.9)
+        let newRatio = enclosing.paneIsFirst ? clampedShare : (1 - clampedShare)
+
+        state.workspaces[id: workspace.id]?.layout = workspace.layout.updatingSplitRatio(
+            atPath: enclosing.path, to: newRatio
+        )
+        // Mirror `updateSplitRatio`: a manual ratio breaks the predefined
+        // layout, so drop the tracked index.
+        state.workspaces[id: workspace.id]?.currentLayoutIndex = nil
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedID.uuidString,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name,
+                "split_path": enclosing.path,
+                "ratio": newRatio,
+                "target_share": clampedShare
+            ]
+            if let label = workspace.panes[id: resolvedID]?.label { payload["label"] = label }
             reply.sendAndClose(payload)
         }
 

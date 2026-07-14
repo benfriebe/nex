@@ -74,4 +74,33 @@ struct SocketParsingOutsideNexTests {
     func nameNoAnchorRejected() {
         #expect(Self.parseFirst(#"{"command":"pane-name","name":"renamed"}"#) == nil)
     }
+
+    // MARK: pane-resize (issue #241)
+
+    @Test("pane-resize: accepted with target + ratio, no pane_id")
+    func resizeRatioTargetNoPaneID() {
+        let msg = Self.parseFirst(#"{"command":"pane-resize","target":"coordinator","ratio":0.65}"#)
+        #expect(msg == .paneResize(paneID: nil, target: "coordinator", workspace: nil, ratio: 0.65, delta: nil))
+    }
+
+    @Test("pane-resize: accepted with target + delta (grow/shrink)")
+    func resizeDeltaTarget() {
+        let msg = Self.parseFirst(#"{"command":"pane-resize","target":"coordinator","delta":-0.05}"#)
+        #expect(msg == .paneResize(paneID: nil, target: "coordinator", workspace: nil, ratio: nil, delta: -0.05))
+    }
+
+    @Test("pane-resize: rejected when both ratio and delta are set")
+    func resizeBothDirectivesRejected() {
+        #expect(Self.parseFirst(#"{"command":"pane-resize","target":"c","ratio":0.6,"delta":0.1}"#) == nil)
+    }
+
+    @Test("pane-resize: rejected when neither ratio nor delta is set")
+    func resizeNoDirectiveRejected() {
+        #expect(Self.parseFirst(#"{"command":"pane-resize","target":"c"}"#) == nil)
+    }
+
+    @Test("pane-resize: rejected with neither paneID nor target")
+    func resizeNoAnchorRejected() {
+        #expect(Self.parseFirst(#"{"command":"pane-resize","ratio":0.6}"#) == nil)
+    }
 }
