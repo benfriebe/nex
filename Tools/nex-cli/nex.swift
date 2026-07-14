@@ -403,6 +403,127 @@ func printPaneListUsage(stream: UnsafeMutablePointer<FILE>) {
     """, stream)
 }
 
+func printWorkspaceUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace list|create|move|delete|profile [...]
+
+    Subcommands:
+      list      List every workspace (grouped + top-level).
+      create    Create a new workspace (optionally with a git worktree).
+      move      Move a workspace into a group or to the top level.
+      delete    Delete one or more workspaces.
+      profile   Assign or clear a workspace's profile.
+
+    Run `nex workspace <subcommand> --help` for subcommand-specific usage.
+    \n
+    """, stream)
+}
+
+func printWorkspaceListUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace list [--json] [--no-header]
+
+    Lists every workspace (grouped + top-level) as a table, or a JSON array
+    with --json.
+
+    Options:
+      --json         Print a JSON array instead of the table.
+      --no-header    Omit the table header row.
+      -h, --help     Show this help.
+
+    This command takes no positional arguments. Exit codes: 0 on success,
+    non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printWorkspaceCreateUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace create [--name "..."] [--path /dir] [--color blue] \\
+                           [--group <name>] [--profile <name>] [--json]
+      nex workspace create --worktree <name> [--branch <name>] [--repo <path>] \\
+                           [--update-main] [--group <existing>] [--json]
+
+    Creates a new workspace and returns its id.
+
+    Options:
+      --name <name>      Workspace name.
+      --path /dir        Working directory for the workspace's first pane.
+      --color <color>    Workspace color.
+      --group <name>     Place the workspace in this group (created if missing,
+                         unless --worktree is given, which requires an existing group).
+      --profile <name>   Assign a workspace profile at creation.
+      --worktree <name>  Create a git worktree and open the first pane in it.
+      --branch <name>    Branch for the worktree (defaults to the worktree name).
+      --repo <path>      Source repo for the worktree (defaults to the cwd).
+      --update-main      Fetch and branch off origin/<default> for the worktree.
+      --json             Print the structured reply (incl. the new workspace id).
+      -h, --help         Show this help.
+
+    Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printWorkspaceMoveUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]
+
+    Moves a workspace into a group or detaches it to the top level.
+
+    Options:
+      --group <name>   Destination group (must already exist).
+      --top-level      Detach the workspace from its current group.
+      --index N        Position within the destination (0-based).
+      -h, --help       Show this help.
+
+    Exactly one of --group / --top-level is required. Exit codes: 0 on success,
+    non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printWorkspaceDeleteUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] \\
+                           [--prune-worktree] [--json]
+
+    Deletes one or more workspaces (closing any remaining panes). Refuses to
+    delete the last remaining workspace.
+
+    Options:
+      --force, -y        Delete even when a workspace still has running agents.
+      --prune-worktree   Best-effort `git worktree remove` of the deleted dir.
+      --json             Print a per-id JSON result array.
+      -h, --help         Show this help.
+
+    Exit codes: 0 on success, non-zero if any delete failed.
+    \n
+    """, stream)
+}
+
+func printWorkspaceProfileUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace profile <name-or-id> (<profile> | --clear)
+
+    Assigns or clears a workspace's profile.
+
+    Options:
+      --clear        Clear the workspace's profile assignment.
+      -h, --help     Show this help.
+
+    Exactly one of <profile> / --clear is required. Exit codes: 0 on success,
+    non-zero on failure.
+    \n
+    """, stream)
+}
+
 /// Send a pane-mutation command (`split` / `create` / `name`) and print
 /// the structured `{ok,...}` reply. Exits non-zero on transport failure,
 /// empty reply (Nex too old for request/response on this command),
@@ -2816,18 +2937,26 @@ func handlePaneCapture(_ args: inout ArraySlice<String>) {
 
 func handleWorkspace(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex workspace list|create|move|delete|profile [...]\n", stderr)
+        printWorkspaceUsage(stream: stderr)
         exit(1)
+    }
+
+    // `nex workspace --help` / `-h` / `help` prints the group overview and
+    // exits 0 (before any subcommand dispatch or socket call).
+    if action == "--help" || action == "-h" || action == "help" {
+        printWorkspaceUsage(stream: stdout)
+        exit(0)
     }
 
     switch action {
     case "list":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceListUsage(stream: stdout)
+            exit(0)
+        }
         let asJSON = popSwitch("--json", from: &args)
         let noHeader = popSwitch("--no-header", from: &args)
-        guard args.isEmpty else {
-            fputs("Usage: nex workspace list [--json] [--no-header]\n", stderr)
-            exit(1)
-        }
+        rejectLeftoverArgs(args, command: "nex workspace list", usage: printWorkspaceListUsage)
 
         let json = decodeReply(["command": "workspace-list"], command: "nex workspace list")
         let workspaces = (json["workspaces"] as? [[String: Any]]) ?? []
@@ -2841,6 +2970,10 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         printWorkspaceTable(workspaces, noHeader: noHeader)
 
     case "create":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceCreateUsage(stream: stdout)
+            exit(0)
+        }
         let name = parseFlag("--name", from: &args)
         let path = parseFlag("--path", from: &args)
         let color = parseFlag("--color", from: &args)
@@ -2856,6 +2989,9 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         let repo = parseFlag("--repo", from: &args)
         let updateMain = popSwitch("--update-main", from: &args)
         let json = popSwitch("--json", from: &args)
+        // `workspace create` takes no positionals; reject stray args / unknown
+        // flags instead of silently dropping them (parity with `pane create`).
+        rejectLeftoverArgs(args, command: "nex workspace create", usage: printWorkspaceCreateUsage)
 
         var payload: [String: Any] = [
             "command": "workspace-create"
@@ -2903,8 +3039,12 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         }
 
     case "move":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceMoveUsage(stream: stdout)
+            exit(0)
+        }
         guard let nameOrID = args.popFirst() else {
-            fputs("Usage: nex workspace move <name-or-id> (--group <name> | --top-level) [--index N]\n", stderr)
+            printWorkspaceMoveUsage(stream: stderr)
             exit(1)
         }
         let group = parseFlag("--group", from: &args)
@@ -2938,6 +3078,10 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         sendJSONAny(payload)
 
     case "delete":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceDeleteUsage(stream: stdout)
+            exit(0)
+        }
         // `--force`/`-y` bypass the server's running-agents guard: without
         // it, deleting a workspace that still has active agents is refused
         // (mirrors the app-quit warning). Popped unconditionally (not
@@ -3027,8 +3171,12 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         if anyFailed { exit(1) }
 
     case "profile":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceProfileUsage(stream: stdout)
+            exit(0)
+        }
         guard let nameOrID = args.popFirst() else {
-            fputs("Usage: nex workspace profile <name-or-id> (<profile> | --clear)\n", stderr)
+            printWorkspaceProfileUsage(stream: stderr)
             exit(1)
         }
         let clear = popSwitch("--clear", from: &args)
