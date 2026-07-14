@@ -766,29 +766,24 @@ struct WorkspaceListView: View {
     @ViewBuilder
     private func filteredWorkspaceRow(workspaceID: UUID) -> some View {
         if let workspaceStore = store.scope(state: \.workspaces[id: workspaceID], action: \.workspaces[id: workspaceID]) {
-            let waiting = workspaceStore.panes.count(where: { $0.status == .waitingForInput })
-            let running = workspaceStore.panes.contains { $0.status == .running }
             let parentGroupName = store.state.groupID(forWorkspace: workspaceID)
                 .flatMap { store.groups[id: $0]?.name }
 
             VStack(alignment: .leading, spacing: 0) {
-                WorkspaceRowView(
-                    name: workspaceStore.name,
-                    color: workspaceStore.color,
+                // Pane-status reads are scoped inside `WorkspaceRowContainer`
+                // so a churning pane doesn't re-render this row's body and
+                // rebuild the `.contextMenu` attached below (issue #227).
+                // Negative index suppresses the `⌘N` badge in
+                // `WorkspaceRowView` (the badge is gated on `index < 9 &&
+                // index >= 0`). The filter walks workspaces inside collapsed
+                // groups too, where the badge would either be wrong or
+                // meaningless, so we hide it wholesale in filtered rows.
+                WorkspaceRowContainer(
+                    workspaceStore: workspaceStore,
                     isActive: workspaceID == store.activeWorkspaceID,
-                    // Negative index suppresses the `⌘N` badge in
-                    // `WorkspaceRowView` (the badge is gated on `index <
-                    // 9 && index >= 0`). The filter walks workspaces
-                    // inside collapsed groups too, where the badge would
-                    // either be wrong or meaningless, so we hide it
-                    // wholesale in filtered rows.
                     index: -1,
-                    icon: workspaceStore.icon,
-                    waitingPaneCount: waiting,
-                    hasRunningPanes: running,
                     isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
                     leadingInset: 0,
-                    labels: workspaceStore.labels,
                     labelStyles: labelPresetStyles
                 )
 
@@ -1327,20 +1322,18 @@ struct WorkspaceListView: View {
             let previewNestedInGroup = isDragging && dragPreviewGroupID != nil
             let effectiveDepth = previewNestedInGroup ? max(depth, 1) : depth
 
-            WorkspaceRowView(
-                name: workspaceStore.name,
-                color: workspaceStore.color,
+            // Per-pane status reads are scoped inside `WorkspaceRowContainer`
+            // (a real `View`) so an agent tick doesn't re-render this row's
+            // enclosing body and rebuild the `.contextMenu` below (issue #227).
+            WorkspaceRowContainer(
+                workspaceStore: workspaceStore,
                 isActive: workspaceID == store.activeWorkspaceID,
                 index: flatIndex,
-                icon: workspaceStore.icon,
-                waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
-                hasRunningPanes: workspaceStore.panes.contains { $0.status == .running },
                 isSelected: store.selectedWorkspaceIDs.contains(workspaceID),
                 // Use a single interpolated value so the depth change
                 // slides smoothly. 24pt matches the old layout's
                 // 16pt Spacer + 8pt HStack spacing.
                 leadingInset: effectiveDepth > 0 ? 24 : 0,
-                labels: workspaceStore.labels,
                 labelStyles: labelPresetStyles
             )
             .padding(.horizontal, 8)
@@ -2365,6 +2358,45 @@ struct WorkspaceListView: View {
 /// observation boundary, so agent activity inside a group no longer
 /// re-renders the whole sidebar and dismisses an open context-menu
 /// submenu (issue #124). See `groupHeaderEntry` for the full rationale.
+/// Scopes a workspace row's per-pane observation into its own `View`, so a
+/// pane-status tick (agent running / waiting) in *any* workspace re-renders
+/// only that one row rather than the whole sidebar list. Mirrors
+/// `GroupHeaderRowContainer`. This is the observation boundary that keeps an
+/// open right-click context menu (and its nested submenus, e.g. "Label") from
+/// being rebuilt — and therefore dismissed by AppKit — whenever a foreground
+/// *or background* pane churns (issue #227). Reading `waitingPaneCount` /
+/// `hasRunningPanes` inline in the list body instead leaks the observation into
+/// the top-level body: a `WithPerceptionTracking` wrapper there is NOT enough
+/// because in release builds it compiles to a transparent pass-through, so only
+/// a separate `View` actually scopes the reads. The `.contextMenu` stays on the
+/// parent's modifier chain, decoupled from these reads.
+private struct WorkspaceRowContainer: View {
+    let workspaceStore: StoreOf<WorkspaceFeature>
+    let isActive: Bool
+    let index: Int
+    let isSelected: Bool
+    let leadingInset: CGFloat
+    let labelStyles: [String: ResolvedLabelStyle]
+
+    var body: some View {
+        WithPerceptionTracking {
+            WorkspaceRowView(
+                name: workspaceStore.name,
+                color: workspaceStore.color,
+                isActive: isActive,
+                index: index,
+                icon: workspaceStore.icon,
+                waitingPaneCount: workspaceStore.panes.count(where: { $0.status == .waitingForInput }),
+                hasRunningPanes: workspaceStore.panes.contains { $0.status == .running },
+                isSelected: isSelected,
+                leadingInset: leadingInset,
+                labels: workspaceStore.labels,
+                labelStyles: labelStyles
+            )
+        }
+    }
+}
+
 private struct GroupHeaderRowContainer: View {
     let store: StoreOf<AppReducer>
     let group: WorkspaceGroup
