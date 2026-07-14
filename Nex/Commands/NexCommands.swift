@@ -161,10 +161,39 @@ final class PaneShortcutMonitor {
         monitor = nil
     }
 
+    /// Whether pane shortcuts should defer to the key window instead of being
+    /// consumed — true when a secondary window (Settings, Help) is key.
+    ///
+    /// The key window counts as the main window when it matches the
+    /// authoritative `MainWindowRegistry.primary` (which the app claims only
+    /// for the main `WindowGroup` content window — never Settings/Help). We
+    /// only fall back to the positional `mainWindowCandidate` heuristic — the
+    /// first visible, non-panel window in `NSApp.windows` — in the brief
+    /// interval before that primary is claimed. That heuristic is fragile
+    /// because `NSApp.windows` ordering is not guaranteed by AppKit: any stray
+    /// visible window (Help, a transient duplicate main window, a lingering
+    /// helper) sorting ahead of the focused main window would make the guard
+    /// wrongly conclude the main window "isn't the main window" and stop
+    /// consuming Cmd+W / Cmd+D (issue #251).
+    static func shouldDeferToSecondaryWindow(
+        keyWindow: NSWindow?,
+        primary: NSWindow?,
+        mainWindowCandidate: @autoclosure () -> NSWindow?
+    ) -> Bool {
+        guard let keyWindow else { return false }
+        if let primary {
+            return keyWindow !== primary
+        }
+        return keyWindow !== mainWindowCandidate()
+    }
+
     func handleKeyEvent(_ event: NSEvent) -> Bool {
         // Don't consume shortcuts when a secondary window (Help, Settings) is key.
-        if let keyWindow = NSApp.keyWindow,
-           keyWindow != NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
+        if Self.shouldDeferToSecondaryWindow(
+            keyWindow: NSApp.keyWindow,
+            primary: MainWindowRegistry.primary,
+            mainWindowCandidate: NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) })
+        ) {
             return false
         }
 

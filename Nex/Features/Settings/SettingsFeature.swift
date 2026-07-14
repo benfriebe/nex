@@ -524,8 +524,15 @@ struct SettingsFeature {
                         // scratchpad / diff panes pick up the new background live.
                         NotificationCenter.default.post(name: GhosttyConfigClient.changedNotification, object: nil)
 
-                        // Update window compositing
-                        if let window = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
+                        // Update window compositing. Prefer the authoritative
+                        // main window over the positional `NSApp.windows`
+                        // heuristic: this fires while the Settings window is
+                        // key and frontmost, and Settings is a non-panel
+                        // visible window, so `first(where:)` can latch onto it
+                        // and composite terminal transparency onto the wrong
+                        // window (same root cause as issue #251).
+                        if let window = MainWindowRegistry.primary
+                            ?? NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
                             window.isOpaque = opacity >= 1.0
                             window.backgroundColor = opacity < 1.0
                                 ? .white.withAlphaComponent(0.001)

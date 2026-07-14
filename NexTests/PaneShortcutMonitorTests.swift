@@ -572,4 +572,76 @@ struct PaneShortcutMonitorTests {
         #expect(store.workspaces[id: Self.wsID]!.panes.count == 2)
         #expect(store.workspaces[id: Self.wsID]!.panes.last?.type == .scratchpad)
     }
+
+    // MARK: - Secondary-window guard (issue #251)
+
+    // Regression + reproduction for issue #251: pane shortcuts intermittently
+    // stopped working (Cmd+W closed the whole window, Cmd+D no-op) because the
+    // guard identified "the main window" positionally via
+    // `NSApp.windows.first(where:)`, whose ordering AppKit does not guarantee.
+    // These exercise the decision directly with real window identities.
+
+    @Test func doesNotDeferWhenNoKeyWindow() {
+        // No key window (the state in unit tests) — never defer.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: nil, primary: nil, mainWindowCandidate: nil
+            ) == false
+        )
+    }
+
+    @Test func doesNotDeferWhenKeyWindowIsPrimary() {
+        let main = NSWindow()
+        // The main window is key and is the registered primary — consume shortcuts.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: main, mainWindowCandidate: nil
+            ) == false
+        )
+    }
+
+    @Test func defersWhenSecondaryWindowIsKey() {
+        let main = NSWindow()
+        let settings = NSWindow()
+        // Settings/Help is key — defer so its own Cmd+W etc. still work.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: settings, primary: main, mainWindowCandidate: main
+            ) == true
+        )
+    }
+
+    @Test func doesNotDeferWhenPrimarySetDespiteMisorderedCandidate() {
+        let main = NSWindow()
+        let stray = NSWindow()
+        // The exact issue #251 trigger: the focused main window is key, but a
+        // stray visible window sorts ahead in `NSApp.windows`, so the positional
+        // candidate resolves to `stray`. With the authoritative primary set, we
+        // must still recognise `main` as the main window and NOT defer.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: main, mainWindowCandidate: stray
+            ) == false
+        )
+    }
+
+    @Test func fallsBackToPositionalCandidateBeforePrimaryClaimed() {
+        let main = NSWindow()
+        let stray = NSWindow()
+        // Before the registry claims a primary (`primary == nil`), the old
+        // positional heuristic still applies: when the candidate matches the
+        // key window we consume; when a stray sorts ahead we defer. The second
+        // case is precisely the fragile pre-fix behaviour that #251 hit — now
+        // confined to the brief pre-registration window.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: nil, mainWindowCandidate: main
+            ) == false
+        )
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: nil, mainWindowCandidate: stray
+            ) == true
+        )
+    }
 }
