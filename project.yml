@@ -54,6 +54,13 @@ targets:
         excludes:
           - "**/*.h"
           - "**/*.c"
+          # Vendored JS is a bundle resource, not a compiled source. The
+          # default XcodeGen classification routes `.js`
+          # (sourcecode.javascript) into Compile Sources, so exclude it
+          # here and re-add it below with an explicit resources buildPhase.
+          - "**/*.js"
+      - path: Nex/Resources/mermaid.min.js
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.benfriebe.nex

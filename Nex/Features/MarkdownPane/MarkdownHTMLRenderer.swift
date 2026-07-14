@@ -21,6 +21,11 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
     private var isInTableHead = false
     private var skipAutolinkDepth = 0
 
+    /// Set true when at least one ```mermaid fenced block was emitted, so
+    /// the preview only pays the cost of injecting the mermaid library when
+    /// a document actually contains a diagram. Read after `visit(_:)`.
+    private(set) var containsMermaid = false
+
     mutating func defaultVisit(_ markup: any Markup) -> String {
         markup.children.map { visit($0) }.joined()
     }
@@ -67,6 +72,13 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String {
         let lang = codeBlock.language ?? ""
+        // A fenced info string can carry more than the language token
+        // (e.g. ```mermaid title="x"). Match only the first token.
+        let langToken = lang.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .first.map(String.init) ?? ""
+        if langToken.lowercased() == "mermaid" {
+            return visitMermaidBlock(codeBlock)
+        }
         let langAttr = lang.isEmpty ? "" : " class=\"language-\(escapeHTML(lang))\""
         let code = escapeHTML(codeBlock.code)
         // Wrap fenced/indented code blocks so the copy button can anchor
@@ -76,6 +88,20 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
         return "<div class=\"code-block\">"
             + "<pre><code\(langAttr)>\(code)</code></pre>"
             + "<button class=\"code-copy-btn\" type=\"button\" aria-label=\"Copy code\"></button>"
+            + "</div>\n"
+    }
+
+    /// Emit a placeholder that `MarkdownMermaidScript` hydrates into an SVG
+    /// diagram in the preview. The raw source is escaped and kept in a
+    /// hidden `<pre class="mermaid-source">` (no flash of unstyled source,
+    /// and available for the JS fallback if rendering fails). No copy
+    /// button: there is no `:scope > pre > code` for the copy script to
+    /// anchor against, which keeps that behaviour consistent.
+    private mutating func visitMermaidBlock(_ codeBlock: CodeBlock) -> String {
+        containsMermaid = true
+        let source = escapeHTML(codeBlock.code)
+        return "<div class=\"mermaid-block\" data-nex-mermaid>"
+            + "<pre class=\"mermaid-source\">\(source)</pre>"
             + "</div>\n"
     }
 
@@ -225,13 +251,15 @@ struct MarkdownHTMLRenderer: MarkupVisitor {
 // MARK: - Public API
 
 enum MarkdownRenderer {
-    /// Parse markdown text and return a full HTML document string.
-    static func renderToHTML(
+    /// Parse markdown text and return a full HTML document string plus
+    /// whether it contains at least one mermaid diagram (so the preview
+    /// can decide whether to inject the mermaid library).
+    static func render(
         _ markdown: String,
         backgroundColor: NSColor = .windowBackgroundColor,
         backgroundOpacity: Double = 1.0,
         baseFontSize: Double = 14
-    ) -> String {
+    ) -> (html: String, containsMermaid: Bool) {
         let (yaml, body) = FrontMatterExtractor.extract(markdown)
         let document = Document(parsing: body)
         var visitor = MarkdownHTMLRenderer()
@@ -239,12 +267,28 @@ enum MarkdownRenderer {
         let fmHTML = yaml.map(FrontMatterRenderer.render) ?? ""
         let bgCSS = cssBackground(color: backgroundColor, opacity: backgroundOpacity)
         let isDark = isDarkBackground(color: backgroundColor)
-        return wrapInHTMLDocument(
+        let html = wrapInHTMLDocument(
             fmHTML + bodyHTML,
             backgroundCSS: bgCSS,
             isDark: isDark,
             baseFontSize: baseFontSize
         )
+        return (html, visitor.containsMermaid)
+    }
+
+    /// Parse markdown text and return a full HTML document string.
+    static func renderToHTML(
+        _ markdown: String,
+        backgroundColor: NSColor = .windowBackgroundColor,
+        backgroundOpacity: Double = 1.0,
+        baseFontSize: Double = 14
+    ) -> String {
+        render(
+            markdown,
+            backgroundColor: backgroundColor,
+            backgroundOpacity: backgroundOpacity,
+            baseFontSize: baseFontSize
+        ).html
     }
 
     private static func isDarkBackground(color: NSColor) -> Bool {
@@ -513,6 +557,22 @@ enum MarkdownRenderer {
         .code-copy-btn.copied::before {
             -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'/%3E%3C/svg%3E");
         }
+        /* Mermaid diagrams. The hidden source is read by MarkdownMermaidScript
+           and replaced with an inline SVG (or, on failure, the fallback code
+           block + error note built below). */
+        .mermaid-source { display: none; }
+        .mermaid-block { margin: 1em 0; text-align: center; }
+        /* Reserve a little space before the SVG arrives so the surrounding
+           content doesn't jump when the diagram pops in. */
+        .mermaid-block:not(.mermaid-rendered):not(.mermaid-error) { min-height: 2em; }
+        .mermaid-block svg { max-width: 100%; height: auto; background: transparent; }
+        .mermaid-block.mermaid-error { text-align: left; }
+        .mermaid-error-note {
+            color: #cf222e;
+            font-size: 0.9em;
+            margin-bottom: 6px;
+        }
+        .dark .mermaid-error-note { color: #ff7b72; }
         """
     }
 }

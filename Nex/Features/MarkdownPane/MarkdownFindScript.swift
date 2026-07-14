@@ -73,6 +73,14 @@ enum MarkdownFindScript {
           var tag = p.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return true;
           if (p.classList && p.classList.contains('nex-find-match')) return true;
+          // Skip the hidden pre-render mermaid source.
+          if (p.classList && p.classList.contains('mermaid-source')) return true;
+          // Skip text inside a rendered diagram's <svg>: wrapping it in an
+          // HTML <mark> injects an HTML element into the SVG namespace, which
+          // doesn't render and blanks the matched label. The error-fallback
+          // code block is plain HTML (not SVG-namespaced) so it stays
+          // searchable.
+          if (p.namespaceURI === 'http://www.w3.org/2000/svg') return true;
           p = p.parentNode;
         }
         return false;
