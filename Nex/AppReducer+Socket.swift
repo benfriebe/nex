@@ -241,6 +241,28 @@ extension AppReducer {
                         id: workspace.id, action: .movePaneInDirection(direction)
                     )))
 
+                case let .paneResize(paneID, target, workspace, ratio, delta):
+                    return handlePaneResize(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspace,
+                        ratio: ratio,
+                        delta: delta,
+                        reply: reply
+                    )
+
+                case let .paneMoveAdjacent(paneID, target, anchor, zone, workspace):
+                    return handlePaneMoveAdjacent(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        anchor: anchor,
+                        zone: zone,
+                        workspaceFilter: workspace,
+                        reply: reply
+                    )
+
                 case .paneMoveToWorkspace(let paneID, let toWorkspace, let create):
                     // Find source workspace
                     guard let sourceWS = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
@@ -1915,6 +1937,163 @@ extension AppReducer {
         }
 
         return .send(.persistState)
+    }
+
+    /// Dispatch `pane-resize` (issue #241). Resolves the target pane, maps
+    /// it to the enclosing split's `splitPath`, translates the requested
+    /// pane *share* (absolute `--ratio` or relative `--grow`/`--shrink`
+    /// `delta`) into the split's stored first-child ratio, and applies it.
+    /// Because the split ratio is always the first child's fraction, a
+    /// second-child pane's share is `1 - ratio`. Effective share clamps to
+    /// `[0.1, 0.9]` (same bounds `updatingSplitRatio` enforces).
+    func handlePaneResize(
+        state: inout State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        ratio: Double?,
+        delta: Double?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // While a pane is zoomed the live layout is a single leaf (the real
+        // tree is parked in `savedLayout`), so a resize can't map to a
+        // split. Give a specific error instead of the misleading
+        // "only pane in its workspace" below.
+        if workspace.zoomedPaneID != nil {
+            reply?.error("cannot resize while a pane is zoomed — un-zoom first")
+            return .none
+        }
+
+        guard let enclosing = workspace.layout.enclosingSplitPath(of: resolvedID) else {
+            reply?.error("pane \(resolvedID.uuidString) has no sibling to resize against (it is the only pane in its workspace)")
+            return .none
+        }
+
+        // Translate the desired pane share into a first-child ratio.
+        let desiredShare: Double
+        if let ratio {
+            desiredShare = ratio
+        } else if let delta {
+            let currentRatio = workspace.layout.ratio(atPath: enclosing.path) ?? 0.5
+            let currentShare = enclosing.paneIsFirst ? currentRatio : (1 - currentRatio)
+            desiredShare = currentShare + delta
+        } else {
+            reply?.error("pane resize requires --ratio or --grow/--shrink")
+            return .none
+        }
+
+        let clampedShare = min(max(desiredShare, 0.1), 0.9)
+        let newRatio = enclosing.paneIsFirst ? clampedShare : (1 - clampedShare)
+
+        state.workspaces[id: workspace.id]?.layout = workspace.layout.updatingSplitRatio(
+            atPath: enclosing.path, to: newRatio
+        )
+        // Mirror `updateSplitRatio`: a manual ratio breaks the predefined
+        // layout, so drop the tracked index.
+        state.workspaces[id: workspace.id]?.currentLayoutIndex = nil
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedID.uuidString,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name,
+                "split_path": enclosing.path,
+                "ratio": newRatio,
+                "target_share": clampedShare
+            ]
+            if let label = workspace.panes[id: resolvedID]?.label { payload["label"] = label }
+            reply.sendAndClose(payload)
+        }
+
+        return .send(.persistState)
+    }
+
+    /// Dispatch `pane-move-adjacent` (issue #241): the CLI form of GUI
+    /// drag-and-drop. Resolves the moved pane (`target`) and the anchor
+    /// pane it docks against (`anchor`) — both within the *same* workspace
+    /// — then reuses `WorkspaceFeature.Action.movePane` to re-parent the
+    /// moved pane onto the given `zone` edge of the anchor.
+    func handlePaneMoveAdjacent(
+        state: inout State,
+        paneID: UUID?,
+        target: String,
+        anchor: String,
+        zone: PaneLayout.DropZone,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let movedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            movedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // The anchor must live in the *same* workspace as the moved pane
+        // (movePane operates on a single workspace's layout).
+        guard let anchorID = resolvePaneInWorkspace(workspace, ref: anchor) else {
+            reply?.error("no pane matching '\(anchor)' in workspace '\(workspace.name)'")
+            return .none
+        }
+        if anchorID == movedID {
+            reply?.error("cannot move a pane adjacent to itself")
+            return .none
+        }
+
+        let zoneName = switch zone {
+        case .top: "above"
+        case .bottom: "below"
+        case .left: "left-of"
+        case .right: "right-of"
+        }
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": movedID.uuidString,
+                "anchor_id": anchorID.uuidString,
+                "zone": zoneName,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name
+            ]
+            if let label = workspace.panes[id: movedID]?.label { payload["label"] = label }
+            reply.sendAndClose(payload)
+        }
+
+        return .merge(
+            .send(.workspaces(.element(
+                id: workspace.id,
+                action: .movePane(paneID: movedID, targetPaneID: anchorID, zone: zone)
+            ))),
+            .send(.persistState)
+        )
+    }
+
+    /// Resolve a pane reference (UUID or unique label) to a concrete pane
+    /// id *within a single workspace*. Used for the `pane-move-adjacent`
+    /// anchor, which must share the moved pane's workspace.
+    private func resolvePaneInWorkspace(_ ws: WorkspaceFeature.State, ref: String) -> UUID? {
+        if let uuid = UUID(uuidString: ref) {
+            return ws.panes[id: uuid] != nil ? uuid : nil
+        }
+        let matches = ws.panes.filter { $0.label == ref }
+        return matches.count == 1 ? matches.first?.id : nil
     }
 
     // MARK: - Sync-input socket handlers (issue #121)

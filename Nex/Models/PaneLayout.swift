@@ -378,6 +378,51 @@ indirect enum PaneLayout: Equatable, Codable {
             }
         }
     }
+
+    /// Read the stored first-child ratio of the split node identified by
+    /// `splitPath` (same encoding as `updatingSplitRatio`). Returns nil if
+    /// the path doesn't land on a split node. Used by `nex pane resize`'s
+    /// relative `--grow`/`--shrink` to compute a pane's current share.
+    func ratio(atPath splitPath: String) -> Double? {
+        ratioByNavigation(splitPath.dropFirst())
+    }
+
+    private func ratioByNavigation(_ nav: Substring) -> Double? {
+        guard case .split(_, let ratio, let first, let second) = self else { return nil }
+        if nav.isEmpty { return ratio }
+        let remaining = nav.dropFirst()
+        return nav.first == "L"
+            ? first.ratioByNavigation(remaining)
+            : second.ratioByNavigation(remaining)
+    }
+
+    /// Locate the *immediate* enclosing split of `paneID` — the split
+    /// whose direct `first`/`second` child is the pane's leaf. Returns the
+    /// split's `splitPath` (same `"d"`/`"L"`/`"R"` encoding as
+    /// `updatingSplitRatio`), whether the pane sits in the `first` child
+    /// (so a caller can translate a desired pane *share* into the split's
+    /// stored first-child ratio), and the split's direction. Returns nil
+    /// when the pane is the sole root leaf (no split to resize against) or
+    /// isn't present. Backs `nex pane resize`.
+    func enclosingSplitPath(
+        of paneID: UUID, prefix: String = "d"
+    ) -> (path: String, paneIsFirst: Bool, direction: SplitDirection)? {
+        guard case .split(let direction, _, let first, let second) = self else { return nil }
+        if first.contains(paneID: paneID) {
+            // Recurse first: an inner split closer to the leaf wins.
+            if let deeper = first.enclosingSplitPath(of: paneID, prefix: prefix + "L") {
+                return deeper
+            }
+            return (prefix, true, direction)
+        }
+        if second.contains(paneID: paneID) {
+            if let deeper = second.enclosingSplitPath(of: paneID, prefix: prefix + "R") {
+                return deeper
+            }
+            return (prefix, false, direction)
+        }
+        return nil
+    }
 }
 
 // MARK: - Predefined Layouts

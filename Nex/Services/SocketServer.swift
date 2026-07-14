@@ -55,7 +55,28 @@ enum SocketMessage: Equatable {
     /// `{ok:false,error:...}` (issue #98).
     case paneSendKey(paneID: UUID?, target: String, key: String, workspace: String?)
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
+    /// Move a pane so it sits adjacent to another pane on a given edge —
+    /// the CLI form of GUI drag-and-drop (`nex pane move --target X
+    /// --below Y`). `target` is the pane being moved (X), `anchor` is the
+    /// pane it docks against (Y), both name-or-UUID and resolved within
+    /// the same workspace; `zone` is the edge of Y that X lands on. Same
+    /// scoping as `paneName` (callable from outside a Nex pane), so
+    /// `paneID` is the optional caller pane used only for label scoping.
+    /// Request/response (see `replyCommandAllowlist`).
+    case paneMoveAdjacent(paneID: UUID?, target: String, anchor: String, zone: PaneLayout.DropZone, workspace: String?)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
+    /// Resize a pane against its immediate split sibling by adjusting the
+    /// enclosing split's ratio. `paneID` (from `NEX_PANE_ID`) and/or
+    /// `target` (name-or-UUID) address the pane; `workspace` narrows label
+    /// resolution — same scoping as `paneClose`/`paneName`, so it is
+    /// callable from outside a Nex pane. Exactly one of `ratio` (absolute
+    /// target share of the pane, 0<r<1) or `delta` (signed share
+    /// adjustment: `--grow` positive, `--shrink` negative) is supplied.
+    /// The reducer maps the pane to its enclosing `splitPath`, translates
+    /// the desired share into the split's stored first-child ratio, and
+    /// replies with a structured payload (request/response — see
+    /// `replyCommandAllowlist`).
+    case paneResize(paneID: UUID?, target: String?, workspace: String?, ratio: Double?, delta: Double?)
     /// Workspace commands
     case workspaceList
     // `worktree` (issue #222): when non-nil, create a git worktree named
@@ -328,7 +349,7 @@ enum SocketMessage: Equatable {
 private let replyCommandAllowlist: Set<String> = [
     "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
-    "pane-split", "pane-create", "pane-name",
+    "pane-split", "pane-create", "pane-name", "pane-resize", "pane-move-adjacent",
     "pane-sync", "pane-sync-exclude",
     "workspace-create", "workspace-delete",
     "graft-start", "graft-stop", "graft-status",
@@ -843,6 +864,18 @@ final class SocketServer: Sendable {
         /// `workspace-create --update-main` — fetch + branch the worktree
         /// off `origin/<default>` rather than the current HEAD.
         var updateMain: Bool?
+        /// `pane-resize --ratio` — absolute target share of the addressed
+        /// pane within its enclosing split (0<r<1).
+        var ratio: Double?
+        /// `pane-resize --grow`/`--shrink` — signed share adjustment
+        /// (grow positive, shrink negative). Mutually exclusive with `ratio`.
+        var delta: Double?
+        /// `pane-move-adjacent` — the anchor pane (name-or-UUID) the moved
+        /// pane docks against.
+        var anchor: String?
+        /// `pane-move-adjacent` — the edge of the anchor to dock on:
+        /// `above` / `below` / `left-of` / `right-of`.
+        var zone: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -881,6 +914,8 @@ final class SocketServer: Sendable {
             case action, excluded
             case worktree, branch
             case updateMain = "update_main"
+            case ratio, delta
+            case anchor, zone
         }
     }
 
@@ -1461,6 +1496,36 @@ final class SocketServer: Sendable {
             guard let scope = parsePaneTarget(wire),
                   let name = wire.name, !name.isEmpty else { return nil }
             return (.paneName(paneID: scope.paneID, target: scope.target, workspace: scope.workspace, name: name), wire)
+        }
+
+        if wire.command == "pane-resize" {
+            // Address the pane (caller pane and/or --target); require
+            // exactly one sizing directive. The reducer resolves the
+            // enclosing split and applies the ratio.
+            guard let scope = parsePaneTarget(wire) else { return nil }
+            guard (wire.ratio != nil) != (wire.delta != nil) else { return nil }
+            return (.paneResize(
+                paneID: scope.paneID, target: scope.target,
+                workspace: scope.workspace, ratio: wire.ratio, delta: wire.delta
+            ), wire)
+        }
+
+        if wire.command == "pane-move-adjacent" {
+            // `target` (moved pane) and `anchor` (dock pane) are both
+            // mandatory; `zone` names the edge. `paneID` is the optional
+            // caller pane, used only to scope label resolution.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let anchor = (wire.anchor?.isEmpty == true) ? nil : wire.anchor
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let zoneMap: [String: PaneLayout.DropZone] = [
+                "above": .top, "below": .bottom, "left-of": .left, "right-of": .right
+            ]
+            guard let target, let anchor, let zone = zoneMap[wire.zone ?? ""] else { return nil }
+            return (.paneMoveAdjacent(
+                paneID: paneID, target: target, anchor: anchor,
+                zone: zone, workspace: workspace
+            ), wire)
         }
 
         guard let paneIDString = wire.paneID,

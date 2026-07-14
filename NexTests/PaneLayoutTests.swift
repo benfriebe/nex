@@ -495,6 +495,66 @@ struct PredefinedLayoutTests {
         #expect(result == expected)
     }
 
+    // MARK: - Enclosing split path (nex pane resize)
+
+    @Test func enclosingSplitPathRootLeafIsNil() {
+        let a = UUID()
+        #expect(PaneLayout.leaf(a).enclosingSplitPath(of: a) == nil)
+    }
+
+    @Test func enclosingSplitPathRootSplit() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        let forA = layout.enclosingSplitPath(of: a)
+        #expect(forA?.path == "d")
+        #expect(forA?.paneIsFirst == true)
+        #expect(forA?.direction == .horizontal)
+        let forB = layout.enclosingSplitPath(of: b)
+        #expect(forB?.path == "d")
+        #expect(forB?.paneIsFirst == false)
+    }
+
+    @Test func enclosingSplitPathNested() {
+        let a = UUID(), b = UUID(), c = UUID()
+        // d = horizontal(a, dR = vertical(b, c))
+        let layout = PaneLayout.split(
+            .horizontal, ratio: 0.6,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.5, first: .leaf(b), second: .leaf(c))
+        )
+        // a's immediate split is the root.
+        #expect(layout.enclosingSplitPath(of: a)?.path == "d")
+        // b/c's immediate split is the inner one at "dR".
+        let forB = layout.enclosingSplitPath(of: b)
+        #expect(forB?.path == "dR")
+        #expect(forB?.paneIsFirst == true)
+        #expect(forB?.direction == .vertical)
+        let forC = layout.enclosingSplitPath(of: c)
+        #expect(forC?.path == "dR")
+        #expect(forC?.paneIsFirst == false)
+    }
+
+    @Test func enclosingSplitPathMissingPaneIsNil() {
+        let a = UUID(), b = UUID()
+        let layout = PaneLayout.split(.horizontal, ratio: 0.5, first: .leaf(a), second: .leaf(b))
+        #expect(layout.enclosingSplitPath(of: UUID()) == nil)
+    }
+
+    // MARK: - Ratio read-back (grow/shrink)
+
+    @Test func ratioAtPathReadsNestedRatio() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let layout = PaneLayout.split(
+            .horizontal, ratio: 0.6,
+            first: .leaf(a),
+            second: .split(.vertical, ratio: 0.3, first: .leaf(b), second: .leaf(c))
+        )
+        #expect(layout.ratio(atPath: "d") == 0.6)
+        #expect(layout.ratio(atPath: "dR") == 0.3)
+        // A path landing on a leaf has no ratio.
+        #expect(layout.ratio(atPath: "dL") == nil)
+    }
+
     // MARK: - Pane ID preservation
 
     @Test func allPaneIDsPreserved() {

@@ -106,6 +106,13 @@ nex pane close
 # --target, renames the calling pane; with --target, renames any pane.
 nex pane name [--target <name-or-uuid>] [--workspace <name-or-uuid>] <label>
 
+# Resize a pane against its immediate split sibling. Set an exact share
+# with --ratio, or nudge with --grow/--shrink (default step 0.05). The
+# key use is keeping the coordinator prominent after a fan-out (below):
+# it addresses the pane by name, so it does NOT depend on focus the way
+# `layout select main-*` does. Effective share clamps to [0.1, 0.9].
+nex pane resize [--target <name-or-uuid>] [--workspace <name-or-uuid>] (--ratio <0..1> | --grow [amt] | --shrink [amt])
+
 # Send text to another pane (typed into its PTY + Enter)
 # Label resolution is scoped to the sender's own workspace by default.
 # Pass --workspace <name-or-id> to target another workspace
@@ -124,6 +131,15 @@ nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 # a bare `nex pane capture <uuid>` is rejected, not treated as --target.
 nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
 
+# Move a pane so it docks against another pane (CLI form of GUI
+# drag-drop). --below stacks the target under the anchor; --above /
+# --left-of / --right-of are the other edges. Both panes resolve within
+# the same workspace. Pairs with `pane resize` for full layout control.
+nex pane move --target <name-or-uuid> (--above|--below|--left-of|--right-of) <anchor> [--workspace <name-or-uuid>] [--json]
+
+# Move the calling pane toward its neighbour (directional form).
+nex pane move <left|right|up|down>
+
 # Move a pane to another workspace (creates it with --create).
 nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 
@@ -136,6 +152,57 @@ nex workspace list [--json] [--no-header]
 # Print current pane's UUID (local; no socket). Exit 1 if not in Nex.
 nex pane id
 ```
+
+### Keep the layout readable (grid + prominent coordinator)
+
+`nex pane split` always bisects the target pane 50/50 with no
+rebalancing. So if you loop the **same** split direction against the
+same pane — `for w in ...; do nex pane split --direction horizontal;
+done` — the 1st worker takes half, the 2nd a quarter, the 3rd an
+eighth… after 4-5 workers the panes are unreadable slivers. Do NOT do
+that. Instead, after spawning the workers, reflow with the built-in
+tmux-style layouts:
+
+```bash
+# Balanced grid — panes stay roughly square, not thin columns.
+nex layout select tiled
+
+# Or: one large "main" pane + the rest tiled beside it.
+nex layout select main-vertical    # main on the left, workers stacked right
+nex layout select main-horizontal  # main on top,    workers in a row below
+```
+
+**Caveat — which pane becomes "main".** `layout select main-*` makes
+the **currently focused** pane the large "main" pane, and every
+`nex pane split` moves focus to the pane it just created. So right
+after the spawn loop the focused pane is the *last worker*, not the
+coordinator — running `main-vertical` then would enlarge a worker, and
+there is no `nex pane focus` CLI to re-focus the coordinator first.
+
+The focus-independent lever is `nex pane resize`, which addresses the
+pane **by name**. `--ratio` is the pane's *share* of its split, so use
+a value **> 0.5** to make the coordinator the larger side:
+
+```bash
+nex layout select tiled                              # balanced grid first
+nex pane resize --target coordinator --ratio 0.65    # coordinator > its sibling
+```
+
+**What resize does and doesn't do.** `pane resize` only rebalances the
+coordinator's *immediate* split (its boundary with the one neighbour it
+shares that split with) — it does **not** make the coordinator dominate
+the whole grid the way a `main-*` layout's root split does. So:
+
+- Want a readable grid where the coordinator is merely the larger cell?
+  `layout select tiled` + `pane resize --target coordinator --ratio 0.65`.
+  Focus-independent, safe to run straight from the coordinator script.
+- Want one pane that dominates the entire workspace? `layout select
+  main-vertical` — but it enlarges whatever is *focused*, so it's only
+  reliable when the coordinator is the focused pane at call time.
+
+`pane resize` also lets a coordinator fine-tune any pane at any time
+(`--grow` / `--shrink` to nudge, `--ratio` to set exactly) without
+touching the GUI. The effective share clamps to `[0.1, 0.9]`.
 
 ### `nex doctor` — when CLI commands stop working
 
@@ -656,7 +723,8 @@ Smoke tests can still use `data:` URLs for navigation, `capture
 ### Key Behaviors
 
 - **Target resolution** for `pane send` / `pane send-key` / `pane close` /
-  `pane capture` / `pane split` / `pane create` / `pane name`:
+  `pane capture` / `pane split` / `pane create` / `pane name` / `pane resize` /
+  `pane move --target`:
   UUIDs are matched globally. Labels are scoped to the sender's own
   workspace (via `NEX_PANE_ID`) unless `--workspace <name-or-id>` is
   passed; a bare label without either explicit or implicit scope is
@@ -763,10 +831,17 @@ Each task file should include:
 #### Step 3: Spawn named worker panes
 
 ```bash
-# Create named worker panes
-nex pane split --name worker-1 --direction vertical
-nex pane split --name worker-2 --direction horizontal
-nex pane split --name worker-3 --direction horizontal
+# Create named worker panes. Direction barely matters here — we reflow
+# into a clean grid immediately after, so don't hand-tune splits.
+nex pane split --name worker-1
+nex pane split --name worker-2
+nex pane split --name worker-3
+
+# Reflow into a balanced grid, then keep the coordinator prominent.
+# (Do NOT rely on repeated same-direction splits — they collapse into
+# unreadable slivers. See "Keep the layout readable" above.)
+nex layout select tiled
+nex pane resize --target coordinator --ratio 0.65
 ```
 
 **Timing**: add a short delay (1-2 seconds) between spawning panes to allow
@@ -1052,6 +1127,15 @@ Workers should write results in this format:
    overwhelming the terminal. Spawn 3-4, wait for them to complete, then spawn
    the next batch.
 
+9. **Reflow the layout after spawning; never loop a single split direction.**
+   `nex pane split` bisects 50/50 with no rebalancing, so repeated
+   same-direction splits collapse into unreadable slivers. After the spawn
+   loop, run `nex layout select tiled` for a balanced grid, then
+   `nex pane resize --target coordinator --ratio 0.65` to keep the coordinator
+   prominent. Prefer `pane resize` over `layout select main-*` for the
+   coordinator: `main-*` enlarges the *focused* pane, and focus sits on the
+   last-spawned worker after the loop.
+
 ## Coordinator Script Template
 
 Here is a complete coordinator script you can adapt:
@@ -1073,11 +1157,19 @@ rm -f "$RESULT_DIR"/*.md  # Clean previous results
 
 # Task files should already exist in $TASK_DIR/<worker-name>.md
 
-# Spawn workers
+# Spawn workers. Don't loop a single --direction: raw 50/50 splits
+# collapse into unreadable slivers. Spawn, then reflow into a grid.
 for worker in "${WORKERS[@]}"; do
-  nex pane split --name "$worker" --direction horizontal
+  nex pane split --name "$worker"
   sleep 2
 done
+
+# Reflow into a balanced grid and keep the coordinator prominent.
+# `pane resize` addresses the coordinator by name, so it works even
+# though focus is on the last-spawned worker after the loop (unlike
+# `layout select main-*`, which enlarges whichever pane is focused).
+nex layout select tiled
+nex pane resize --target coordinator --ratio 0.65
 
 # Start agents
 for worker in "${WORKERS[@]}"; do

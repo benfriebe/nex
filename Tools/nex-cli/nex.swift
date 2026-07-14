@@ -9,9 +9,11 @@
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
 //   nex pane name <name>
+//   nex pane resize [--target <name-or-uuid>] [--workspace <name-or-uuid>] (--ratio <0..1> | --grow [amt] | --shrink [amt])
 //   nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
 //   nex pane send-key --target <name-or-uuid> [--workspace <name-or-uuid>] <key>
 //   nex pane move [left|right|up|down]
+//   nex pane move --target X (--above|--below|--left-of|--right-of) Y
 //   nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
 //   nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
 //   nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
@@ -199,9 +201,11 @@ func printUsage() {
       nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex pane name <name>
+      nex pane resize [--target <name-or-uuid>] [--workspace <name-or-uuid>] (--ratio <0..1> | --grow [amt] | --shrink [amt])
       nex pane send [--bare] --target <name-or-uuid> [--workspace <name-or-uuid>] <command...>
       nex pane send-key --target <name-or-uuid> [--workspace <name-or-uuid>] <key>
       nex pane move [left|right|up|down]
+      nex pane move --target X (--above|--below|--left-of|--right-of) Y
       nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
       nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
       nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
@@ -357,6 +361,60 @@ func printPaneNameUsage(stream: UnsafeMutablePointer<FILE>) {
     Without --target the calling pane is renamed (requires NEX_PANE_ID). The new
     label is the sole positional argument. Exit codes: 0 on success, non-zero on
     failure.
+    \n
+    """, stream)
+}
+
+func printPaneMoveUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane move <left|right|up|down>                    # move the calling pane
+      nex pane move --target X --below Y                    # dock pane X under pane Y
+      nex pane move --target X --right-of Y                 # dock pane X beside pane Y
+
+    The directional form moves the calling pane (requires NEX_PANE_ID) toward its
+    neighbour. The adjacent form is the CLI equivalent of GUI drag-and-drop: it
+    re-parents pane X onto an edge of pane Y (both name-or-uuid, resolved in the
+    same workspace).
+
+    Adjacent options:
+      --target <name-or-uuid>     Pane to move (X). Required for the adjacent form.
+      --above <name-or-uuid>      Dock X above the anchor (Y).
+      --below <name-or-uuid>      Dock X below the anchor.
+      --left-of <name-or-uuid>    Dock X to the left of the anchor.
+      --right-of <name-or-uuid>   Dock X to the right of the anchor.
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --json                      Print the structured reply instead of the ack.
+      -h, --help                  Show this help.
+
+    Exactly one edge (--above / --below / --left-of / --right-of) is required for
+    the adjacent form. Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printPaneResizeUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex pane resize --ratio <0..1>                      # resize the calling pane
+      nex pane resize --target <name-or-uuid> --ratio 0.4 # resize a specific pane
+      nex pane resize --target coordinator --grow         # enlarge by a step
+      nex pane resize --target worker-1 --shrink 0.1      # shrink by 0.1
+
+    Adjusts a pane's share of its immediate split against its sibling. Without
+    --target the calling pane is resized (requires NEX_PANE_ID).
+
+    Options:
+      --target <name-or-uuid>     Pane to resize (UUID = global, label needs scope).
+      --workspace <name-or-uuid>  Scope label resolution to a specific workspace.
+      --ratio <0..1>              Set the pane's share of its split exactly.
+      --grow [amount]             Enlarge the pane's share (default step 0.05).
+      --shrink [amount]           Shrink the pane's share (default step 0.05).
+      --json                      Print the structured reply instead of the ack.
+      -h, --help                  Show this help.
+
+    Exactly one of --ratio / --grow / --shrink is required. The effective share
+    is clamped to [0.1, 0.9]. Exit codes: 0 on success, non-zero on failure.
     \n
     """, stream)
 }
@@ -569,6 +627,24 @@ func popSwitch(_ name: String, from args: inout ArraySlice<String>) -> Bool {
     guard let idx = args.firstIndex(of: name) else { return false }
     args.remove(at: idx)
     return true
+}
+
+/// Parse a flag whose value is *optional* (e.g. `--grow` or `--grow 0.1`).
+/// Returns nil when the flag is absent. When present, consumes the next
+/// token only if it parses as a Double; otherwise returns `default`. Used
+/// by `pane resize`'s `--grow` / `--shrink` step flags.
+func parseOptionalAmountFlag(
+    _ name: String, default def: Double, from args: inout ArraySlice<String>
+) -> Double? {
+    guard let idx = args.firstIndex(of: name) else { return nil }
+    var amount = def
+    let next = args.index(after: idx)
+    if next < args.endIndex, let value = Double(args[next]) {
+        amount = value
+        args.remove(at: next)
+    }
+    args.remove(at: idx)
+    return amount
 }
 
 /// Split `args` at the first POSIX `--` terminator. Removes everything
@@ -1219,6 +1295,87 @@ func handlePane(_ args: inout ArraySlice<String>) {
         if let originPaneID { payload["pane_id"] = originPaneID }
         sendPaneMutationReply(payload, command: "name", asJSON: asJSON, verb: "renamed pane")
 
+    case "resize":
+        // Issue #241: resize a pane against its split sibling so agents
+        // can keep a coordinator prominent / balance a fanned-out grid
+        // without the GUI. Mirrors `pane name` scoping (works from outside
+        // a Nex pane via --target). Request/response.
+        if args.contains("--help") || args.contains("-h") {
+            printPaneResizeUsage(stream: stdout)
+            exit(0)
+        }
+        let target = parseFlag("--target", from: &args)
+        let workspace = parseFlag("--workspace", from: &args)
+        let asJSON = popSwitch("--json", from: &args)
+        let ratioStr = parseFlag("--ratio", from: &args)
+        let grow = parseOptionalAmountFlag("--grow", default: 0.05, from: &args)
+        let shrink = parseOptionalAmountFlag("--shrink", default: 0.05, from: &args)
+
+        let directives = [ratioStr != nil, grow != nil, shrink != nil].count(where: { $0 })
+        guard directives == 1 else {
+            fputs("nex pane resize: exactly one of --ratio / --grow / --shrink is required\n", stderr)
+            printPaneResizeUsage(stream: stderr)
+            exit(1)
+        }
+
+        rejectLeftoverArgs(
+            args, command: "pane resize",
+            positionalHint: "size panes with --ratio / --grow / --shrink",
+            usage: printPaneResizeUsage
+        )
+
+        let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+        guard target != nil || originPaneID != nil else {
+            fputs("nex pane resize: requires --target <name-or-uuid> when called from outside a Nex pane\n", stderr)
+            printPaneResizeUsage(stream: stderr)
+            exit(1)
+        }
+
+        var payload: [String: Any] = ["command": "pane-resize"]
+        if let ratioStr {
+            guard let ratio = Double(ratioStr), ratio > 0, ratio < 1 else {
+                fputs("nex pane resize: --ratio must be a number between 0 and 1 (exclusive)\n", stderr)
+                exit(1)
+            }
+            payload["ratio"] = ratio
+        } else if let grow {
+            payload["delta"] = grow
+        } else if let shrink {
+            payload["delta"] = -shrink
+        }
+        if let target { payload["target"] = target }
+        if let workspace { payload["workspace"] = workspace }
+        if let originPaneID { payload["pane_id"] = originPaneID }
+
+        guard let replyData = sendJSONAndReadReply(payload) else {
+            printTransportFailure(command: "nex pane resize")
+            exit(1)
+        }
+        if replyData.isEmpty {
+            fputs("nex pane resize: empty reply (Nex version may not support this command)\n", stderr)
+            exit(1)
+        }
+        let json = parseReplyOrExit(replyData, command: "nex pane resize")
+        if asJSON {
+            var clean = json
+            clean.removeValue(forKey: "ok")
+            if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+               let s = String(data: data, encoding: .utf8) {
+                print(s)
+            }
+            return
+        }
+        let resolvedID = (json["pane_id"] as? String) ?? "?"
+        let resolvedLabel = json["label"] as? String
+        let resolvedWS = json["workspace_name"] as? String
+        var ack = "resized \(resolvedID)"
+        if let resolvedLabel { ack += " (\(resolvedLabel))" }
+        if let share = json["target_share"] as? Double {
+            ack += String(format: " to %.0f%% of its split", share * 100)
+        }
+        if let resolvedWS { ack += " in workspace \(resolvedWS)" }
+        print(ack)
+
     case "send":
         // Issue #117: works from outside a Nex pane. `pane_id` (the
         // caller, when set) only scopes label resolution; routing is by
@@ -1374,9 +1531,88 @@ func handlePane(_ args: inout ArraySlice<String>) {
         print(ack)
 
     case "move":
+        if args.contains("--help") || args.contains("-h") {
+            printPaneMoveUsage(stream: stdout)
+            exit(0)
+        }
+        // Issue #241: two forms.
+        //  1. Directional (existing): `nex pane move <left|right|up|down>`
+        //     moves the caller pane toward its neighbour.
+        //  2. Adjacent (new): `nex pane move --target X --below Y` docks
+        //     pane X on an edge of pane Y — the CLI form of GUI drag-drop.
+        // Detect the adjacent form by --target or any zone flag.
+        let moveTarget = parseFlag("--target", from: &args)
+        let zoneFlags: [(String, String?)] = [
+            ("above", parseFlag("--above", from: &args)),
+            ("below", parseFlag("--below", from: &args)),
+            ("left-of", parseFlag("--left-of", from: &args)),
+            ("right-of", parseFlag("--right-of", from: &args))
+        ]
+        let givenZones = zoneFlags.filter { $0.1 != nil }
+        if moveTarget != nil || !givenZones.isEmpty {
+            let workspace = parseFlag("--workspace", from: &args)
+            let asJSON = popSwitch("--json", from: &args)
+            guard let moveTarget else {
+                fputs("nex pane move: the adjacent form requires --target <name-or-uuid>\n", stderr)
+                printPaneMoveUsage(stream: stderr)
+                exit(1)
+            }
+            guard givenZones.count == 1, let zoneName = givenZones.first?.0,
+                  let anchor = givenZones.first?.1 else {
+                fputs("nex pane move: exactly one of --above / --below / --left-of / --right-of <anchor> is required\n", stderr)
+                printPaneMoveUsage(stream: stderr)
+                exit(1)
+            }
+            rejectLeftoverArgs(
+                args, command: "pane move",
+                positionalHint: "dock a pane with --target X --below/--above/--left-of/--right-of Y",
+                usage: printPaneMoveUsage
+            )
+            var payload: [String: Any] = [
+                "command": "pane-move-adjacent",
+                "target": moveTarget,
+                "anchor": anchor,
+                "zone": zoneName
+            ]
+            if let workspace { payload["workspace"] = workspace }
+            if let originPaneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"],
+               !originPaneID.isEmpty {
+                payload["pane_id"] = originPaneID
+            }
+            guard let replyData = sendJSONAndReadReply(payload) else {
+                printTransportFailure(command: "nex pane move")
+                exit(1)
+            }
+            if replyData.isEmpty {
+                fputs("nex pane move: empty reply (Nex version may not support this command)\n", stderr)
+                exit(1)
+            }
+            let json = parseReplyOrExit(replyData, command: "nex pane move")
+            if asJSON {
+                var clean = json
+                clean.removeValue(forKey: "ok")
+                if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+                   let s = String(data: data, encoding: .utf8) {
+                    print(s)
+                }
+                return
+            }
+            let movedID = (json["pane_id"] as? String) ?? moveTarget
+            let anchorID = (json["anchor_id"] as? String) ?? anchor
+            let label = json["label"] as? String
+            let ws = json["workspace_name"] as? String
+            var ack = "moved \(movedID)"
+            if let label { ack += " (\(label))" }
+            ack += " \(zoneName) \(anchorID)"
+            if let ws { ack += " in workspace \(ws)" }
+            print(ack)
+            return
+        }
+
+        // Directional form (unchanged).
         let paneID = requirePaneID()
         guard let direction = args.popFirst() else {
-            fputs("Usage: nex pane move [left|right|up|down]\n", stderr)
+            printPaneMoveUsage(stream: stderr)
             exit(1)
         }
         let validDirections: Set = ["left", "right", "up", "down"]
@@ -3134,8 +3370,7 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
                         record["worktree_pruned"] = removed
                         if !removed { record["worktree_error"] = message }
                         if !json {
-                            if removed { print("  \(message)") }
-                            else { fputs("Warning: \(message)\n", stderr) }
+                            if removed { print("  \(message)") } else { fputs("Warning: \(message)\n", stderr) }
                         }
                     } else {
                         let message = "workspace \(wsName) had no panes; no directory to prune"
