@@ -553,6 +553,26 @@ struct ContentView: View {
                         store.send(.searchSelectedUpdated(paneID: paneID, selected: current))
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: WebPaneCoordinator.findResultNotification)) { notification in
+                    guard let paneID = notification.userInfo?["paneID"] as? UUID,
+                          let tabID = notification.userInfo?["tabID"] as? UUID,
+                          let total = notification.userInfo?["total"] as? Int,
+                          let current = notification.userInfo?["current"] as? Int else { return }
+                    // Web find is per-tab; drop results from a tab that
+                    // isn't the pane's active one (e.g. the outgoing tab's
+                    // clear() during a tab switch, which would otherwise
+                    // clobber the incoming tab's count).
+                    if let ws = store.workspaces.first(where: { $0.panes[id: paneID] != nil }),
+                       let activeTabID = ws.webPanes[paneID]?.activeTab?.id,
+                       activeTabID != tabID {
+                        return
+                    }
+                    store.send(.searchTotalUpdated(paneID: paneID, total: total))
+                    // current is -1 when there are no matches; only forward a real index.
+                    if current >= 0 {
+                        store.send(.searchSelectedUpdated(paneID: paneID, selected: current))
+                    }
+                }
                 .onAppear {
                     // The xcodebuild test host instantiates ContentView; skip the
                     // socket listener so `xcodebuild test` never touches

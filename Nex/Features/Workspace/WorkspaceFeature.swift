@@ -479,6 +479,34 @@ struct WorkspaceFeature {
         }
     }
 
+    /// Move an open find from one tab of a web pane to another. Web-pane
+    /// find is per-tab (marks + needle live in each WKWebView) but the
+    /// search bar is per-pane, so switching / closing tabs while find is
+    /// open must clear the outgoing tab and re-run the needle on the
+    /// incoming one. Keeping only the active tab needled also means
+    /// `searchClose` (which targets the active tab) fully tears find
+    /// down, and a background tab never resurrects marks via
+    /// `reapplyFind`. No-op when the find bar isn't open on this pane.
+    private func retargetWebFind(
+        paneID: UUID,
+        from oldTabID: UUID?,
+        to newTabID: UUID?,
+        needle: String
+    ) -> Effect<Action> {
+        let store = webPaneStore
+        return .run { _ in
+            await MainActor.run {
+                guard let coord = store.coordinatorIfExists(for: paneID) else { return }
+                if let oldTabID, oldTabID != newTabID {
+                    coord.runFindClose(tabID: oldTabID)
+                }
+                if let newTabID {
+                    coord.runFind(tabID: newTabID, needle: needle)
+                }
+            }
+        }
+    }
+
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
@@ -954,18 +982,32 @@ struct WorkspaceFeature {
                     state.syncWebPaneHeader(paneID: paneID)
                 }
                 let store = webPaneStore
-                return .run { _ in
+                let destroyEffect: Effect<Action> = .run { _ in
                     await store.destroyTab(paneID: paneID, tabID: tabID)
                 }
+                // Closing the active tab with find open: `destroyTab`
+                // clears the closed tab's find; re-run the needle on the
+                // tab that takes over so the bar keeps working.
+                if wasActive, state.searchingPaneID == paneID,
+                   let newActiveID = webState.activeTabID {
+                    return .merge(
+                        destroyEffect,
+                        retargetWebFind(paneID: paneID, from: nil, to: newActiveID, needle: state.searchNeedle)
+                    )
+                }
+                return destroyEffect
 
             case .webPaneTabSelect(let paneID, let tabID):
                 guard var webState = state.webPanes[paneID] else { return .none }
                 guard webState.contains(tabID: tabID) else { return .none }
                 guard webState.activeTabID != tabID else { return .none }
+                let oldTabID = webState.activeTab?.id
                 webState.activeTabID = tabID
                 state.webPanes[paneID] = webState
                 state.syncWebPaneHeader(paneID: paneID)
-                return .none
+                // Move an open find to the newly-active tab.
+                guard state.searchingPaneID == paneID else { return .none }
+                return retargetWebFind(paneID: paneID, from: oldTabID, to: tabID, needle: state.searchNeedle)
 
             case .webPaneTabCycle(let paneID, let offset):
                 guard var webState = state.webPanes[paneID], webState.tabs.count > 1 else { return .none }
@@ -973,10 +1015,12 @@ struct WorkspaceFeature {
                 guard let activeID, let currentIdx = webState.index(of: activeID) else { return .none }
                 let count = webState.tabs.count
                 let nextIdx = ((currentIdx + offset) % count + count) % count
-                webState.activeTabID = webState.tabs[nextIdx].id
+                let newTabID = webState.tabs[nextIdx].id
+                webState.activeTabID = newTabID
                 state.webPanes[paneID] = webState
                 state.syncWebPaneHeader(paneID: paneID)
-                return .none
+                guard state.searchingPaneID == paneID else { return .none }
+                return retargetWebFind(paneID: paneID, from: activeID, to: newTabID, needle: state.searchNeedle)
 
             case .webPaneTabReorder(let paneID, let orderedTabIDs):
                 guard var webState = state.webPanes[paneID] else { return .none }
@@ -1599,7 +1643,7 @@ struct WorkspaceFeature {
             case .toggleSearch:
                 guard let focusedID = state.focusedPaneID,
                       let pane = state.panes[id: focusedID],
-                      pane.type == .shell || (pane.type == .markdown && !pane.isEditing)
+                      pane.type == .shell || pane.type == .web || (pane.type == .markdown && !pane.isEditing)
                 else { return .none }
                 if state.searchingPaneID != nil {
                     return .send(.searchClose)
@@ -1630,7 +1674,20 @@ struct WorkspaceFeature {
                 state.searchNeedle = needle
                 state.searchSelected = nil
                 guard let paneID = state.searchingPaneID else { return .none }
-                let isMarkdown = state.panes[id: paneID]?.type == .markdown
+                let paneType = state.panes[id: paneID]?.type
+                if paneType == .web {
+                    // WKWebView find runs locally in JS; drive it directly
+                    // against the active tab so typing feels responsive.
+                    guard let tabID = state.webPanes[paneID]?.activeTab?.id else { return .none }
+                    let store = webPaneStore
+                    return .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.runFind(tabID: tabID, needle: needle)
+                        }
+                    }
+                    .cancellable(id: SearchDebounceID.debounce, cancelInFlight: true)
+                }
+                let isMarkdown = paneType == .markdown
                 if isMarkdown {
                     // WKWebView find runs locally in JS; no backend round-trip
                     // to debounce. Drive it directly so typing feels responsive.
@@ -1662,7 +1719,17 @@ struct WorkspaceFeature {
 
             case .searchNavigateNext:
                 guard let paneID = state.searchingPaneID else { return .none }
-                if state.panes[id: paneID]?.type == .markdown {
+                let nextType = state.panes[id: paneID]?.type
+                if nextType == .web {
+                    guard let tabID = state.webPanes[paneID]?.activeTab?.id else { return .none }
+                    let store = webPaneStore
+                    return .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.runFindNavigate(tabID: tabID, forward: true)
+                        }
+                    }
+                }
+                if nextType == .markdown {
                     return .run { _ in
                         await MainActor.run {
                             MarkdownFindController.shared.navigateNext(paneID: paneID)
@@ -1676,7 +1743,17 @@ struct WorkspaceFeature {
 
             case .searchNavigatePrevious:
                 guard let paneID = state.searchingPaneID else { return .none }
-                if state.panes[id: paneID]?.type == .markdown {
+                let prevType = state.panes[id: paneID]?.type
+                if prevType == .web {
+                    guard let tabID = state.webPanes[paneID]?.activeTab?.id else { return .none }
+                    let store = webPaneStore
+                    return .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.runFindNavigate(tabID: tabID, forward: false)
+                        }
+                    }
+                }
+                if prevType == .markdown {
                     return .run { _ in
                         await MainActor.run {
                             MarkdownFindController.shared.navigatePrevious(paneID: paneID)
@@ -1690,12 +1767,22 @@ struct WorkspaceFeature {
 
             case .searchClose:
                 guard let paneID = state.searchingPaneID else { return .none }
-                let isMarkdown = state.panes[id: paneID]?.type == .markdown
+                let closeType = state.panes[id: paneID]?.type
+                let webTabID = state.webPanes[paneID]?.activeTab?.id
                 state.searchingPaneID = nil
                 state.searchNeedle = ""
                 state.searchTotal = nil
                 state.searchSelected = nil
-                if isMarkdown {
+                if closeType == .web {
+                    guard let tabID = webTabID else { return .none }
+                    let store = webPaneStore
+                    return .run { _ in
+                        await MainActor.run {
+                            store.coordinatorIfExists(for: paneID)?.runFindClose(tabID: tabID)
+                        }
+                    }
+                }
+                if closeType == .markdown {
                     return .run { _ in
                         await MainActor.run {
                             MarkdownFindController.shared.close(paneID: paneID)
