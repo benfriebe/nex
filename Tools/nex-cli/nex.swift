@@ -464,7 +464,7 @@ func printPaneListUsage(stream: UnsafeMutablePointer<FILE>) {
 func printWorkspaceUsage(stream: UnsafeMutablePointer<FILE>) {
     fputs("""
     Usage:
-      nex workspace list|create|move|delete|profile [...]
+      nex workspace list|create|move|delete|profile|label [...]
 
     Subcommands:
       list      List every workspace (grouped + top-level).
@@ -472,6 +472,7 @@ func printWorkspaceUsage(stream: UnsafeMutablePointer<FILE>) {
       move      Move a workspace into a group or to the top level.
       delete    Delete one or more workspaces.
       profile   Assign or clear a workspace's profile.
+      label     Set/add/remove/clear a workspace's labels.
 
     Run `nex workspace <subcommand> --help` for subcommand-specific usage.
     \n
@@ -481,18 +482,19 @@ func printWorkspaceUsage(stream: UnsafeMutablePointer<FILE>) {
 func printWorkspaceListUsage(stream: UnsafeMutablePointer<FILE>) {
     fputs("""
     Usage:
-      nex workspace list [--json] [--no-header]
+      nex workspace list [--group <name-or-id>] [--json] [--no-header]
 
-    Lists every workspace (grouped + top-level) as a table, or a JSON array
-    with --json.
+    Lists workspaces as a table, or a JSON array with --json. Each entry
+    carries id, name, group, color, pane count, created_at, last_accessed_at,
+    last_activity_at, labels, and the agent session id (when present).
 
     Options:
-      --json         Print a JSON array instead of the table.
-      --no-header    Omit the table header row.
-      -h, --help     Show this help.
+      --group <name-or-id>  Only list workspaces in this group.
+      --json                Print a JSON array instead of the table.
+      --no-header           Omit the table header row.
+      -h, --help            Show this help.
 
-    This command takes no positional arguments. Exit codes: 0 on success,
-    non-zero on failure.
+    Exit codes: 0 on success, non-zero on failure.
     \n
     """, stream)
 }
@@ -578,6 +580,76 @@ func printWorkspaceProfileUsage(stream: UnsafeMutablePointer<FILE>) {
 
     Exactly one of <profile> / --clear is required. Exit codes: 0 on success,
     non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printWorkspaceLabelUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex workspace label <name-or-id> --set <label> [--set <label> ...]
+      nex workspace label <name-or-id> --add <label> [--add <label> ...]
+      nex workspace label <name-or-id> --remove <label> [--remove <label> ...]
+      nex workspace label <name-or-id> --clear
+
+    Reads, then rewrites a workspace's labels. Changes render live in the
+    sidebar and persist. Exactly one operation per invocation.
+
+    Options:
+      --set <label>      Replace all labels with the given value(s).
+      --add <label>      Add the given label(s), preserving existing ones.
+      --remove <label>   Remove the given label(s).
+      --clear            Remove all labels.
+      --json             Print the structured reply (incl. resulting labels).
+      -h, --help         Show this help.
+
+    Exit codes: 0 on success, non-zero on failure (unknown/ambiguous
+    workspace, etc).
+    \n
+    """, stream)
+}
+
+func printGroupReorderUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex group reorder <name-or-id> --order <id1,id2,...> [--json]
+
+    Rewrites a group's member order to the given sequence. Each token is a
+    workspace UUID or a name unique within the group. Members omitted from
+    --order keep their relative order at the tail; a token that isn't a member
+    is an error. Changes render live and persist.
+
+    Options:
+      --order <list>   Comma- or space-separated member ids/names.
+      --json           Print the structured reply (incl. resulting order).
+      -h, --help       Show this help.
+
+    Exit codes: 0 on success, non-zero on failure.
+    \n
+    """, stream)
+}
+
+func printGroupSortUsage(stream: UnsafeMutablePointer<FILE>) {
+    fputs("""
+    Usage:
+      nex group sort <name-or-id> --by name|last-activity|last-accessed [--desc] [--json]
+
+    Sorts a group's members by a known key. Default direction is ascending;
+    pass --desc for descending (e.g. most-recently-active first). Changes
+    render live and persist.
+
+    Sort keys:
+      name             Alphabetical by workspace name (case-insensitive).
+      last-activity    Most recent pane activity in the workspace.
+      last-accessed    When the workspace was last opened (alias: last-modified).
+
+    Options:
+      --by <key>       One of the sort keys above.
+      --desc           Reverse the sort direction.
+      --json           Print the structured reply (incl. resulting order).
+      -h, --help       Show this help.
+
+    Exit codes: 0 on success, non-zero on failure.
     \n
     """, stream)
 }
@@ -3192,9 +3264,12 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         }
         let asJSON = popSwitch("--json", from: &args)
         let noHeader = popSwitch("--no-header", from: &args)
+        let group = parseFlag("--group", from: &args)
         rejectLeftoverArgs(args, command: "nex workspace list", usage: printWorkspaceListUsage)
 
-        let json = decodeReply(["command": "workspace-list"], command: "nex workspace list")
+        var listPayload: [String: Any] = ["command": "workspace-list"]
+        if let group { listPayload["group"] = group }
+        let json = decodeReply(listPayload, command: "nex workspace list")
         let workspaces = (json["workspaces"] as? [[String: Any]]) ?? []
         if asJSON {
             if let out = try? JSONSerialization.data(withJSONObject: workspaces, options: [.sortedKeys]),
@@ -3437,9 +3512,78 @@ func handleWorkspace(_ args: inout ArraySlice<String>) {
         // missing/empty profile as "clear the assignment".
         sendJSON(payload)
 
+    case "label":
+        if args.contains("--help") || args.contains("-h") {
+            printWorkspaceLabelUsage(stream: stdout)
+            exit(0)
+        }
+        guard let nameOrID = args.popFirst() else {
+            printWorkspaceLabelUsage(stream: stderr)
+            exit(1)
+        }
+        // Collect each mutation flag (repeatable, e.g. `--add a --add b`).
+        var setValues: [String] = []
+        var addValues: [String] = []
+        var removeValues: [String] = []
+        while let value = parseFlag("--set", from: &args) {
+            setValues.append(value)
+        }
+        while let value = parseFlag("--add", from: &args) {
+            addValues.append(value)
+        }
+        while let value = parseFlag("--remove", from: &args) {
+            removeValues.append(value)
+        }
+        let clear = popSwitch("--clear", from: &args)
+        let json = popSwitch("--json", from: &args)
+        // `--style` (per-label palette color) is the issue's one deferred
+        // flag; reject it with a pointer rather than a generic "unexpected
+        // argument" so a copy-pasted `--add "1d" --style blue` explains itself.
+        if args.contains("--style") {
+            fputs("workspace label: --style is not yet supported; set label colors in Settings ▸ Labels\n", stderr)
+            exit(1)
+        }
+        rejectLeftoverArgs(args, command: "nex workspace label", usage: printWorkspaceLabelUsage)
+
+        // Exactly one operation per invocation.
+        let ops = [!setValues.isEmpty, !addValues.isEmpty, !removeValues.isEmpty, clear]
+            .count(where: { $0 })
+        guard ops == 1 else {
+            fputs("workspace label requires exactly one of --set / --add / --remove / --clear\n", stderr)
+            exit(1)
+        }
+
+        let op: String
+        let values: [String]
+        if clear {
+            op = "clear"; values = []
+        } else if !setValues.isEmpty {
+            op = "set"; values = setValues
+        } else if !addValues.isEmpty {
+            op = "add"; values = addValues
+        } else {
+            op = "remove"; values = removeValues
+        }
+
+        let reply = decodeReply(
+            ["command": "workspace-label", "name": nameOrID, "label_op": op, "label_values": values],
+            command: "nex workspace label"
+        )
+        if json {
+            if let data = try? JSONSerialization.data(withJSONObject: reply, options: [.sortedKeys]),
+               let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        } else {
+            let wsName = (reply["workspace_name"] as? String) ?? nameOrID
+            let labels = (reply["labels"] as? [String]) ?? []
+            let rendered = labels.isEmpty ? "(none)" : labels.joined(separator: ", ")
+            print("\(wsName) labels: \(rendered)")
+        }
+
     default:
         fputs("Unknown workspace action: \(action)\n", stderr)
-        fputs("Valid actions: list, create, move, delete, profile\n", stderr)
+        fputs("Valid actions: list, create, move, delete, profile, label\n", stderr)
         exit(1)
     }
 }
@@ -3459,6 +3603,7 @@ func printWorkspaceTable(_ workspaces: [[String: Any]], noHeader: Bool) {
         let group: String
         let panes: String
         let active: String
+        let labels: String
     }
 
     let rows: [Row] = workspaces.map { entry in
@@ -3467,17 +3612,22 @@ func printWorkspaceTable(_ workspaces: [[String: Any]], noHeader: Bool) {
             name: (entry["name"] as? String) ?? "",
             group: (entry["group_name"] as? String) ?? "-",
             panes: String((entry["pane_count"] as? Int) ?? 0),
-            active: ((entry["is_active"] as? Bool) ?? false) ? "●" : "-"
+            active: ((entry["is_active"] as? Bool) ?? false) ? "●" : "-",
+            labels: {
+                let labels = (entry["labels"] as? [String]) ?? []
+                return labels.isEmpty ? "-" : labels.joined(separator: ",")
+            }()
         )
     }
 
-    let headers = ["ID", "NAME", "GROUP", "PANES", "ACTIVE"]
+    let headers = ["ID", "NAME", "GROUP", "PANES", "ACTIVE", "LABELS"]
     var widths = headers.map(\.count)
     for row in rows {
         widths[0] = max(widths[0], row.id.count)
         widths[1] = max(widths[1], row.name.count)
         widths[2] = max(widths[2], row.group.count)
         widths[3] = max(widths[3], row.panes.count)
+        widths[4] = max(widths[4], row.active.count)
     }
 
     func pad(_ value: String, _ width: Int) -> String {
@@ -3486,17 +3636,38 @@ func printWorkspaceTable(_ workspaces: [[String: Any]], noHeader: Bool) {
     }
 
     if !noHeader {
-        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(headers[4])")
+        print("\(pad(headers[0], widths[0]))  \(pad(headers[1], widths[1]))  \(pad(headers[2], widths[2]))  \(pad(headers[3], widths[3]))  \(pad(headers[4], widths[4]))  \(headers[5])")
     }
     for row in rows {
-        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.group, widths[2]))  \(pad(row.panes, widths[3]))  \(row.active)")
+        print("\(pad(row.id, widths[0]))  \(pad(row.name, widths[1]))  \(pad(row.group, widths[2]))  \(pad(row.panes, widths[3]))  \(pad(row.active, widths[4]))  \(row.labels)")
     }
 }
 
 func handleGroup(_ args: inout ArraySlice<String>) {
     guard let action = args.popFirst() else {
-        fputs("Usage: nex group list|create|rename|delete [...]\n", stderr)
+        fputs("Usage: nex group list|create|rename|delete|reorder|sort [...]\n", stderr)
         exit(1)
+    }
+
+    // `nex group --help` / `-h` / `help` prints the overview and exits 0
+    // (parity with `nex workspace --help`) before any subcommand dispatch.
+    if action == "--help" || action == "-h" || action == "help" {
+        fputs("""
+        Usage:
+          nex group list|create|rename|delete|reorder|sort [...]
+
+        Subcommands:
+          list      List groups and their member workspaces.
+          create    Create a new group.
+          rename    Rename a group.
+          delete    Delete a group (children promote unless --cascade).
+          reorder   Rewrite a group's member order from an explicit id list.
+          sort      Sort a group's members by name|last-activity|last-accessed.
+
+        Run `nex group <subcommand> --help` for subcommand-specific usage.
+        \n
+        """, stdout)
+        exit(0)
     }
 
     switch action {
@@ -3556,11 +3727,79 @@ func handleGroup(_ args: inout ArraySlice<String>) {
             "cascade": cascade
         ])
 
+    case "reorder":
+        if args.contains("--help") || args.contains("-h") {
+            printGroupReorderUsage(stream: stdout)
+            exit(0)
+        }
+        guard let nameOrID = args.popFirst() else {
+            printGroupReorderUsage(stream: stderr)
+            exit(1)
+        }
+        guard let orderRaw = parseFlag("--order", from: &args) else {
+            fputs("group reorder requires --order <id1,id2,...>\n", stderr)
+            exit(1)
+        }
+        let json = popSwitch("--json", from: &args)
+        rejectLeftoverArgs(args, command: "nex group reorder", usage: printGroupReorderUsage)
+        // Accept comma- and/or whitespace-separated ids (or member names).
+        let order = orderRaw
+            .split(whereSeparator: { $0 == "," || $0 == " " })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !order.isEmpty else {
+            fputs("group reorder: --order was empty\n", stderr)
+            exit(1)
+        }
+        let reply = decodeReply(
+            ["command": "group-reorder", "name": nameOrID, "order": order],
+            command: "nex group reorder"
+        )
+        printGroupOrderReply(reply, json: json)
+
+    case "sort":
+        if args.contains("--help") || args.contains("-h") {
+            printGroupSortUsage(stream: stdout)
+            exit(0)
+        }
+        guard let nameOrID = args.popFirst() else {
+            printGroupSortUsage(stream: stderr)
+            exit(1)
+        }
+        guard let by = parseFlag("--by", from: &args) else {
+            fputs("group sort requires --by name|last-activity|last-accessed\n", stderr)
+            exit(1)
+        }
+        let desc = popSwitch("--desc", from: &args)
+        let json = popSwitch("--json", from: &args)
+        rejectLeftoverArgs(args, command: "nex group sort", usage: printGroupSortUsage)
+        let reply = decodeReply(
+            ["command": "group-sort", "name": nameOrID, "by": by, "descending": desc],
+            command: "nex group sort"
+        )
+        printGroupOrderReply(reply, json: json)
+
     default:
         fputs("Unknown group action: \(action)\n", stderr)
-        fputs("Valid actions: list, create, rename, delete\n", stderr)
+        fputs("Valid actions: list, create, rename, delete, reorder, sort\n", stderr)
         exit(1)
     }
+}
+
+/// Shared renderer for the `group-reorder` / `group-sort` replies: prints
+/// the raw object with `--json`, else a one-line confirmation of the new
+/// member order (full ids, copy-pasteable back into `--order`).
+func printGroupOrderReply(_ reply: [String: Any], json: Bool) {
+    if json {
+        if let data = try? JSONSerialization.data(withJSONObject: reply, options: [.sortedKeys]),
+           let str = String(data: data, encoding: .utf8) {
+            print(str)
+        }
+        return
+    }
+    let groupName = (reply["group_name"] as? String) ?? "?"
+    let order = (reply["order"] as? [String]) ?? []
+    print("group \(groupName) order: \(order.joined(separator: ", "))")
 }
 
 /// Render `group-list` as ID, NAME, COLOR, WORKSPACES. Member workspaces

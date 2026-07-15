@@ -360,7 +360,7 @@ struct SocketParsingTests {
         {"command":"workspace-list"}
         """)
         let result = SocketServer.parseWireMessage(data)
-        #expect(result?.0 == .workspaceList)
+        #expect(result?.0 == .workspaceList(group: nil))
     }
 
     @Test func parseWorkspaceCreateCommand() {

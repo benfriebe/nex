@@ -117,6 +117,7 @@
 		9443792BCB5BEA5B06312F00 /* RecursiveFSWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140051AE1CBF1087B5F289F7 /* RecursiveFSWatcher.swift */; };
 		95D51269B050D359AC3E91D8 /* LabelMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A3FCA7A9AA41A0B3A67A8C7 /* LabelMigrationTests.swift */; };
 		9B3EBAD3C0DFAD660680ABDF /* AppReducer+Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEB41E01CA1293F665B7553 /* AppReducer+Domain.swift */; };
+		9C37FAB696DDB215E7268DAF /* WorkspaceListLabelGroupOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB7A0DB98A0C96BD37DE44D /* WorkspaceListLabelGroupOrderTests.swift */; };
 		9D8356F03AF69469528218D5 /* FocusNotifyingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC82B39AC5EEEC6A787B4D4 /* FocusNotifyingTextView.swift */; };
 		9E48EBF9E92828BAF42C0932 /* LabelPresetsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D01D7C0300DB8B0987C7F58 /* LabelPresetsSettingsView.swift */; };
 		A0056823B88DEBC5006159A2 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFE42A23C94DA8DA930C61E3 /* NotificationService.swift */; };
@@ -431,6 +432,7 @@
 		F90FF9C2E7F0BC50E51C47DE /* RepoRegistryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoRegistryView.swift; sourceTree = "<group>"; };
 		F9DA0C4B28F4E3DAF4CF1EB0 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		F9F22E5DD60C8A8D83A0B4F8 /* PaneListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneListTests.swift; sourceTree = "<group>"; };
+		FAB7A0DB98A0C96BD37DE44D /* WorkspaceListLabelGroupOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceListLabelGroupOrderTests.swift; sourceTree = "<group>"; };
 		FDC5A9C48821CE81CCB7FFB5 /* WebPaneCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneCoordinator.swift; sourceTree = "<group>"; };
 		FF88062F290789D98B545AC6 /* WorkspaceGroupCRUDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroupCRUDTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -594,6 +596,7 @@
 				933D5B5E664E30B2E88EE3C7 /* WorkspaceGroupPersistenceTests.swift */,
 				2445F37BD230A19B4FA07CDC /* WorkspaceGroupRenderTests.swift */,
 				E9F7D5571F89D43BC6C76928 /* WorkspaceGroupSocketTests.swift */,
+				FAB7A0DB98A0C96BD37DE44D /* WorkspaceListLabelGroupOrderTests.swift */,
 				D6716078E70D711E23FFD0BD /* WorkspaceProfileTests.swift */,
 				11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */,
 			);
@@ -1062,6 +1065,7 @@
 				F4E3D6023E3546EC2908C4D6 /* WorkspaceGroupPersistenceTests.swift in Sources */,
 				0CB9F718A5EF25AF73DED570 /* WorkspaceGroupRenderTests.swift in Sources */,
 				AF0F22742F34298F1E06A238 /* WorkspaceGroupSocketTests.swift in Sources */,
+				9C37FAB696DDB215E7268DAF /* WorkspaceListLabelGroupOrderTests.swift in Sources */,
 				63C73B3CC0EC644276F19597 /* WorkspaceProfileTests.swift in Sources */,
 				1E6354C9BBDF122BF0FB255F /* WorktreeOperationTests.swift in Sources */,
 			);

@@ -77,8 +77,9 @@ enum SocketMessage: Equatable {
     /// replies with a structured payload (request/response — see
     /// `replyCommandAllowlist`).
     case paneResize(paneID: UUID?, target: String?, workspace: String?, ratio: Double?, delta: Double?)
-    /// Workspace commands
-    case workspaceList
+    /// Workspace commands. `workspace-list --group <name-or-id>` scopes
+    /// the listing to a single group (nil = every workspace).
+    case workspaceList(group: String?)
     // `worktree` (issue #222): when non-nil, create a git worktree named
     // this and open the new workspace's first pane in it. `branch` is the
     // branch name (defaults to `worktree`); `updateMain` fetches + branches
@@ -97,12 +98,25 @@ enum SocketMessage: Equatable {
     /// `nex workspace profile <name-or-id> (<profile> | --clear)`.
     /// `profile` nil = clear. Fire-and-forget (matches `workspace-move`).
     case workspaceProfile(nameOrID: String, profile: String?)
+    /// `nex workspace label <name-or-id> --set|--add|--remove|--clear`.
+    /// `op` is one of `set` / `add` / `remove` / `clear`; `values` are the
+    /// label strings (empty for `clear`). Request/response
+    /// (`replyCommandAllowlist`) — the reply echoes the resulting labels.
+    case workspaceLabel(nameOrID: String, op: String, values: [String])
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
     case groupList
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
+    /// `nex group reorder <name-or-id> --order <a,b,c>`. Rewrites the
+    /// group's `childOrder` to the given member order (ids or member
+    /// names). Members omitted from `order` keep their relative order at
+    /// the tail. Request/response — the reply echoes the resulting order.
+    case groupReorder(nameOrID: String, order: [String])
+    /// `nex group sort <name-or-id> --by name|last-activity|last-accessed
+    /// [--desc]`. Rewrites `childOrder` by the given key. Request/response.
+    case groupSort(nameOrID: String, by: String, descending: Bool)
     /// File commands. `reuse` = replace the originating pane in place
     /// (`nex open --here`) instead of splitting off it.
     case openFile(path: String, paneID: UUID?, reuse: Bool)
@@ -351,7 +365,8 @@ private let replyCommandAllowlist: Set<String> = [
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
     "pane-split", "pane-create", "pane-name", "pane-resize", "pane-move-adjacent",
     "pane-sync", "pane-sync-exclude",
-    "workspace-create", "workspace-delete",
+    "workspace-create", "workspace-delete", "workspace-label",
+    "group-reorder", "group-sort",
     "graft-start", "graft-stop", "graft-status",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
@@ -876,6 +891,17 @@ final class SocketServer: Sendable {
         /// `pane-move-adjacent` — the edge of the anchor to dock on:
         /// `above` / `below` / `left-of` / `right-of`.
         var zone: String?
+        /// `workspace-label` — the mutation verb (`set`/`add`/`remove`/`clear`).
+        var labelOp: String?
+        /// `workspace-label` — the label values the verb operates on
+        /// (empty for `clear`).
+        var labelValues: [String]?
+        /// `group-reorder` — the explicit member order (ids or member names).
+        var order: [String]?
+        /// `group-sort` — the sort key (`name`/`last-activity`/`last-accessed`).
+        var by: String?
+        /// `group-sort --desc` — reverse the sort direction.
+        var descending: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -916,6 +942,9 @@ final class SocketServer: Sendable {
             case updateMain = "update_main"
             case ratio, delta
             case anchor, zone
+            case labelOp = "label_op"
+            case labelValues = "label_values"
+            case order, by, descending
         }
     }
 
@@ -969,7 +998,8 @@ final class SocketServer: Sendable {
         }
 
         if wire.command == "workspace-list" {
-            return (.workspaceList, wire)
+            let group = (wire.group?.isEmpty == true) ? nil : wire.group
+            return (.workspaceList(group: group), wire)
         }
 
         if wire.command == "workspace-move" {
@@ -993,6 +1023,13 @@ final class SocketServer: Sendable {
             return (.workspaceProfile(nameOrID: nameOrID, profile: profile), wire)
         }
 
+        if wire.command == "workspace-label" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty,
+                  let op = wire.labelOp, !op.isEmpty
+            else { return nil }
+            return (.workspaceLabel(nameOrID: nameOrID, op: op, values: wire.labelValues ?? []), wire)
+        }
+
         if wire.command == "group-list" {
             return (.groupList, wire)
         }
@@ -1013,6 +1050,18 @@ final class SocketServer: Sendable {
         if wire.command == "group-delete" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             return (.groupDelete(nameOrID: nameOrID, cascade: wire.cascade ?? false), wire)
+        }
+
+        if wire.command == "group-reorder" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.groupReorder(nameOrID: nameOrID, order: wire.order ?? []), wire)
+        }
+
+        if wire.command == "group-sort" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty,
+                  let by = wire.by, !by.isEmpty
+            else { return nil }
+            return (.groupSort(nameOrID: nameOrID, by: by, descending: wire.descending ?? false), wire)
         }
 
         if wire.command == "open" {
