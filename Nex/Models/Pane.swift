@@ -44,6 +44,15 @@ struct Pane: Identifiable, Equatable {
     /// has this nil until the resumed agent re-emits a start.
     var agentStartedAt: Date?
 
+    /// Number of Claude Code background units still in flight for this
+    /// pane's agent (`run_in_background` shells + background subagents),
+    /// as reported by the `background_tasks` array on the most recent
+    /// `Stop` / `Notification` hook (issues #215, #220). Non-zero means
+    /// the turn ended but work continues, so the pane stays `.running`
+    /// instead of falsely reading `.waitingForInput`. Transient — not
+    /// persisted; reset to 0 on the next `start` / `error`.
+    var backgroundTaskCount: Int
+
     /// Convenience accessor for rendering logic.
     var isUsingExternalEditor: Bool { externalEditorCommand != nil }
     var createdAt: Date
@@ -65,6 +74,7 @@ struct Pane: Identifiable, Equatable {
         markdownFontSize: Double = Pane.defaultMarkdownFontSize,
         parkedSourcePaneID: UUID? = nil,
         agentStartedAt: Date? = nil,
+        backgroundTaskCount: Int = 0,
         createdAt: Date = Date(),
         lastActivityAt: Date = Date()
     ) {
@@ -83,6 +93,7 @@ struct Pane: Identifiable, Equatable {
         self.markdownFontSize = markdownFontSize
         self.parkedSourcePaneID = parkedSourcePaneID
         self.agentStartedAt = agentStartedAt
+        self.backgroundTaskCount = backgroundTaskCount
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt
     }

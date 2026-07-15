@@ -2178,10 +2178,10 @@ struct AppReducerTests {
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.socketMessage(.agentStopped(paneID: parkedID), reply: nil))
+        await store.send(.socketMessage(.agentStopped(paneID: parkedID, backgroundTaskCount: 0), reply: nil))
         await store.receive(.workspaces(.element(
             id: Self.wsID1,
-            action: .agentStopped(paneID: parkedID)
+            action: .agentStopped(paneID: parkedID, backgroundTaskCount: 0)
         )))
         await store.finish()
 
