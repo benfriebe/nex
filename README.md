@@ -137,7 +137,7 @@ Manual setup (skip if `install-hooks.sh` did it):
   "hooks": {
     "Stop": [{ "hooks": [{ "type": "command", "command": "nex event stop" }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "nex event notification" }] }],
-    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "nex event session-start" }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "nex event session-start" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "nex event session-end" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "nex event start" }] }]
   }
@@ -225,7 +225,7 @@ When `nex` commands stop reaching the app, run the doctor first:
 nex doctor [--json]
 ```
 
-It runs five named checks (`transport`, `socket`/`resolve`, `ping`, `process`, `version`) and prints a `[PASS|FAIL|WARN]` line plus a concrete repair tip for each failure: `ping` round-trips a real socket command, `process` distinguishes "Nex isn't running" from "Nex is wedged", and `version` flags CLI/app drift. Exits 0 when everything passes. Every other CLI error now prints a paired `Error: … / Repair: …` message; fire-and-forget event hooks stay exit-0 but emit a `Warning:` (silence with `NEX_SILENT=1`).
+It runs six named checks (`transport`, `socket`/`resolve`, `ping`, `process`, `version`, `hooks`) and prints a `[PASS|FAIL|WARN]` line plus a concrete repair tip for each failure: `ping` round-trips a real socket command, `process` distinguishes "Nex isn't running" from "Nex is wedged", `version` flags CLI/app drift, and `hooks` verifies the user-level Claude Code hook config (`~/.claude/settings.json` + `settings.local.json`) still carries every nex hook (a stale pre-v0.19 `SessionStart` matcher silently stops resumed sessions binding their session id — issue #181; re-run `install-hooks.sh` to migrate — note a re-run normalises nex-managed hook matchers). Exits non-zero only when a check FAILs; WARNs (like hook drift) are reported but leave the exit code 0. Every other CLI error now prints a paired `Error: … / Repair: …` message; fire-and-forget event hooks stay exit-0 but emit a `Warning:` (silence with `NEX_SILENT=1`).
 
 ### Web pane automation
 

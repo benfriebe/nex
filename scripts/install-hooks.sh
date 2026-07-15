@@ -3,11 +3,18 @@ set -euo pipefail
 
 # Install nex CLI and configure Claude Code hooks.
 # Run this after installing Nex.app.
+#
+# Safe to re-run: hook merging dedupes nex-managed commands (including
+# absolute-path variants) and normalises their matchers — a re-run is
+# the repair path `nex doctor` suggests for stale hook configs.
+# NEX_INSTALL_DIR overrides where the nex symlink goes (default
+# /usr/local/bin); the hooks invoke bare `nex`, so the directory must
+# be on PATH in the shells Claude Code runs hooks from.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_PATH="/Applications/Nex.app"
 BINARY="nex"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${NEX_INSTALL_DIR:-/usr/local/bin}"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 
 # Find the app bundle
@@ -29,11 +36,18 @@ if [ ! -f "$BINARY_SRC" ]; then
     exit 1
 fi
 
-# Install nex to /usr/local/bin (symlink so --version can find Info.plist)
+# Install nex into INSTALL_DIR (symlink so --version can find Info.plist)
 echo "Installing $BINARY to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 ln -sf "$BINARY_SRC" "$INSTALL_DIR/$BINARY"
 echo "  Installed $INSTALL_DIR/$BINARY -> $BINARY_SRC"
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+        echo "  Warning: $INSTALL_DIR is not on this shell's PATH. The hooks run"
+        echo "  bare 'nex' commands, so they will fail in shells that can't find it."
+        ;;
+esac
 
 # Configure Claude Code hooks
 echo "Configuring Claude Code hooks..."
@@ -63,7 +77,6 @@ HOOKS='{
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",

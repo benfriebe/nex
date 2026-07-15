@@ -3,8 +3,11 @@
 
 Usage: merge_hooks.py <settings-path> <hooks-json>
 
-Preserves unrelated user hooks. Dedupes by command string so repeated runs
-don't accumulate duplicates. Updates matcher when it has changed.
+Preserves unrelated user hooks. Dedupes nex-managed hooks by substring
+(any existing command *containing* an incoming command string counts,
+so `/Applications/Nex.app/Contents/Helpers/nex event stop` is replaced
+by the bare `nex event stop` rather than left to double-fire). Updates
+matcher when it has changed.
 """
 import json
 import sys
@@ -21,13 +24,18 @@ def merge_hooks(settings: dict, new_hooks: dict) -> dict:
                 h.get("command") for h in new_inner if h.get("type") == "command"
             }
 
+            def is_nex_managed(command):
+                return command is not None and any(
+                    new_command in command for new_command in new_commands
+                )
+
             for grp in existing_groups:
                 grp["hooks"] = [
                     h
                     for h in grp.get("hooks", [])
                     if not (
                         h.get("type") == "command"
-                        and h.get("command") in new_commands
+                        and is_nex_managed(h.get("command"))
                     )
                 ]
             existing_groups[:] = [g for g in existing_groups if g.get("hooks")]

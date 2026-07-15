@@ -4258,13 +4258,16 @@ private func handleGraftStatus(args: inout ArraySlice<String>) {
 
 // MARK: - Doctor
 
-/// `nex doctor` — run a sequence of IPC health checks and print
-/// pass/fail with concrete repair tips. Added for issue #100 so users
-/// have a single command to run when CLI commands stop reaching the
-/// running Nex app.
+/// `nex doctor` — run a sequence of IPC health checks (plus a local
+/// Claude Code hook-config check) and print pass/fail with concrete
+/// repair tips. Added for issue #100 so users have a single command
+/// to run when CLI commands stop reaching the running Nex app.
 ///
-/// Exits 0 if every check passes, non-zero if any fail. Pass `--json`
-/// for a machine-readable report.
+/// Exits non-zero only when a check FAILs; WARNs are reported but
+/// leave the exit code 0 (and `--json`'s `ok` true), so scripts using
+/// doctor as a transport/app-health gate aren't tripped by advisory
+/// drift like hook config. Pass `--json` for a machine-readable
+/// report.
 func handleDoctor(_ args: inout ArraySlice<String>) {
     let useJSON = popSwitch("--json", from: &args)
 
@@ -4280,6 +4283,7 @@ func handleDoctor(_ args: inout ArraySlice<String>) {
     report.addPingCheck()
     report.addProcessCheck(transport: transport)
     report.addVersionCheck(cliVersion: nexVersion)
+    report.addHooksCheck()
 
     if useJSON {
         report.printJSON()
@@ -4544,6 +4548,197 @@ struct DoctorReport {
                 status: .warn,
                 detail: "CLI is \(cliVersion); app is \(appVersion).",
                 repair: "Rebuild Nex (or relaunch from the latest build) so the bundled CLI matches the running app."
+            ))
+        }
+    }
+
+    /// The full set of Claude Code hooks `install-hooks.sh` wires, as
+    /// (event, command) pairs. Kept here so `doctor` and the installer
+    /// can't silently drift apart on *which* hooks Nex expects.
+    static let expectedHooks: [(event: String, command: String)] = [
+        ("Stop", "nex event stop"),
+        ("Notification", "nex event notification"),
+        ("SessionStart", "nex event session-start"),
+        ("SessionEnd", "nex event session-end"),
+        ("UserPromptSubmit", "nex event start")
+    ]
+
+    /// SessionStart hook sources the config must cover. A pre-v0.19
+    /// `install-hooks.sh` wrote `"matcher": "startup"`, and app
+    /// auto-updates never touch `~/.claude/settings.json` — so those
+    /// installs silently never bind session ids for resumed sessions
+    /// (`claude --continue` / `--resume`), the exact failure in issue
+    /// #181. `doctor` is where that drift becomes visible.
+    static let sessionStartSources = ["startup", "resume", "clear", "compact"]
+
+    /// Does `matcher` fire for `source`, per Claude Code's documented
+    /// three-way matcher semantics: `*` / empty = match-all; a value
+    /// made of only letters, digits, `_`, `-`, spaces, `,`, `|` is a
+    /// list of exact strings split on `|` / `,` (whitespace-trimmed);
+    /// anything else is an unanchored regex (mirroring JS
+    /// `new RegExp(m).test(s)`). A regex that fails to compile is
+    /// treated as covering nothing — Claude Code wouldn't fire it
+    /// either.
+    static func matcherCovers(_ matcher: String, source: String) -> Bool {
+        let trimmed = matcher.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed == "*" { return true }
+        let listChars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ,|")
+        if trimmed.unicodeScalars.allSatisfy(listChars.contains) {
+            return trimmed
+                .split(whereSeparator: { $0 == "|" || $0 == "," })
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .contains(source)
+        }
+        guard let regex = try? NSRegularExpression(pattern: trimmed) else { return false }
+        return regex.firstMatch(
+            in: source, range: NSRange(source.startIndex..., in: source)
+        ) != nil
+    }
+
+    /// Verify the Claude Code hook config still carries every nex hook,
+    /// and that the SessionStart entry fires for all sources. Local
+    /// filesystem check only — it inspects the config where this CLI
+    /// runs, which is also where `claude` runs and hooks fire.
+    ///
+    /// Checks the two user-level files (`settings.json` +
+    /// `settings.local.json`) that `install-hooks.sh` manages and that
+    /// apply to every project. Project-level scopes are deliberately
+    /// out of reach — doctor can't know which project directories
+    /// matter — so drift wording hedges accordingly.
+    ///
+    /// Drift is a WARN, not a FAIL: IPC is healthy and every command
+    /// works; what degrades is agent tracking (session binding, status
+    /// indicators). Scripts gating on `doctor`'s exit code for
+    /// transport health shouldn't start failing over hook config.
+    mutating func addHooksCheck(claudeDir: String = "~/.claude") {
+        // Resolve `~` through $HOME first (passwd fallback), matching
+        // how install-hooks.sh and Claude Code locate the same files.
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let dir = claudeDir.hasPrefix("~/") || claudeDir == "~"
+            ? home + claudeDir.dropFirst(1)
+            : claudeDir
+        let repair = "Re-run the bundled installer (safe to re-run — it merges, dedupes, and normalises nex-managed hooks): /Applications/Nex.app/Contents/Resources/scripts/install-hooks.sh"
+
+        // Order matters: later files take precedence for scalar
+        // settings (local overrides user), mirroring Claude Code.
+        let fileNames = ["settings.json", "settings.local.json"]
+        var parsed: [(name: String, json: [String: Any])] = []
+        var unreadable: [String] = []
+        for name in fileNames {
+            guard let data = FileManager.default.contents(atPath: dir + "/" + name) else { continue }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                parsed.append((name, json))
+            } else {
+                unreadable.append(name)
+            }
+        }
+
+        if parsed.isEmpty, unreadable.isEmpty {
+            var isDir: ObjCBool = false
+            let dirExists = FileManager.default.fileExists(atPath: dir, isDirectory: &isDir)
+                && isDir.boolValue
+            if dirExists {
+                append(DoctorCheck(
+                    name: "hooks",
+                    status: .warn,
+                    detail: "no Claude Code settings in \(claudeDir) — nex hooks are not installed, so agent status and session ids won't track.",
+                    repair: repair
+                ))
+            } else {
+                // No ~/.claude at all: this machine doesn't run Claude
+                // Code, so missing hooks aren't drift — don't nag.
+                append(DoctorCheck(
+                    name: "hooks",
+                    status: .skip,
+                    detail: "skipped (no \(claudeDir) directory — Claude Code not detected)",
+                    repair: nil
+                ))
+            }
+            return
+        }
+
+        var problems: [String] = []
+        if !unreadable.isEmpty {
+            problems.append(
+                "not valid JSON: \(unreadable.joined(separator: ", ")) (Claude Code itself needs these parseable)"
+            )
+        }
+
+        // `disableAllHooks` kills every hook — including nex's — so a
+        // fully-wired config still binds nothing (the exact #181
+        // symptom). Last file that defines it wins (local over user).
+        let disableAllHooks = parsed.reversed()
+            .compactMap { $0.json["disableAllHooks"] as? Bool }
+            .first
+        if disableAllHooks == true {
+            problems.append(
+                "\"disableAllHooks\": true is set — every hook (including nex's) is disabled, so session ids and agent status won't track"
+            )
+        }
+
+        /// Hook groups under `event` across all parsed files. Casts
+        /// per element so one malformed entry can't hide a valid nex
+        /// group sitting next to it.
+        func groups(_ event: String) -> [[String: Any]] {
+            parsed.flatMap { file -> [[String: Any]] in
+                let hooks = file.json["hooks"] as? [String: Any] ?? [:]
+                return (hooks[event] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+            }
+        }
+
+        /// Groups under `event` whose command list contains `command`
+        /// (substring match, so absolute paths and extra flags count).
+        func groupsWiring(_ event: String, _ command: String) -> [[String: Any]] {
+            groups(event).filter { group in
+                let inner = (group["hooks"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+                return inner.contains { hook in
+                    (hook["command"] as? String)?.contains(command) == true
+                }
+            }
+        }
+
+        let missing = Self.expectedHooks
+            .filter { groupsWiring($0.event, $0.command).isEmpty }
+            .map { "\($0.event) → `\($0.command)`" }
+        if !missing.isEmpty {
+            problems.append("missing hook(s): \(missing.joined(separator: ", "))")
+        }
+
+        // Matcher coverage: a group with no matcher fires for every
+        // source. Otherwise union coverage across all groups that wire
+        // the session-start command.
+        let sessionStartGroups = groupsWiring("SessionStart", "nex event session-start")
+        if !sessionStartGroups.isEmpty {
+            let matchers = sessionStartGroups.map { $0["matcher"] as? String }
+            let uncovered = Self.sessionStartSources.filter { source in
+                !matchers.contains { matcher in
+                    matcher == nil || Self.matcherCovers(matcher!, source: source)
+                }
+            }
+            if !uncovered.isEmpty {
+                let resumeTail = uncovered.contains("resume")
+                    ? " — resumed sessions (`claude --continue` / `--resume`) won't bind their session id (issue #181)"
+                    : ""
+                problems.append(
+                    "SessionStart matcher \(matchers.compactMap(\.self).map { "\"\($0)\"" }.joined(separator: ", ")) misses source(s): \(uncovered.joined(separator: ", "))\(resumeTail)"
+                )
+            }
+        }
+
+        let scope = parsed.map(\.name).joined(separator: ", ")
+        if problems.isEmpty {
+            append(DoctorCheck(
+                name: "hooks",
+                status: .pass,
+                detail: "all nex hooks wired in \(claudeDir) (checked \(scope))",
+                repair: nil
+            ))
+        } else {
+            append(DoctorCheck(
+                name: "hooks",
+                status: .warn,
+                detail: "hook config drift in \(claudeDir) (checked \(scope); project-level settings scopes not checked): \(problems.joined(separator: "; "))",
+                repair: repair
             ))
         }
     }
