@@ -290,7 +290,7 @@ struct WorkspaceGroupSocketTests {
         )
 
         let sink = CaptureSink()
-        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+        await store.send(.socketMessage(.workspaceList(group: nil), reply: makeCaptureHandle(sink)))
 
         #expect(sink.payloads.count == 1)
         #expect(sink.closedCount == 1)
@@ -329,7 +329,7 @@ struct WorkspaceGroupSocketTests {
         )
 
         let sink = CaptureSink()
-        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+        await store.send(.socketMessage(.workspaceList(group: nil), reply: makeCaptureHandle(sink)))
 
         let workspaces = sink.payloads[0]["workspaces"] as? [[String: Any]] ?? []
         #expect(workspaces.count == 1)
@@ -341,7 +341,7 @@ struct WorkspaceGroupSocketTests {
         let store = makeStore()
         let sink = CaptureSink()
 
-        await store.send(.socketMessage(.workspaceList, reply: makeCaptureHandle(sink)))
+        await store.send(.socketMessage(.workspaceList(group: nil), reply: makeCaptureHandle(sink)))
 
         #expect(sink.payloads.count == 1)
         #expect(sink.closedCount == 1)

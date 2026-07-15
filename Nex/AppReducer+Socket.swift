@@ -404,8 +404,8 @@ extension AppReducer {
 
                 // MARK: Workspace commands
 
-                case .workspaceList:
-                    handleWorkspaceList(state: state, reply: reply)
+                case .workspaceList(let group):
+                    handleWorkspaceList(state: state, group: group, reply: reply)
                     return .none
 
                 case .workspaceCreate(let name, let path, let color, let group, let profile, let worktree, let branch, let updateMain, let repo):
@@ -448,6 +448,15 @@ extension AppReducer {
                         action: .setProfile(profile)
                     )))
 
+                case .workspaceLabel(let nameOrID, let op, let values):
+                    return handleWorkspaceLabel(
+                        &state,
+                        nameOrID: nameOrID,
+                        op: op,
+                        values: values,
+                        reply: reply
+                    )
+
                 case .groupList:
                     handleGroupList(state: state, reply: reply)
                     return .none
@@ -462,6 +471,26 @@ extension AppReducer {
                 case .groupDelete(let nameOrID, let cascade):
                     guard let group = state.resolveGroup(nameOrID) else { return .none }
                     return .send(.deleteGroup(id: group.id, cascade: cascade))
+
+                case .groupReorder(let nameOrID, let order):
+                    return handleGroupReorder(
+                        &state,
+                        nameOrID: nameOrID,
+                        explicitOrder: order,
+                        sortBy: nil,
+                        descending: false,
+                        reply: reply
+                    )
+
+                case .groupSort(let nameOrID, let by, let descending):
+                    return handleGroupReorder(
+                        &state,
+                        nameOrID: nameOrID,
+                        explicitOrder: nil,
+                        sortBy: by,
+                        descending: descending,
+                        reply: reply
+                    )
 
                 // MARK: File commands
 
@@ -1257,9 +1286,24 @@ extension AppReducer {
     /// workspaces), matching the fields on `pane-list`.
     func handleWorkspaceList(
         state: State,
+        group groupFilter: String?,
         reply: SocketServer.ReplyHandle?
     ) {
         guard let reply else { return }
+
+        // `--group` scopes the listing to one group's members (in child
+        // order). An unknown/ambiguous group name is an error, not an
+        // empty list, so scripts can tell "no such group" from "empty
+        // group".
+        var restrictTo: Set<UUID>?
+        if let groupFilter, !groupFilter.isEmpty {
+            guard let group = state.resolveGroup(groupFilter) else {
+                reply.send(["ok": false, "error": "no group matches '\(groupFilter)'"])
+                reply.close()
+                return
+            }
+            restrictTo = Set(group.childOrder)
+        }
 
         var orderedWorkspaceIDs: [UUID] = []
         var seen = Set<UUID>()
@@ -1281,6 +1325,11 @@ extension AppReducer {
             orderedWorkspaceIDs.append(workspace.id)
         }
 
+        if let restrictTo {
+            orderedWorkspaceIDs = orderedWorkspaceIDs.filter { restrictTo.contains($0) }
+        }
+
+        let iso = ISO8601DateFormatter()
         let workspaces: [[String: Any]] = orderedWorkspaceIDs.compactMap { workspaceID in
             guard let workspace = state.workspaces[id: workspaceID] else { return nil }
             var entry: [String: Any] = [
@@ -1288,8 +1337,22 @@ extension AppReducer {
                 "name": workspace.name,
                 "color": workspace.color.rawValue,
                 "pane_count": workspace.panes.count,
-                "is_active": workspace.id == state.activeWorkspaceID
+                "is_active": workspace.id == state.activeWorkspaceID,
+                "created_at": iso.string(from: workspace.createdAt),
+                "last_accessed_at": iso.string(from: workspace.lastAccessedAt),
+                "labels": Array(workspace.labels)
             ]
+            // Workspaces have no activity timestamp of their own; surface
+            // the most recent across their panes so scripts can rank by
+            // "last touched".
+            if let latest = workspace.panes.map(\.lastActivityAt).max() {
+                entry["last_activity_at"] = iso.string(from: latest)
+            }
+            // The issue's staleness use case keys off the workspace's
+            // agent session; expose the first pane that carries one.
+            if let session = workspace.panes.compactMap(\.agentSessionID).first {
+                entry["agent_session_id"] = session
+            }
             if let groupID = state.groupID(forWorkspace: workspace.id),
                let group = state.groups[id: groupID] {
                 entry["group_id"] = group.id.uuidString
@@ -1300,6 +1363,220 @@ extension AppReducer {
 
         reply.send(["ok": true, "workspaces": workspaces])
         reply.close()
+    }
+
+    /// `workspace-label` — apply a set/add/remove/clear mutation to a
+    /// workspace's labels and reply with the resulting set. Mutating
+    /// inline (rather than dispatching `.addLabel` etc.) lets the reply
+    /// reflect the post-mutation labels in the same reducer run.
+    func handleWorkspaceLabel(
+        _ state: inout State,
+        nameOrID: String,
+        op: String,
+        values: [String],
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ message: String) -> Effect<Action> {
+            reply?.sendAndClose(["ok": false, "error": message])
+            return .none
+        }
+
+        guard let resolved = state.resolveWorkspace(nameOrID) else {
+            return fail("no workspace matches '\(nameOrID)'")
+        }
+        let workspaceID = resolved.id
+
+        let normalizedValues = values
+            .map { WorkspaceFeature.normalizeLabel($0) }
+            .filter { !$0.isEmpty }
+
+        // Labels introduced by set/add that need a backing LabelPreset so
+        // they aren't orphaned (invisible/unmanaged in Settings ▸ Labels).
+        var introduced: [String] = []
+
+        switch op {
+        case "set":
+            // A `set` whose values all normalize away (e.g. `--set ""`) would
+            // silently clear every label. Reject it so an accidental wipe
+            // can't masquerade as a set; `--clear` is the explicit path.
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to set (use --clear to remove all labels)")
+            }
+            var seen = Set<String>()
+            var deduped: [String] = []
+            for value in normalizedValues where seen.insert(value).inserted {
+                deduped.append(value)
+            }
+            state.workspaces[id: workspaceID]?.labels = deduped
+            introduced = deduped
+        case "add":
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to add")
+            }
+            for value in normalizedValues
+                where state.workspaces[id: workspaceID]?.labels.contains(value) == false {
+                state.workspaces[id: workspaceID]?.labels.append(value)
+            }
+            introduced = normalizedValues
+        case "remove":
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to remove")
+            }
+            // Removing a label from a workspace does not delete its preset
+            // (mirrors the GUI — presets persist independently of use).
+            state.workspaces[id: workspaceID]?.labels.removeAll { normalizedValues.contains($0) }
+        case "clear":
+            state.workspaces[id: workspaceID]?.labels = []
+        default:
+            return fail("unknown label operation '\(op)'")
+        }
+
+        let resultLabels = Array(state.workspaces[id: workspaceID]?.labels ?? [])
+        reply?.sendAndClose([
+            "ok": true,
+            "workspace_id": workspaceID.uuidString,
+            "workspace_name": state.workspaces[id: workspaceID]?.name ?? "",
+            "labels": resultLabels
+        ])
+
+        // Ensure each introduced label has a (gray, recolorable) preset so a
+        // CLI-tagged workspace is consistent with the GUI, where every applied
+        // label is a managed preset. `addLabelPreset` is a no-op for names that
+        // already exist, so it never recolors a user's preset.
+        var effects: [Effect<Action>] = [.send(.persistState)]
+        for name in introduced {
+            effects.append(.send(.presets(.addLabelPreset(name: name, color: .named(.gray)))))
+        }
+        return .merge(effects)
+    }
+
+    /// `group-reorder` / `group-sort` — rewrite a group's `childOrder`.
+    /// `childOrder` (not `workspace.sortOrder`) is the actual render
+    /// order, so writing it here is what makes same-group reordering
+    /// take effect (the gap the issue calls out for `workspace move
+    /// --index`). Exactly one of `explicitOrder` / `sortBy` is set.
+    func handleGroupReorder(
+        _ state: inout State,
+        nameOrID: String,
+        explicitOrder: [String]?,
+        sortBy: String?,
+        descending: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ message: String) -> Effect<Action> {
+            reply?.sendAndClose(["ok": false, "error": message])
+            return .none
+        }
+
+        guard let group = state.resolveGroup(nameOrID) else {
+            return fail("no group matches '\(nameOrID)'")
+        }
+        // Only members that still exist as workspaces are orderable.
+        // Dedup defensively: a corrupted `childOrder` holding a duplicate
+        // id would otherwise trap the per-key `Dictionary(uniqueKeysWithValues:)`
+        // build in the sort branch.
+        var memberSet = Set<UUID>()
+        let members = group.childOrder.filter {
+            state.workspaces[id: $0] != nil && memberSet.insert($0).inserted
+        }
+
+        var newOrder: [UUID]
+        if let explicitOrder {
+            // Resolve each token to a member (UUID, or a name unique
+            // within the group). Reject anything that isn't a member so
+            // typos surface instead of silently dropping.
+            var resolved: [UUID] = []
+            var seen = Set<UUID>()
+            for token in explicitOrder {
+                guard let id = resolveGroupMember(token, members: members, state: state) else {
+                    return fail("'\(token)' is not a workspace in group '\(group.name)'")
+                }
+                guard seen.insert(id).inserted else {
+                    return fail("workspace '\(token)' listed more than once")
+                }
+                resolved.append(id)
+            }
+            // Members omitted from --order keep their relative order at the tail.
+            newOrder = resolved
+            for id in members where !seen.contains(id) {
+                newOrder.append(id)
+            }
+        } else if let sortBy {
+            // Precompute the sort key per member into a local (avoids
+            // capturing `inout state` in the comparator closure).
+            let key = sortBy.lowercased()
+            let comparator: (UUID, UUID) -> Bool
+            switch key {
+            case "name":
+                let names = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, state.workspaces[id: $0]?.name ?? "")
+                })
+                comparator = { (names[$0] ?? "").localizedCaseInsensitiveCompare(names[$1] ?? "") == .orderedAscending }
+            case "last-activity", "last_activity":
+                let dates = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, activityDate($0, state: state))
+                })
+                comparator = { (dates[$0] ?? .distantPast) < (dates[$1] ?? .distantPast) }
+            case "last-accessed", "last_accessed", "last-modified", "last_modified":
+                let dates = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, state.workspaces[id: $0]?.lastAccessedAt ?? .distantPast)
+                })
+                comparator = { (dates[$0] ?? .distantPast) < (dates[$1] ?? .distantPast) }
+            default:
+                return fail("unknown sort key '\(sortBy)' (use name|last-activity|last-accessed)")
+            }
+            // Stable sort with the original index as a tiebreaker so equal
+            // keys keep their prior relative order. For `--desc` we invert
+            // the key comparison (not a whole-array reverse), so ties still
+            // keep their original order rather than flipping.
+            let indexed = members.enumerated().map { ($0.offset, $0.element) }
+            let sorted = indexed.sorted { lhs, rhs in
+                let aFirst = descending ? comparator(rhs.1, lhs.1) : comparator(lhs.1, rhs.1)
+                let bFirst = descending ? comparator(lhs.1, rhs.1) : comparator(rhs.1, lhs.1)
+                if aFirst { return true }
+                if bFirst { return false }
+                return lhs.0 < rhs.0
+            }
+            newOrder = sorted.map(\.1)
+        } else {
+            return fail("no order or sort key given")
+        }
+
+        // Preserve any children whose workspace vanished mid-flight at the
+        // tail so we never drop ids from `childOrder`.
+        for id in group.childOrder where !memberSet.contains(id) {
+            newOrder.append(id)
+        }
+
+        state.groups[id: group.id]?.childOrder = newOrder
+
+        reply?.sendAndClose([
+            "ok": true,
+            "group_id": group.id.uuidString,
+            "group_name": group.name,
+            "order": newOrder.filter { memberSet.contains($0) }.map(\.uuidString)
+        ])
+        return .send(.persistState)
+    }
+
+    /// Resolve a `group-reorder` token to a member workspace id: a UUID
+    /// that is a member, or a name that uniquely matches a member.
+    private func resolveGroupMember(
+        _ token: String,
+        members: [UUID],
+        state: State
+    ) -> UUID? {
+        if let uuid = UUID(uuidString: token), members.contains(uuid) {
+            return uuid
+        }
+        let matches = members.filter { state.workspaces[id: $0]?.name == token }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    /// Most recent pane activity in a workspace, or `.distantPast` when
+    /// it has no panes — used as the `last-activity` sort key.
+    private func activityDate(_ workspaceID: UUID, state: State) -> Date {
+        state.workspaces[id: workspaceID]?.panes.map(\.lastActivityAt).max() ?? .distantPast
     }
 
     /// Build and send the read-only `group-list` response. Groups follow
