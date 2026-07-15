@@ -245,6 +245,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v17_workspace_profile") { db in
+            let columns = try db.columns(in: "workspace").map(\.name)
+            if !columns.contains("profileName") {
+                try db.alter(table: "workspace") { t in
+                    t.add(column: "profileName", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -267,6 +276,10 @@ struct WorkspaceRecord: Codable, FetchableRecord, PersistableRecord {
     /// Prefix-qualified `GroupIcon.storageString` (`"system:<name>"` /
     /// `"emoji:<grapheme>"`); nil falls back to the first-letter avatar.
     var icon: String?
+    /// Assigned workspace-profile name (env-var set from the config file).
+    /// Defaulted so existing memberwise-init call sites keep compiling; the
+    /// persistence round-trip test forces the save-side mapping.
+    var profileName: String? = nil
 }
 
 struct PaneRecord: Codable, FetchableRecord, PersistableRecord {

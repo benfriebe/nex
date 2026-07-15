@@ -4,6 +4,16 @@ import Foundation
 import SwiftUI
 import WebKit
 
+/// A resolved worktree the first pane of a new workspace should open in
+/// (issue #222). Carries the on-disk worktree path and the branch it was
+/// created on, so `.createWorkspace` can point the first pane's working
+/// directory there and register a `RepoAssociation` for the worktree
+/// (rather than the repo root).
+struct WorktreeSeed: Equatable {
+    let path: String
+    let branchName: String
+}
+
 @Reducer
 struct AppReducer {
     @ObservableState
@@ -102,13 +112,7 @@ struct AppReducer {
             var agentCount = 0
             var workspaceCount = 0
             for workspace in workspaces {
-                let visible = workspace.panes.reduce(into: 0) { acc, pane in
-                    if pane.status != .idle { acc += 1 }
-                }
-                let parked = workspace.parkedPanes.reduce(into: 0) { acc, pane in
-                    if pane.status != .idle { acc += 1 }
-                }
-                let count = visible + parked
+                let count = workspace.activeAgentCount
                 if count > 0 {
                     agentCount += count
                     workspaceCount += 1
@@ -367,7 +371,13 @@ struct AppReducer {
 
     enum Action: Equatable {
         case appLaunched
-        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil)
+        case createWorkspace(name: String, color: WorkspaceColor? = nil, repos: [Repo] = [], workingDirectory: String? = nil, groupID: UUID? = nil, profileName: String? = nil, id: UUID? = nil, worktree: WorktreeSeed? = nil)
+        /// Create a workspace whose first pane opens in a freshly-created
+        /// git worktree (issue #222). Validates + creates the worktree
+        /// (optionally updating the default branch first), then dispatches
+        /// `.createWorkspace` with the resolved worktree seed. Failures
+        /// surface via `worktreeCreationError` (the sheet stays open).
+        case createWorkspaceWithWorktree(name: String, color: WorkspaceColor? = nil, repo: Repo, worktreeName: String, branchName: String, updateMain: Bool = false, groupID: UUID? = nil, profileName: String? = nil, id: UUID? = nil)
         case deleteWorkspace(UUID)
         case moveWorkspace(id: UUID, toIndex: Int)
         case moveGroup(id: UUID, toIndex: Int)
@@ -455,7 +465,10 @@ struct AppReducer {
         // Worktree Operations
         case createWorktree(workspaceID: UUID, repoID: UUID, worktreeName: String, branchName: String)
         case worktreeCreated(workspaceID: UUID, repoID: UUID, worktreePath: String, branchName: String)
-        case worktreeCreationFailed(workspaceID: UUID, error: String)
+        // `workspaceID` is optional: the inline new-workspace worktree flow
+        // (issue #222) fails before any workspace exists, so it passes nil.
+        // The handler only reads the error string.
+        case worktreeCreationFailed(workspaceID: UUID?, error: String)
         case dismissWorktreeCreationError
         case removeWorktreeAssociation(workspaceID: UUID, associationID: UUID, deleteWorktree: Bool)
 
@@ -611,6 +624,7 @@ struct AppReducer {
     @Dependency(\.notificationService) var notificationService
     @Dependency(\.statusBarController) var statusBarController
     @Dependency(\.ghosttyConfig) var ghosttyConfig
+    @Dependency(\.workspaceProfiles) var workspaceProfiles
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.graftService) var graftService
     @Dependency(\.webPaneStore) var webPaneStore
@@ -1042,23 +1056,43 @@ struct AppReducer {
                     }
                 )
 
-            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID):
+            case .createWorkspace(let name, let color, let repos, let workingDirectory, let groupID, let newProfileName, let id, let worktree):
+                // A worktree was just created for this workspace, so clear
+                // any stale error from a prior failed attempt (issue #222).
+                if worktree != nil {
+                    state.worktreeCreationError = nil
+                }
                 let previousActiveID = state.activeWorkspaceID
                 let resolvedColor = color ?? state.workspaces.nextRandomColor()
                 var workspace = WorkspaceFeature.State(
-                    id: uuid(),
+                    // `id` is pre-minted by the socket create path so its
+                    // reply can return the new workspace's id; every other
+                    // caller passes nil and gets a fresh uuid here.
+                    id: id ?? uuid(),
                     name: name,
                     color: resolvedColor
                 )
+                if let newProfileName {
+                    // Same normalization as `.setProfile`: trim; empty or
+                    // the built-in "default" baseline → nil.
+                    workspace.profileName = WorkspaceProfilesClient.normalizedAssignment(newProfileName)
+                }
 
-                // If exactly one repo, start the first pane in that repo's directory
-                if repos.count == 1 {
+                // A worktree seed (issue #222) always carries exactly one
+                // source repo — open the first pane in the worktree, not the
+                // repo root. Otherwise: a single repo opens in that repo's
+                // directory; a bare `workingDirectory` wins when given.
+                if let worktree {
+                    workspace.panes[workspace.panes.startIndex].workingDirectory = worktree.path
+                } else if repos.count == 1 {
                     workspace.panes[workspace.panes.startIndex].workingDirectory = repos[0].path
                 } else if let workingDirectory {
                     workspace.panes[workspace.panes.startIndex].workingDirectory = workingDirectory
                 }
 
-                // Register repos and add associations
+                // Register repos and add associations. When a worktree seed
+                // is present, its single repo's association points at the
+                // worktree path + branch (mirrors `.worktreeCreated`).
                 for repo in repos {
                     if state.repoRegistry[id: repo.id] == nil {
                         state.repoRegistry.append(repo)
@@ -1066,9 +1100,15 @@ struct AppReducer {
                     let assoc = RepoAssociation(
                         id: uuid(),
                         repoID: repo.id,
-                        worktreePath: repo.path
+                        worktreePath: worktree?.path ?? repo.path,
+                        branchName: worktree?.branchName
                     )
                     workspace.repoAssociations.append(assoc)
+                    // A worktree flow promotes the repo out of
+                    // auto-discovered status (mirrors `.worktreeCreated`).
+                    if worktree != nil {
+                        state.repoRegistry[id: repo.id]?.isAutoDiscovered = false
+                    }
                 }
 
                 state.workspaces.append(workspace)
@@ -1129,6 +1169,7 @@ struct AppReducer {
                 let cwd = workspace.panes.first!.workingDirectory
                 let opacity = ghosttyConfig.backgroundOpacity
                 let workspaceID = workspace.id
+                let profileName = workspace.profileName
                 let watcherSeeds: [Effect<Action>] = workspace.repoAssociations.map { assoc in
                     Effect.send(.startHeadWatcher(
                         workspaceID: workspaceID,
@@ -1136,14 +1177,67 @@ struct AppReducer {
                         worktreePath: assoc.worktreePath
                     ))
                 }
+                // A worktree seed create should refresh the new (now-active)
+                // workspace's git status immediately, matching `.worktreeCreated`
+                // — otherwise the dirty/ahead badge lags until the 30s timer or
+                // a HEAD change (review of #222).
+                let gitStatusSeed: [Effect<Action>] = worktree != nil ? [.send(.refreshGitStatus)] : []
                 return .merge(
                     [
                         .run { _ in
-                            await surfaceManager.createSurface(paneID: paneID, workingDirectory: cwd, backgroundOpacity: opacity)
+                            let env = workspaceProfiles.resolveEnv(
+                                profileName ?? WorkspaceProfilesClient.defaultProfileName
+                            )
+                            await surfaceManager.createSurface(paneID: paneID, workingDirectory: cwd, backgroundOpacity: opacity, env: env)
                         },
                         .send(.persistState)
-                    ] + watcherSeeds
+                    ] + watcherSeeds + gitStatusSeed
                 )
+
+            case .createWorkspaceWithWorktree(let name, let color, let repo, let worktreeName, let branchName, let updateMain, let groupID, let profileName, let id):
+                // Reset any error from a prior failed attempt so a retry
+                // starts clean (the sheet observes this string).
+                state.worktreeCreationError = nil
+                // Sanitize before the raw name reaches the filesystem path or
+                // git ref — the same single source of truth the inspector
+                // flow uses (issue #218). Invalid input surfaces immediately
+                // and keeps the sheet open (no async work dispatched).
+                guard let folderName = WorkspaceFeature.State.sanitizedGitName(from: worktreeName) else {
+                    state.worktreeCreationError = "\"\(worktreeName)\" isn't a usable worktree name. Use letters, numbers, or - _ / . characters."
+                    return .none
+                }
+                guard let safeBranch = WorkspaceFeature.State.sanitizedGitName(from: branchName) else {
+                    state.worktreeCreationError = "\"\(branchName)\" isn't a usable branch name. Use letters, numbers, or - _ / . characters."
+                    return .none
+                }
+                let basePath = state.settings.resolvedWorktreeBasePath(forRepoPath: repo.path)
+                let worktreePath = "\(basePath)/\(folderName)"
+                let repoPath = repo.path
+                return .run { [gitService] send in
+                    do {
+                        try await performWorktreeAdd(
+                            gitService: gitService,
+                            repoPath: repoPath,
+                            worktreePath: worktreePath,
+                            branch: safeBranch,
+                            updateMain: updateMain
+                        )
+                        await send(.createWorkspace(
+                            name: name,
+                            color: color,
+                            repos: [repo],
+                            groupID: groupID,
+                            profileName: profileName,
+                            id: id,
+                            worktree: WorktreeSeed(path: worktreePath, branchName: safeBranch)
+                        ))
+                    } catch {
+                        await send(.worktreeCreationFailed(
+                            workspaceID: nil,
+                            error: worktreeErrorMessage(error)
+                        ))
+                    }
+                }
 
             case .deleteWorkspace(let id):
                 guard let workspace = state.workspaces[id: id] else { return .none }
@@ -2003,8 +2097,9 @@ struct AppReducer {
                 // Create surfaces for shell panes only (markdown panes use WKWebView)
                 let panesToResume = resumablePanes
                 let opacity = ghosttyConfig.backgroundOpacity
-                let shellPanes: [(id: UUID, cwd: String)] = workspaces.flatMap { ws in
-                    ws.panes.filter { $0.type == .shell }.map { (id: $0.id, cwd: $0.workingDirectory) }
+                let shellPanes: [(id: UUID, cwd: String, profile: String?)] = workspaces.flatMap { ws in
+                    ws.panes.filter { $0.type == .shell }
+                        .map { (id: $0.id, cwd: $0.workingDirectory, profile: ws.profileName) }
                 }
                 // Seed HEAD watchers for every persisted RepoAssociation so
                 // sidebar branch/status updates land within ~200ms of any
@@ -2023,11 +2118,27 @@ struct AppReducer {
                 return .merge(
                     [
                         .run { send in
+                            // Resolve each workspace profile once, not per
+                            // pane — resolveEnv re-reads the config file.
+                            // Restored panes carry their workspace's profile
+                            // env so the `claude --resume` below lands in a
+                            // PTY that's already on the right account.
+                            var envCache: [String: [String: String]] = [:]
                             for pane in shellPanes {
+                                let profile = pane.profile
+                                    ?? WorkspaceProfilesClient.defaultProfileName
+                                let env: [String: String]
+                                if let cached = envCache[profile] {
+                                    env = cached
+                                } else {
+                                    env = workspaceProfiles.resolveEnv(profile)
+                                    envCache[profile] = env
+                                }
                                 await surfaceManager.createSurface(
                                     paneID: pane.id,
                                     workingDirectory: pane.cwd,
-                                    backgroundOpacity: opacity
+                                    backgroundOpacity: opacity,
+                                    env: env
                                 )
                             }
 

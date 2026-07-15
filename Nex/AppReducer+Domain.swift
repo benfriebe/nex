@@ -137,6 +137,7 @@ extension AppReducer {
         // Everything not yet extracted into its own reduce-block.
         case .appLaunched,
              .createWorkspace,
+             .createWorkspaceWithWorktree,
              .deleteWorkspace,
              .moveWorkspace,
              .moveGroup,

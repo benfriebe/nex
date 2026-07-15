@@ -420,6 +420,23 @@ struct PaneHeaderView: View {
         NSPasteboard.general.setString(pane.workingDirectory, forType: .string)
     }
 
+    /// Fields that tick continuously while an agent works (status flips,
+    /// terminal-title/activity updates). They drive only the header's live
+    /// visuals — the status dot, path text, and agent badge — and are
+    /// deliberately EXCLUDED from `==` below so an agent tick cannot force a
+    /// re-render of the menu-host copy of this view and rebuild its
+    /// `.contextMenu` NSMenu out from under an open submenu (issue #227,
+    /// pane-header variant). Visual freshness for these fields comes from the
+    /// separate live (non-hit-testing) overlay copy in `PaneGridView`.
+    private static func menuStableProjection(_ pane: Pane) -> Pane {
+        var p = pane
+        p.status = .idle
+        p.title = nil
+        p.agentStartedAt = nil
+        p.lastActivityAt = pane.createdAt
+        return p
+    }
+
     /// Show a popup menu at the current mouse location. Using an
     /// NSMenu rather than SwiftUI's `Menu` lets the button match the
     /// visual size of the surrounding plain Buttons — `Menu` adds
@@ -484,6 +501,36 @@ struct PaneHeaderView: View {
             return "diff: \(scope)"
         }
         return chromeHomeAbbreviated(pane.title ?? pane.workingDirectory)
+    }
+}
+
+// MARK: - Equatable (menu-stability boundary)
+
+/// `@preconcurrency` because `View` is `@MainActor`-isolated and `Equatable`
+/// is not: SwiftUI only ever compares views during a main-actor render pass,
+/// so the conformance is safe, and this silences the Swift 6 actor-isolation
+/// diagnostic (the same pattern the codebase uses for Obj-C conformances).
+extension PaneHeaderView: @preconcurrency Equatable {
+    /// Two header views are "equal" — and SwiftUI may therefore skip
+    /// re-rendering (and rebuilding the `.contextMenu` NSMenu) — whenever
+    /// nothing that changes the menu's structure or the header's chrome has
+    /// changed. High-frequency agent-activity fields (status / title /
+    /// started-at / last-activity) are projected out via
+    /// `menuStableProjection`, so a churning pane no longer dismisses an open
+    /// Status / Move-to-Workspace submenu (issue #227). The stored closures are
+    /// intentionally ignored: they are captured per pane id and stay correct
+    /// even when a comparison skips a re-render. `PaneGridView` renders a second
+    /// live, non-hit-testing copy on top so the status dot / path / badge still
+    /// update in real time.
+    static func == (lhs: PaneHeaderView, rhs: PaneHeaderView) -> Bool {
+        menuStableProjection(lhs.pane) == menuStableProjection(rhs.pane)
+            && lhs.isFocused == rhs.isFocused
+            && lhs.isZoomed == rhs.isZoomed
+            && lhs.isEditing == rhs.isEditing
+            && lhs.isSyncExcluded == rhs.isSyncExcluded
+            && lhs.workspaceSyncActive == rhs.workspaceSyncActive
+            && lhs.otherWorkspaces.map(\.id) == rhs.otherWorkspaces.map(\.id)
+            && lhs.otherWorkspaces.map(\.name) == rhs.otherWorkspaces.map(\.name)
     }
 }
 

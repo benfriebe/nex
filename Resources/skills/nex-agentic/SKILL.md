@@ -106,6 +106,13 @@ nex pane close
 # --target, renames the calling pane; with --target, renames any pane.
 nex pane name [--target <name-or-uuid>] [--workspace <name-or-uuid>] <label>
 
+# Resize a pane against its immediate split sibling. Set an exact share
+# with --ratio, or nudge with --grow/--shrink (default step 0.05). The
+# key use is keeping the coordinator prominent after a fan-out (below):
+# it addresses the pane by name, so it does NOT depend on focus the way
+# `layout select main-*` does. Effective share clamps to [0.1, 0.9].
+nex pane resize [--target <name-or-uuid>] [--workspace <name-or-uuid>] (--ratio <0..1> | --grow [amt] | --shrink [amt])
+
 # Send text to another pane (typed into its PTY + Enter)
 # Label resolution is scoped to the sender's own workspace by default.
 # Pass --workspace <name-or-id> to target another workspace
@@ -115,12 +122,87 @@ nex pane name [--target <name-or-uuid>] [--workspace <name-or-uuid>] <label>
 # escape sequences, partial input, paste-safe structured content).
 nex pane send [--bare] [--json] --target <label-or-uuid> [--workspace <name-or-uuid>] <command...>
 
-# List panes (only command that returns data — use for reconciliation)
+# List panes (read-only inventory — use for reconciliation)
 nex pane list [--workspace <name-or-id> | --current] [--json] [--no-header]
+
+# Read another pane's terminal contents as text (viewport, or full
+# scrollback with --scrollback). WITHOUT --target it captures the CALLING
+# pane — always pass --target to read a worker. The target is flag-only:
+# a bare `nex pane capture <uuid>` is rejected, not treated as --target.
+nex pane capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--lines N] [--scrollback]
+
+# Move a pane so it docks against another pane (CLI form of GUI
+# drag-drop). --below stacks the target under the anchor; --above /
+# --left-of / --right-of are the other edges. Both panes resolve within
+# the same workspace. Pairs with `pane resize` for full layout control.
+nex pane move --target <name-or-uuid> (--above|--below|--left-of|--right-of) <anchor> [--workspace <name-or-uuid>] [--json]
+
+# Move the calling pane toward its neighbour (directional form).
+nex pane move <left|right|up|down>
+
+# Move a pane to another workspace (creates it with --create).
+nex pane move-to-workspace --to-workspace <name-or-uuid> [--create]
+
+# List workspace groups and their ordered member workspaces
+nex group list [--json] [--no-header]
+
+# List every workspace (grouped + top-level) with its parent group
+nex workspace list [--json] [--no-header]
 
 # Print current pane's UUID (local; no socket). Exit 1 if not in Nex.
 nex pane id
 ```
+
+### Keep the layout readable (grid + prominent coordinator)
+
+`nex pane split` always bisects the target pane 50/50 with no
+rebalancing. So if you loop the **same** split direction against the
+same pane — `for w in ...; do nex pane split --direction horizontal;
+done` — the 1st worker takes half, the 2nd a quarter, the 3rd an
+eighth… after 4-5 workers the panes are unreadable slivers. Do NOT do
+that. Instead, after spawning the workers, reflow with the built-in
+tmux-style layouts:
+
+```bash
+# Balanced grid — panes stay roughly square, not thin columns.
+nex layout select tiled
+
+# Or: one large "main" pane + the rest tiled beside it.
+nex layout select main-vertical    # main on the left, workers stacked right
+nex layout select main-horizontal  # main on top,    workers in a row below
+```
+
+**Caveat — which pane becomes "main".** `layout select main-*` makes
+the **currently focused** pane the large "main" pane, and every
+`nex pane split` moves focus to the pane it just created. So right
+after the spawn loop the focused pane is the *last worker*, not the
+coordinator — running `main-vertical` then would enlarge a worker, and
+there is no `nex pane focus` CLI to re-focus the coordinator first.
+
+The focus-independent lever is `nex pane resize`, which addresses the
+pane **by name**. `--ratio` is the pane's *share* of its split, so use
+a value **> 0.5** to make the coordinator the larger side:
+
+```bash
+nex layout select tiled                              # balanced grid first
+nex pane resize --target coordinator --ratio 0.65    # coordinator > its sibling
+```
+
+**What resize does and doesn't do.** `pane resize` only rebalances the
+coordinator's *immediate* split (its boundary with the one neighbour it
+shares that split with) — it does **not** make the coordinator dominate
+the whole grid the way a `main-*` layout's root split does. So:
+
+- Want a readable grid where the coordinator is merely the larger cell?
+  `layout select tiled` + `pane resize --target coordinator --ratio 0.65`.
+  Focus-independent, safe to run straight from the coordinator script.
+- Want one pane that dominates the entire workspace? `layout select
+  main-vertical` — but it enlarges whatever is *focused*, so it's only
+  reliable when the coordinator is the focused pane at call time.
+
+`pane resize` also lets a coordinator fine-tune any pane at any time
+(`--grow` / `--shrink` to nudge, `--ratio` to set exactly) without
+touching the GUI. The effective share clamps to `[0.1, 0.9]`.
 
 ### `nex doctor` — when CLI commands stop working
 
@@ -150,12 +232,12 @@ by default to avoid stderr spam when Nex is closed; set
 
 ### `pane list` — reconcile with live state
 
-`pane list` is the only Nex command that returns data. Use it whenever a
-coordinator needs to know what panes actually exist right now — panes can
-be closed by the user, crash, or be moved between workspaces. `pane send`
-exits non-zero with a structured error on a missing/ambiguous target,
-but checking `pane list` first lets a coordinator skip
-sends to dead workers and surface a clearer message.
+`pane list` is Nex's read-only pane inventory. Use it whenever a coordinator
+needs to know what panes actually exist right now — panes can be closed by
+the user, crash, or be moved between workspaces. `pane send` exits non-zero
+with a structured error on a missing/ambiguous target, but checking
+`pane list` first lets a coordinator skip sends to dead workers and surface
+a clearer message.
 
 ```bash
 # Human-readable (default)
@@ -171,8 +253,14 @@ nex pane list --current
 nex pane list --workspace nex
 ```
 
+The default table's `ID` column prints the full pane UUID, so you can
+copy it straight into `--target <uuid>` (the agent session id in
+`SESSION` stays truncated — it's never a `--target`). Scripts should
+still prefer `--json`.
+
 Each JSON entry includes: `id`, `label`, `type` (`shell` / `markdown` /
 `scratchpad` / `diff` / `web`), `title`, `workspace_id`, `workspace_name`,
+optional `group_id` and `group_name` (both absent for top-level workspaces),
 `working_directory`, `git_branch`, `status` (`idle`/`running`/
 `waitingForInput`), `agent_session_id`, `is_focused`,
 `is_active_workspace`, `created_at`, `last_activity_at`.
@@ -200,7 +288,48 @@ nex pane list --json | jq -r '.[] | select(.label | startswith("worker-"))
 
 # Find a specific pane's UUID before a `pane send`
 uuid=$(nex pane list --json | jq -r '.[] | select(.label == "build") | .id')
+
+# Find my workspace's group (`top-level` means it has no parent group)
+nex pane list --json | jq -r --arg pane "$NEX_PANE_ID" \
+  '.[] | select(.id == $pane) | .group_name // "top-level"'
 ```
+
+### `group list` — inspect workspace grouping
+
+Use `group list` when an orchestrator needs the full sidebar grouping rather
+than the parent of one pane's workspace. Groups and member workspaces retain
+their sidebar order.
+
+```bash
+# Human-readable group table
+nex group list
+
+# JSON for scripts; an empty state is []
+nex group list --json
+```
+
+Each JSON group includes `id`, `name`, optional `color`, and `workspaces`.
+Each `workspaces` entry contains the member workspace's `id` and `name`.
+
+### `workspace list` — inventory every workspace
+
+`group list` only shows *grouped* workspaces. When an orchestrator needs the
+full workspace inventory (top-level and grouped together, in sidebar order),
+use `workspace list`. Unlike the sidebar itself, members of a collapsed group
+are still listed.
+
+```bash
+# Human-readable table (ID, NAME, GROUP, PANES, ACTIVE)
+nex workspace list
+
+# JSON for scripts; an empty state is []
+nex workspace list --json
+```
+
+Each JSON entry includes `id`, `name`, `color`, `pane_count`, `is_active`,
+and optional `group_id` / `group_name` (both absent for a top-level
+workspace). The `group_name` field matches the one on `pane list`, so
+`.group_name // "top-level"` answers "which group is this workspace in".
 
 ### Event Commands (Agent Lifecycle)
 
@@ -233,8 +362,102 @@ still has background work in flight reads correctly. The count shows in
 ### Workspace Commands
 
 ```bash
-nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray]
+# Create a workspace (request/response). Replies with the new workspace's
+# id — `created workspace <name> (<uuid>)`, or the raw {ok,workspace_id,
+# workspace_name,group?} object with --json — so a coordinator can capture
+# the id to target it later. --group creates the group if missing.
+# --profile assigns a workspace profile (env-var injection into every pane).
+# --worktree creates a git worktree inline and opens the workspace's first
+# pane in it — ideal for isolating a fan-out worker on its own branch:
+#   --worktree <name>   worktree dir is <worktree-base-path>/<name>
+#   --branch <name>     branch to create/check out (defaults to <name>)
+#   --repo <path>       source repo (defaults to the CLI's cwd)
+#   --update-main       branch off a fresh origin/<default> (fetches first)
+#   --group <existing>  composes with --worktree, but the group must already
+#                       exist (an unknown/ambiguous name is rejected — it
+#                       won't create one, to avoid orphaning it on failure)
+# The reply adds `worktree_path` + `branch`; the create runs with a longer
+# read timeout so a slow `git fetch` isn't a spurious failure.
+nex workspace create [--name "..."] [--path /dir] [--color blue|green|red|yellow|purple|orange|pink|gray] [--group <name>] [--profile <name>] [--worktree <name> [--branch <name>] [--repo <path>] [--update-main]] [--json]
+
+# Assign or clear a workspace's profile (fire-and-forget). Applies to the
+# NEXT pane spawned in the workspace; existing panes keep their env.
+nex workspace profile <name-or-id> (<profile> | --clear)
+
+# Delete one or more workspaces by name-or-id (request/response). Deletes
+# outright — no CLI prompt — closing any remaining panes. Refuses to
+# delete the last remaining workspace. Exits non-zero if any delete fails.
+#   --force / -y      delete even if the workspace has RUNNING AGENTS.
+#                     Without it, a workspace with active agents
+#                     (running/waiting panes) is refused (mirrors the
+#                     app-quit warning); the reply carries `active_agents`.
+#                     In the GUI this is a "Delete anyway?" dialog with a
+#                     "Don't ask again" checkbox instead.
+#   --prune-worktree  also `git worktree remove` the deleted workspace's
+#                     directory. Best-effort + non-forcing: git refuses a
+#                     dirty/locked worktree or the main checkout (a Warning,
+#                     not a failure). An *empty* workspace has no directory
+#                     to prune — delete it before closing its panes if you
+#                     want the worktree reclaimed automatically.
+#   --json            compact per-id result array: each row has `id` (the
+#                     arg as typed), `ok`, and on success `workspace_id`,
+#                     `workspace_name`, `path?`, `worktree_pruned?`,
+#                     `worktree_error?` — or `error` on failure.
+# Exit code reflects DELETES only: a prune that git refuses is a Warning,
+# not a failure, so the command still exits 0 if the workspace was deleted.
+nex workspace delete <name-or-id> [<name-or-id> ...] [--force|-y] [--prune-worktree] [--json]
 ```
+
+### Workspace Profiles (multi-account env injection)
+
+A workspace profile is a named env-var set defined in
+`~/.config/nex/config`, one variable per line (repeated lines with the
+same name merge, later lines win). Manage them by hand in the config
+file or via **Settings → Profiles** (both write the same lines):
+
+```
+profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work
+profile = personal:CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+```
+
+Assign one to a workspace (`workspace create --profile`, `workspace
+profile`, the inspector picker, or the sidebar context menu) and every
+pane PTY spawned in that workspace from then on gets those vars plus
+`NEX_PROFILE=<name>`. The flagship use case is running multiple Claude
+Code accounts side by side — one workspace per `CLAUDE_CONFIG_DIR` —
+and the injection survives restart: restored panes respawn with the
+profile env, so auto-resumed agent sessions (`claude --resume`) stay
+on their workspace's account.
+
+The built-in **`default` profile** is the baseline: a workspace with no
+explicit assignment is on `default`, so every pane always carries
+`NEX_PROFILE` (`default` unless assigned). It always exists (virtual
+until customized), can't be renamed or deleted in Settings, and adding
+vars to it (Settings → Profiles or `profile = default:KEY=value` lines)
+applies them to every unassigned workspace. Selecting `default` in the
+UI, `nex workspace profile <ws> default`, and `--clear` are equivalent.
+
+Rules worth knowing:
+
+- **Spawn-time only.** Assignment changes never touch live PTYs; open
+  a fresh pane after assigning. Corollary: `pane move-to-workspace`
+  moves a live PTY, so the pane keeps its birth env even when the
+  destination workspace has a different profile. Workspaces created
+  with a profile up front (the New Workspace sheet's Profile picker or
+  `workspace create --profile`) spawn their first pane already on it.
+- Profile definitions are re-read from the config file on every spawn,
+  so editing values applies to new panes without restarting Nex.
+- Profile names cannot contain `:` or `=`; values may contain both.
+  Quotes in values are literal (no stripping). A leading `~` in the
+  value is tilde-expanded.
+- `NEX_PANE_ID` and `PATH` are reserved — profile entries for them are
+  ignored.
+- Assigning a profile with no definitions in the config is allowed
+  (`workspace create --profile` works before the config lines exist);
+  panes then get only `NEX_PROFILE=<name>` and a warning is logged.
+- `workspace profile` is fire-and-forget: an unknown or ambiguous
+  workspace name is a silent no-op (same semantics as `workspace
+  move`). UUIDs always win over names.
 
 ### File Commands
 
@@ -511,7 +734,8 @@ Smoke tests can still use `data:` URLs for navigation, `capture
 ### Key Behaviors
 
 - **Target resolution** for `pane send` / `pane send-key` / `pane close` /
-  `pane capture` / `pane split` / `pane create` / `pane name`:
+  `pane capture` / `pane split` / `pane create` / `pane name` / `pane resize` /
+  `pane move --target`:
   UUIDs are matched globally. Labels are scoped to the sender's own
   workspace (via `NEX_PANE_ID`) unless `--workspace <name-or-id>` is
   passed; a bare label without either explicit or implicit scope is
@@ -618,10 +842,17 @@ Each task file should include:
 #### Step 3: Spawn named worker panes
 
 ```bash
-# Create named worker panes
-nex pane split --name worker-1 --direction vertical
-nex pane split --name worker-2 --direction horizontal
-nex pane split --name worker-3 --direction horizontal
+# Create named worker panes. Direction barely matters here — we reflow
+# into a clean grid immediately after, so don't hand-tune splits.
+nex pane split --name worker-1
+nex pane split --name worker-2
+nex pane split --name worker-3
+
+# Reflow into a balanced grid, then keep the coordinator prominent.
+# (Do NOT rely on repeated same-direction splits — they collapse into
+# unreadable slivers. See "Keep the layout readable" above.)
+nex layout select tiled
+nex pane resize --target coordinator --ratio 0.65
 ```
 
 **Timing**: add a short delay (1-2 seconds) between spawning panes to allow
@@ -907,6 +1138,15 @@ Workers should write results in this format:
    overwhelming the terminal. Spawn 3-4, wait for them to complete, then spawn
    the next batch.
 
+9. **Reflow the layout after spawning; never loop a single split direction.**
+   `nex pane split` bisects 50/50 with no rebalancing, so repeated
+   same-direction splits collapse into unreadable slivers. After the spawn
+   loop, run `nex layout select tiled` for a balanced grid, then
+   `nex pane resize --target coordinator --ratio 0.65` to keep the coordinator
+   prominent. Prefer `pane resize` over `layout select main-*` for the
+   coordinator: `main-*` enlarges the *focused* pane, and focus sits on the
+   last-spawned worker after the loop.
+
 ## Coordinator Script Template
 
 Here is a complete coordinator script you can adapt:
@@ -928,11 +1168,19 @@ rm -f "$RESULT_DIR"/*.md  # Clean previous results
 
 # Task files should already exist in $TASK_DIR/<worker-name>.md
 
-# Spawn workers
+# Spawn workers. Don't loop a single --direction: raw 50/50 splits
+# collapse into unreadable slivers. Spawn, then reflow into a grid.
 for worker in "${WORKERS[@]}"; do
-  nex pane split --name "$worker" --direction horizontal
+  nex pane split --name "$worker"
   sleep 2
 done
+
+# Reflow into a balanced grid and keep the coordinator prominent.
+# `pane resize` addresses the coordinator by name, so it works even
+# though focus is on the last-spawned worker after the loop (unlike
+# `layout select main-*`, which enlarges whichever pane is focused).
+nex layout select tiled
+nex pane resize --target coordinator --ratio 0.65
 
 # Start agents
 for worker in "${WORKERS[@]}"; do

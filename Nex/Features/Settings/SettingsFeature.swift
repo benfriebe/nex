@@ -42,6 +42,12 @@ struct SettingsFeature {
         var newGroupPlacement: SidebarPlacement = .endOfList
         var newWorkspacePlacement: SidebarPlacement = .endOfList
         var confirmQuitWhenActive: Bool = true
+        /// Warn before deleting a workspace that still has active agents
+        /// (running or waiting-for-input panes). The GUI shows a
+        /// "Delete anyway?" dialog with a "Don't ask again" checkbox that
+        /// flips this flag; the CLI's `--force` is the scripting
+        /// equivalent and is honoured independently of this setting.
+        var confirmWorkspaceDeleteWhenActive: Bool = true
         /// Master toggle for the status-bar system stats.
         var showSystemStats: Bool = true
         /// Which metrics are shown (rawValues of `SystemStatKind`).
@@ -98,6 +104,7 @@ struct SettingsFeature {
         case setNewGroupPlacement(SidebarPlacement)
         case setNewWorkspacePlacement(SidebarPlacement)
         case setConfirmQuitWhenActive(Bool)
+        case setConfirmWorkspaceDeleteWhenActive(Bool)
         case setShowSystemStats(Bool)
         case setSystemStatEnabled(SystemStatKind, Bool)
         case setShowSystemStatGraphs(Bool)
@@ -110,6 +117,7 @@ struct SettingsFeature {
         case setSidebarColorIntensity(Double)
         case setSidebarStyle(SidebarStyleParam, Double)
         case refreshConfirmQuitWhenActive
+        case refreshConfirmWorkspaceDeleteWhenActive
         case selectTheme(NexTheme?)
         case applyAppearance(opacity: Double, r: Double, g: Double, b: Double, theme: NexTheme?)
         /// Apply an imported shareable chrome-style theme: overwrites the colour
@@ -133,6 +141,7 @@ struct SettingsFeature {
     static let defaultsKeyNewGroupPlacement = "settings.newGroupPlacement"
     static let defaultsKeyNewWorkspacePlacement = "settings.newWorkspacePlacement"
     static let defaultsKeyConfirmQuitWhenActive = QuitGateDefaults.confirmQuit
+    static let defaultsKeyConfirmWorkspaceDeleteWhenActive = WorkspaceDeleteGateDefaults.confirm
     static let defaultsKeyShowSystemStats = "settings.showSystemStats"
     static let defaultsKeyEnabledSystemStats = "settings.enabledSystemStats"
     static let defaultsKeyShowSystemStatGraphs = "settings.showSystemStatGraphs"
@@ -179,6 +188,9 @@ struct SettingsFeature {
                 }
                 if userDefaults.hasKey(Self.defaultsKeyConfirmQuitWhenActive) {
                     state.confirmQuitWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmQuitWhenActive)
+                }
+                if userDefaults.hasKey(Self.defaultsKeyConfirmWorkspaceDeleteWhenActive) {
+                    state.confirmWorkspaceDeleteWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmWorkspaceDeleteWhenActive)
                 }
                 if userDefaults.hasKey(Self.defaultsKeyShowSystemStats) {
                     state.showSystemStats = userDefaults.boolForKey(Self.defaultsKeyShowSystemStats)
@@ -306,6 +318,11 @@ struct SettingsFeature {
                 userDefaults.setBool(enabled, Self.defaultsKeyConfirmQuitWhenActive)
                 return .none
 
+            case .setConfirmWorkspaceDeleteWhenActive(let enabled):
+                state.confirmWorkspaceDeleteWhenActive = enabled
+                userDefaults.setBool(enabled, Self.defaultsKeyConfirmWorkspaceDeleteWhenActive)
+                return .none
+
             case .setShowSystemStats(let enabled):
                 state.showSystemStats = enabled
                 userDefaults.setBool(enabled, Self.defaultsKeyShowSystemStats)
@@ -431,6 +448,16 @@ struct SettingsFeature {
                 }
                 return .none
 
+            case .refreshConfirmWorkspaceDeleteWhenActive:
+                // Same as `.refreshConfirmQuitWhenActive`, for the
+                // workspace-delete dialog's "Don't ask again" checkbox.
+                if userDefaults.hasKey(Self.defaultsKeyConfirmWorkspaceDeleteWhenActive) {
+                    state.confirmWorkspaceDeleteWhenActive = userDefaults.boolForKey(Self.defaultsKeyConfirmWorkspaceDeleteWhenActive)
+                } else {
+                    state.confirmWorkspaceDeleteWhenActive = true
+                }
+                return .none
+
             case .selectTheme(let theme):
                 state.selectedTheme = theme
                 userDefaults.setString(theme?.id ?? "", Self.defaultsKeySelectedTheme)
@@ -497,8 +524,15 @@ struct SettingsFeature {
                         // scratchpad / diff panes pick up the new background live.
                         NotificationCenter.default.post(name: GhosttyConfigClient.changedNotification, object: nil)
 
-                        // Update window compositing
-                        if let window = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
+                        // Update window compositing. Prefer the authoritative
+                        // main window over the positional `NSApp.windows`
+                        // heuristic: this fires while the Settings window is
+                        // key and frontmost, and Settings is a non-panel
+                        // visible window, so `first(where:)` can latch onto it
+                        // and composite terminal transparency onto the wrong
+                        // window (same root cause as issue #251).
+                        if let window = MainWindowRegistry.primary
+                            ?? NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
                             window.isOpaque = opacity >= 1.0
                             window.backgroundColor = opacity < 1.0
                                 ? .white.withAlphaComponent(0.001)

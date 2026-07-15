@@ -1558,6 +1558,96 @@ struct WorkspaceFeatureTests {
         // No state change asserted: state.searchingPaneID stays nil.
     }
 
+    @Test func toggleSearchOpensForWebPane() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [Pane(id: paneID, type: .web, workingDirectory: "/tmp")]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+        workspace.webPanes = [
+            paneID: WebPaneState(
+                tabs: [WebTab(id: UUID(), url: "https://example.com")],
+                activeTabID: nil,
+                isPrivate: false
+            )
+        ]
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleSearch) { state in
+            state.searchingPaneID = paneID
+            state.searchNeedle = ""
+            state.searchTotal = nil
+            state.searchSelected = nil
+        }
+    }
+
+    @Test func searchCloseClearsStateForWebPane() async {
+        let paneID = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [Pane(id: paneID, type: .web, workingDirectory: "/tmp")]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+        workspace.webPanes = [
+            paneID: WebPaneState(
+                tabs: [WebTab(id: UUID(), url: "https://example.com")],
+                activeTabID: nil,
+                isPrivate: false
+            )
+        ]
+        workspace.searchingPaneID = paneID
+        workspace.searchNeedle = "foo"
+        workspace.searchTotal = 3
+        workspace.searchSelected = 1
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.searchClose) { state in
+            state.searchingPaneID = nil
+            state.searchNeedle = ""
+            state.searchTotal = nil
+            state.searchSelected = nil
+        }
+    }
+
+    @Test func webPaneTabSwitchWhileSearchingPreservesSearchState() async {
+        let paneID = UUID()
+        let tabA = UUID()
+        let tabB = UUID()
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.panes = [Pane(id: paneID, type: .web, workingDirectory: "/tmp")]
+        workspace.layout = .leaf(paneID)
+        workspace.focusedPaneID = paneID
+        workspace.webPanes = [
+            paneID: WebPaneState(
+                tabs: [WebTab(id: tabA, url: "https://a.example"), WebTab(id: tabB, url: "https://b.example")],
+                activeTabID: tabA,
+                isPrivate: false
+            )
+        ]
+        workspace.searchingPaneID = paneID
+        workspace.searchNeedle = "foo"
+
+        let store = TestStore(initialState: workspace) { WorkspaceFeature() } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Switching the active tab retargets find (no coordinator in
+        // tests, so the effect is a no-op) without dropping the bar.
+        await store.send(.webPaneTabSelect(paneID: paneID, tabID: tabB)) { state in
+            state.webPanes[paneID]?.activeTabID = tabB
+        }
+        #expect(store.state.searchingPaneID == paneID)
+        #expect(store.state.searchNeedle == "foo")
+    }
+
     @Test func toggleMarkdownEditDismissesActiveSearch() async {
         let paneID = UUID()
         var workspace = WorkspaceFeature.State(name: "Test")

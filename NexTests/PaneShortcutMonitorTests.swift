@@ -157,6 +157,123 @@ struct PaneShortcutMonitorTests {
         #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
     }
 
+    // MARK: - Web pane priority layer (issue #229)
+
+    /// Two-pane workspace where one pane is a web pane. The leaf order
+    /// (first/second) drives focus-prev/next traversal, so callers place
+    /// the web pane in the leaf position the test needs.
+    private static func makeWebAndShellWorkspace(
+        firstPaneID: UUID,
+        secondPaneID: UUID,
+        webPaneID: UUID,
+        focusedPaneID: UUID
+    ) -> WorkspaceFeature.State {
+        WorkspaceFeature.State(
+            id: wsID, name: "Test", slug: "test", color: .blue,
+            panes: [
+                Pane(id: firstPaneID, type: firstPaneID == webPaneID ? .web : .shell),
+                Pane(id: secondPaneID, type: secondPaneID == webPaneID ? .web : .shell)
+            ],
+            layout: .split(.horizontal, ratio: 0.5, first: .leaf(firstPaneID), second: .leaf(secondPaneID)),
+            focusedPaneID: focusedPaneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+    }
+
+    @Test func cmdOpenBracketInWebPaneFocusesPreviousPane() {
+        // Issue #229: ⌘[ used to be swallowed by the web priority layer
+        // (back). It now falls through to focus-previous even inside a
+        // web pane. Web pane is the focused second leaf; ⌘[ moves to the
+        // first (shell) leaf.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID2, focusedPaneID: Self.paneID2
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(keyEvent(keyCode: 33, modifierFlags: .command))
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
+    @Test func cmdCloseBracketInWebPaneFocusesNextPane() {
+        // Web pane is the focused first leaf; ⌘] moves to the second
+        // (shell) leaf instead of triggering forward.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID1, focusedPaneID: Self.paneID1
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(keyEvent(keyCode: 30, modifierFlags: .command))
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID2)
+    }
+
+    @Test func cmdLeftArrowInWebPaneIsConsumedForBack() {
+        // ⌘← is the new back binding: the priority layer consumes it and
+        // does NOT change pane focus.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID2, focusedPaneID: Self.paneID2
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(
+            keyEvent(keyCode: 123, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID2)
+    }
+
+    @Test func cmdRightArrowInWebPaneIsConsumedForForward() {
+        // ⌘→ is the new forward binding: consumed, focus unchanged.
+        let ws = Self.makeWebAndShellWorkspace(
+            firstPaneID: Self.paneID1, secondPaneID: Self.paneID2,
+            webPaneID: Self.paneID1, focusedPaneID: Self.paneID1
+        )
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handled = monitor.handleKeyEvent(
+            keyEvent(keyCode: 124, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handled == true)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
+    @Test func cmdArrowInShellPaneIsNotConsumed() {
+        // The web back/forward binding is web-pane-only. In a shell pane
+        // plain ⌘← / ⌘→ have no default binding, so the monitor must
+        // defer (return false) and leave line-navigation to the terminal
+        // — no regression for non-web panes.
+        let ws = Self.makeTwoPaneWorkspace() // both shell, focus paneID1
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws], activeWorkspaceID: Self.wsID
+        )
+
+        let handledLeft = monitor.handleKeyEvent(
+            keyEvent(keyCode: 123, modifierFlags: [.command, .numericPad, .function])
+        )
+        let handledRight = monitor.handleKeyEvent(
+            keyEvent(keyCode: 124, modifierFlags: [.command, .numericPad, .function])
+        )
+
+        #expect(handledLeft == false)
+        #expect(handledRight == false)
+        #expect(store.workspaces[id: Self.wsID]?.focusedPaneID == Self.paneID1)
+    }
+
     // MARK: - Open web pane (menu bar action)
 
     @Test func cmdShiftOIsNotConsumedByMonitor() {
@@ -454,5 +571,77 @@ struct PaneShortcutMonitorTests {
         #expect(handled == true)
         #expect(store.workspaces[id: Self.wsID]!.panes.count == 2)
         #expect(store.workspaces[id: Self.wsID]!.panes.last?.type == .scratchpad)
+    }
+
+    // MARK: - Secondary-window guard (issue #251)
+
+    // Regression + reproduction for issue #251: pane shortcuts intermittently
+    // stopped working (Cmd+W closed the whole window, Cmd+D no-op) because the
+    // guard identified "the main window" positionally via
+    // `NSApp.windows.first(where:)`, whose ordering AppKit does not guarantee.
+    // These exercise the decision directly with real window identities.
+
+    @Test func doesNotDeferWhenNoKeyWindow() {
+        // No key window (the state in unit tests) — never defer.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: nil, primary: nil, mainWindowCandidate: nil
+            ) == false
+        )
+    }
+
+    @Test func doesNotDeferWhenKeyWindowIsPrimary() {
+        let main = NSWindow()
+        // The main window is key and is the registered primary — consume shortcuts.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: main, mainWindowCandidate: nil
+            ) == false
+        )
+    }
+
+    @Test func defersWhenSecondaryWindowIsKey() {
+        let main = NSWindow()
+        let settings = NSWindow()
+        // Settings/Help is key — defer so its own Cmd+W etc. still work.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: settings, primary: main, mainWindowCandidate: main
+            ) == true
+        )
+    }
+
+    @Test func doesNotDeferWhenPrimarySetDespiteMisorderedCandidate() {
+        let main = NSWindow()
+        let stray = NSWindow()
+        // The exact issue #251 trigger: the focused main window is key, but a
+        // stray visible window sorts ahead in `NSApp.windows`, so the positional
+        // candidate resolves to `stray`. With the authoritative primary set, we
+        // must still recognise `main` as the main window and NOT defer.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: main, mainWindowCandidate: stray
+            ) == false
+        )
+    }
+
+    @Test func fallsBackToPositionalCandidateBeforePrimaryClaimed() {
+        let main = NSWindow()
+        let stray = NSWindow()
+        // Before the registry claims a primary (`primary == nil`), the old
+        // positional heuristic still applies: when the candidate matches the
+        // key window we consume; when a stray sorts ahead we defer. The second
+        // case is precisely the fragile pre-fix behaviour that #251 hit — now
+        // confined to the brief pre-registration window.
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: nil, mainWindowCandidate: main
+            ) == false
+        )
+        #expect(
+            PaneShortcutMonitor.shouldDeferToSecondaryWindow(
+                keyWindow: main, primary: nil, mainWindowCandidate: stray
+            ) == true
+        )
     }
 }

@@ -65,15 +65,68 @@ enum SocketMessage: Equatable {
     /// `{ok:false,error:...}` (issue #98).
     case paneSendKey(paneID: UUID?, target: String, key: String, workspace: String?)
     case paneMove(paneID: UUID, direction: PaneLayout.Direction)
+    /// Move a pane so it sits adjacent to another pane on a given edge —
+    /// the CLI form of GUI drag-and-drop (`nex pane move --target X
+    /// --below Y`). `target` is the pane being moved (X), `anchor` is the
+    /// pane it docks against (Y), both name-or-UUID and resolved within
+    /// the same workspace; `zone` is the edge of Y that X lands on. Same
+    /// scoping as `paneName` (callable from outside a Nex pane), so
+    /// `paneID` is the optional caller pane used only for label scoping.
+    /// Request/response (see `replyCommandAllowlist`).
+    case paneMoveAdjacent(paneID: UUID?, target: String, anchor: String, zone: PaneLayout.DropZone, workspace: String?)
     case paneMoveToWorkspace(paneID: UUID, toWorkspace: String, create: Bool)
-    /// Workspace commands
-    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?)
+    /// Resize a pane against its immediate split sibling by adjusting the
+    /// enclosing split's ratio. `paneID` (from `NEX_PANE_ID`) and/or
+    /// `target` (name-or-UUID) address the pane; `workspace` narrows label
+    /// resolution — same scoping as `paneClose`/`paneName`, so it is
+    /// callable from outside a Nex pane. Exactly one of `ratio` (absolute
+    /// target share of the pane, 0<r<1) or `delta` (signed share
+    /// adjustment: `--grow` positive, `--shrink` negative) is supplied.
+    /// The reducer maps the pane to its enclosing `splitPath`, translates
+    /// the desired share into the split's stored first-child ratio, and
+    /// replies with a structured payload (request/response — see
+    /// `replyCommandAllowlist`).
+    case paneResize(paneID: UUID?, target: String?, workspace: String?, ratio: Double?, delta: Double?)
+    /// Workspace commands. `workspace-list --group <name-or-id>` scopes
+    /// the listing to a single group (nil = every workspace).
+    case workspaceList(group: String?)
+    // `worktree` (issue #222): when non-nil, create a git worktree named
+    // this and open the new workspace's first pane in it. `branch` is the
+    // branch name (defaults to `worktree`); `updateMain` fetches + branches
+    // off `origin/<default>`; `repo` is the source repo path (defaults to
+    // the CLI's cwd, always sent by the CLI when `worktree` is set).
+    case workspaceCreate(name: String?, path: String?, color: WorkspaceColor?, group: String?, profile: String? = nil, worktree: String? = nil, branch: String? = nil, updateMain: Bool = false, repo: String? = nil)
     case workspaceMove(nameOrID: String, group: String?, index: Int?)
+    /// Delete a single workspace by name-or-id. Request/response
+    /// (`replyCommandAllowlist`) — the CLI loops one request per id for
+    /// bulk `nex workspace delete a b c`, and reads back the deleted
+    /// workspace's directory so `--prune-worktree` can remove it.
+    /// `force` (from `--force`/`-y`) bypasses the running-agents guard:
+    /// without it, deleting a workspace that still has active agents is
+    /// refused (mirrors the app-quit warning).
+    case workspaceDelete(nameOrID: String, force: Bool)
+    /// `nex workspace profile <name-or-id> (<profile> | --clear)`.
+    /// `profile` nil = clear. Fire-and-forget (matches `workspace-move`).
+    case workspaceProfile(nameOrID: String, profile: String?)
+    /// `nex workspace label <name-or-id> --set|--add|--remove|--clear`.
+    /// `op` is one of `set` / `add` / `remove` / `clear`; `values` are the
+    /// label strings (empty for `clear`). Request/response
+    /// (`replyCommandAllowlist`) — the reply echoes the resulting labels.
+    case workspaceLabel(nameOrID: String, op: String, values: [String])
     /// Group commands. Icon-setting is deliberately UI-only: the
     /// curated palette + emoji picker lives in the context menu.
+    case groupList
     case groupCreate(name: String, color: WorkspaceColor?)
     case groupRename(nameOrID: String, newName: String)
     case groupDelete(nameOrID: String, cascade: Bool)
+    /// `nex group reorder <name-or-id> --order <a,b,c>`. Rewrites the
+    /// group's `childOrder` to the given member order (ids or member
+    /// names). Members omitted from `order` keep their relative order at
+    /// the tail. Request/response — the reply echoes the resulting order.
+    case groupReorder(nameOrID: String, order: [String])
+    /// `nex group sort <name-or-id> --by name|last-activity|last-accessed
+    /// [--desc]`. Rewrites `childOrder` by the given key. Request/response.
+    case groupSort(nameOrID: String, by: String, descending: Bool)
     /// File commands. `reuse` = replace the originating pane in place
     /// (`nex open --here`) instead of splitting off it.
     case openFile(path: String, paneID: UUID?, reuse: Bool)
@@ -318,9 +371,12 @@ enum SocketMessage: Equatable {
 /// `ReplyHandle` and the wire behaviour is byte-identical to the
 /// pre-request/response protocol.
 private let replyCommandAllowlist: Set<String> = [
+    "workspace-list", "group-list",
     "pane-list", "pane-close", "pane-capture", "pane-send", "pane-send-key",
-    "pane-split", "pane-create", "pane-name",
+    "pane-split", "pane-create", "pane-name", "pane-resize", "pane-move-adjacent",
     "pane-sync", "pane-sync-exclude",
+    "workspace-create", "workspace-delete", "workspace-label",
+    "group-reorder", "group-sort",
     "graft-start", "graft-stop", "graft-status",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
@@ -735,8 +791,13 @@ final class SocketServer: Sendable {
         // Group/workspace-management fields
         var newName: String?
         var cascade: Bool?
+        /// `workspace-delete --force`/`-y` — bypass the running-agents guard.
+        var force: Bool?
         var index: Int?
         var group: String?
+        /// `workspace-create --profile` / `workspace-profile` — the
+        /// workspace-profile name to assign (empty = clear).
+        var profile: String?
         // Request/response — `pane-list` filters
         var workspace: String?
         var scope: String?
@@ -825,6 +886,38 @@ final class SocketServer: Sendable {
         /// `pane-sync-exclude` — true to exclude the target pane,
         /// false to re-include. Required for that command.
         var excluded: Bool?
+        /// `workspace-create --worktree <name>` (issue #222) — the worktree
+        /// / branch folder name to create and open the first pane in.
+        var worktree: String?
+        /// `workspace-create --branch <name>` — branch name for the new
+        /// worktree (defaults to `worktree` when omitted).
+        var branch: String?
+        /// `workspace-create --update-main` — fetch + branch the worktree
+        /// off `origin/<default>` rather than the current HEAD.
+        var updateMain: Bool?
+        /// `pane-resize --ratio` — absolute target share of the addressed
+        /// pane within its enclosing split (0<r<1).
+        var ratio: Double?
+        /// `pane-resize --grow`/`--shrink` — signed share adjustment
+        /// (grow positive, shrink negative). Mutually exclusive with `ratio`.
+        var delta: Double?
+        /// `pane-move-adjacent` — the anchor pane (name-or-UUID) the moved
+        /// pane docks against.
+        var anchor: String?
+        /// `pane-move-adjacent` — the edge of the anchor to dock on:
+        /// `above` / `below` / `left-of` / `right-of`.
+        var zone: String?
+        /// `workspace-label` — the mutation verb (`set`/`add`/`remove`/`clear`).
+        var labelOp: String?
+        /// `workspace-label` — the label values the verb operates on
+        /// (empty for `clear`).
+        var labelValues: [String]?
+        /// `group-reorder` — the explicit member order (ids or member names).
+        var order: [String]?
+        /// `group-sort` — the sort key (`name`/`last-activity`/`last-accessed`).
+        var by: String?
+        /// `group-sort --desc` — reverse the sort direction.
+        var descending: Bool?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -834,7 +927,7 @@ final class SocketServer: Sendable {
             case backgroundTasks = "background_tasks"
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
-            case cascade, index, group
+            case cascade, force, index, group, profile
             case workspace, scope
             case reuse
             case repoPath = "repo_path"
@@ -862,6 +955,13 @@ final class SocketServer: Sendable {
             case block, behavior
             case script
             case action, excluded
+            case worktree, branch
+            case updateMain = "update_main"
+            case ratio, delta
+            case anchor, zone
+            case labelOp = "label_op"
+            case labelValues = "label_values"
+            case order, by, descending
         }
     }
 
@@ -892,12 +992,31 @@ final class SocketServer: Sendable {
         // require pane_id.
         if wire.command == "workspace-create" {
             let color = wire.color.flatMap { WorkspaceColor(rawValue: $0) }
+            // Empty-string profile is normalised to nil (= no profile);
+            // `.setProfile` normalises again as the backstop.
+            let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
+            // Worktree fields (issue #222). Empty strings normalise to nil so
+            // a serialised-but-unset field can't accidentally trigger the
+            // worktree path or an empty branch name.
+            let worktree = (wire.worktree?.isEmpty == true) ? nil : wire.worktree
+            let branch = (wire.branch?.isEmpty == true) ? nil : wire.branch
+            let repo = (wire.repo?.isEmpty == true) ? nil : wire.repo
             return (.workspaceCreate(
                 name: wire.name,
                 path: wire.path,
                 color: color,
-                group: wire.group
+                group: wire.group,
+                profile: profile,
+                worktree: worktree,
+                branch: branch,
+                updateMain: wire.updateMain ?? false,
+                repo: repo
             ), wire)
+        }
+
+        if wire.command == "workspace-list" {
+            let group = (wire.group?.isEmpty == true) ? nil : wire.group
+            return (.workspaceList(group: group), wire)
         }
 
         if wire.command == "workspace-move" {
@@ -907,6 +1026,29 @@ final class SocketServer: Sendable {
             // accidentally target a group with an empty name.
             let group = (wire.group?.isEmpty == true) ? nil : wire.group
             return (.workspaceMove(nameOrID: nameOrID, group: group, index: wire.index), wire)
+        }
+
+        if wire.command == "workspace-delete" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.workspaceDelete(nameOrID: nameOrID, force: wire.force ?? false), wire)
+        }
+
+        if wire.command == "workspace-profile" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            // Empty/missing profile = clear the assignment.
+            let profile = (wire.profile?.isEmpty == true) ? nil : wire.profile
+            return (.workspaceProfile(nameOrID: nameOrID, profile: profile), wire)
+        }
+
+        if wire.command == "workspace-label" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty,
+                  let op = wire.labelOp, !op.isEmpty
+            else { return nil }
+            return (.workspaceLabel(nameOrID: nameOrID, op: op, values: wire.labelValues ?? []), wire)
+        }
+
+        if wire.command == "group-list" {
+            return (.groupList, wire)
         }
 
         if wire.command == "group-create" {
@@ -925,6 +1067,18 @@ final class SocketServer: Sendable {
         if wire.command == "group-delete" {
             guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
             return (.groupDelete(nameOrID: nameOrID, cascade: wire.cascade ?? false), wire)
+        }
+
+        if wire.command == "group-reorder" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty else { return nil }
+            return (.groupReorder(nameOrID: nameOrID, order: wire.order ?? []), wire)
+        }
+
+        if wire.command == "group-sort" {
+            guard let nameOrID = wire.name, !nameOrID.isEmpty,
+                  let by = wire.by, !by.isEmpty
+            else { return nil }
+            return (.groupSort(nameOrID: nameOrID, by: by, descending: wire.descending ?? false), wire)
         }
 
         if wire.command == "open" {
@@ -1408,6 +1562,36 @@ final class SocketServer: Sendable {
             guard let scope = parsePaneTarget(wire),
                   let name = wire.name, !name.isEmpty else { return nil }
             return (.paneName(paneID: scope.paneID, target: scope.target, workspace: scope.workspace, name: name), wire)
+        }
+
+        if wire.command == "pane-resize" {
+            // Address the pane (caller pane and/or --target); require
+            // exactly one sizing directive. The reducer resolves the
+            // enclosing split and applies the ratio.
+            guard let scope = parsePaneTarget(wire) else { return nil }
+            guard (wire.ratio != nil) != (wire.delta != nil) else { return nil }
+            return (.paneResize(
+                paneID: scope.paneID, target: scope.target,
+                workspace: scope.workspace, ratio: wire.ratio, delta: wire.delta
+            ), wire)
+        }
+
+        if wire.command == "pane-move-adjacent" {
+            // `target` (moved pane) and `anchor` (dock pane) are both
+            // mandatory; `zone` names the edge. `paneID` is the optional
+            // caller pane, used only to scope label resolution.
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let target = (wire.target?.isEmpty == true) ? nil : wire.target
+            let anchor = (wire.anchor?.isEmpty == true) ? nil : wire.anchor
+            let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
+            let zoneMap: [String: PaneLayout.DropZone] = [
+                "above": .top, "below": .bottom, "left-of": .left, "right-of": .right
+            ]
+            guard let target, let anchor, let zone = zoneMap[wire.zone ?? ""] else { return nil }
+            return (.paneMoveAdjacent(
+                paneID: paneID, target: target, anchor: anchor,
+                zone: zone, workspace: workspace
+            ), wire)
         }
 
         guard let paneIDString = wire.paneID,

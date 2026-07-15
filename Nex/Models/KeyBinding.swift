@@ -254,8 +254,9 @@ enum NexAction: String, CaseIterable {
     // fresh web pane from anywhere. The rest ship unbound; the
     // priority layer in `PaneShortcutMonitor` dispatches them directly
     // when the focused pane is a web pane, so the global ⌘L / ⌘R /
-    // ⌘[ / ⌘] / ⌘T / ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every
-    // other pane type.
+    // ⌘← / ⌘→ / ⌘T / ⌘W / ⌘⇧[ / ⌘⇧] defaults are preserved for every
+    // other pane type. (Back/forward moved off ⌘[ / ⌘] to ⌘← / ⌘→ so
+    // ⌘[ / ⌘] stay on focus prev/next even in a web pane — issue #229.)
     case openWebPane = "open_web_pane"
     case webFocusURLBar = "web_focus_url_bar"
     case webBack = "web_back"
@@ -265,6 +266,9 @@ enum NexAction: String, CaseIterable {
     case webTabClose = "web_tab_close"
     case webTabPrev = "web_tab_prev"
     case webTabNext = "web_tab_next"
+    case webZoomIn = "web_zoom_in"
+    case webZoomOut = "web_zoom_out"
+    case webZoomReset = "web_zoom_reset"
 
     case unbind
 
@@ -334,6 +338,9 @@ enum NexAction: String, CaseIterable {
         case .webTabClose: "Web: Close Tab"
         case .webTabPrev: "Web: Previous Tab"
         case .webTabNext: "Web: Next Tab"
+        case .webZoomIn: "Web: Zoom In"
+        case .webZoomOut: "Web: Zoom Out"
+        case .webZoomReset: "Web: Reset Zoom"
         case .unbind: "Unbind"
         }
     }
@@ -363,7 +370,8 @@ enum NexAction: String, CaseIterable {
              .resetMarkdownFontSize, .openDiff:
             "Files"
         case .webFocusURLBar, .webBack, .webForward, .webReload,
-             .webTabNew, .webTabClose, .webTabPrev, .webTabNext:
+             .webTabNew, .webTabClose, .webTabPrev, .webTabNext,
+             .webZoomIn, .webZoomOut, .webZoomReset:
             "Web Pane (active when web pane focused)"
         case .toggleSearch, .closeSearch:
             "Search"

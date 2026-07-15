@@ -1,7 +1,8 @@
 import Foundation
 import os.log
 
-/// Parses Ghostty-style config files for keybinding entries.
+/// Parses Ghostty-style config files for keybinding, general-setting, and
+/// workspace-profile entries.
 enum ConfigParser {
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.benfriebe.nex",
@@ -93,6 +94,130 @@ enum ConfigParser {
                 lines.removeLast()
             }
             lines.append("\(key) = \(value)")
+        }
+
+        // Ensure trailing newline
+        if lines.last?.isEmpty != true {
+            lines.append("")
+        }
+
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// A named environment-variable set assignable to a workspace.
+    struct Profile: Equatable {
+        let name: String
+        var env: [String: String]
+    }
+
+    /// Parse workspace-profile entries from a config file.
+    /// Returns an empty list if the file doesn't exist or has no profile entries.
+    static func parseProfiles(fromFile path: String, expandTilde: Bool = true) -> [Profile] {
+        guard FileManager.default.fileExists(atPath: path),
+              let contents = try? String(contentsOfFile: path, encoding: .utf8)
+        else {
+            return []
+        }
+        return parseProfiles(from: contents, expandTilde: expandTilde)
+    }
+
+    /// Parse `profile = <name>:<KEY>=<value>` entries from a config file's
+    /// contents — one variable per line; repeated lines with the same profile
+    /// name merge, later lines winning on key collision:
+    /// ```
+    /// profile = work:CLAUDE_CONFIG_DIR=~/.claude-accounts/work
+    /// profile = work:FOO=bar
+    /// profile = personal:CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+    /// ```
+    /// Profile names cannot contain `:` or `=`; values may contain both.
+    /// Key/value case is preserved, a leading `~` in the value is
+    /// tilde-expanded (unless `expandTilde` is false — the Settings editor
+    /// parses raw so a round-trip doesn't rewrite the user's `~` paths),
+    /// and quotes are kept literal (no stripping) like the rest of the
+    /// config syntax. Profiles are returned in order of first appearance.
+    static func parseProfiles(from contents: String, expandTilde: Bool = true) -> [Profile] {
+        var order: [String] = []
+        var envByName: [String: [String: String]] = [:]
+
+        for line in contents.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard trimmed.hasPrefix("profile") else { continue }
+            guard let eqIndex = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces)
+            guard key == "profile" else { continue }
+
+            let value = trimmed[trimmed.index(after: eqIndex)...]
+                .trimmingCharacters(in: .whitespaces)
+
+            // Split on the first ":" — everything before is the profile name,
+            // everything after is a single KEY=value assignment.
+            guard let colonIndex = value.firstIndex(of: ":") else {
+                logger.warning("Malformed profile line (missing ':'): \(value)")
+                continue
+            }
+            let name = value[..<colonIndex].trimmingCharacters(in: .whitespaces)
+            let assignment = value[value.index(after: colonIndex)...]
+
+            guard let varEqIndex = assignment.firstIndex(of: "=") else {
+                logger.warning("Malformed profile assignment (missing '='): \(value)")
+                continue
+            }
+            let envKey = assignment[..<varEqIndex].trimmingCharacters(in: .whitespaces)
+            var envValue = assignment[assignment.index(after: varEqIndex)...]
+                .trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !envKey.isEmpty else {
+                logger.warning("Malformed profile entry (empty name or key): \(value)")
+                continue
+            }
+
+            if expandTilde, envValue.hasPrefix("~") {
+                envValue = (envValue as NSString).expandingTildeInPath
+            }
+            if envByName[name] == nil { order.append(name) }
+            envByName[name, default: [:]][envKey] = envValue
+        }
+
+        return order.map { Profile(name: $0, env: envByName[$0] ?? [:]) }
+    }
+
+    /// Write profile definitions to the config file, preserving all
+    /// non-profile lines (general settings, keybinds, comments). Every
+    /// existing `profile` line is replaced by the serialized set — one
+    /// `profile = <name>:<KEY>=<value>` line per variable, profiles in
+    /// array order, keys sorted within each profile. Profiles with an
+    /// empty name and variables with an empty key are skipped (the line
+    /// format cannot represent them), so a profile needs at least one
+    /// valid variable to survive a round-trip.
+    static func writeProfiles(_ profiles: [Profile], toFile path: String) {
+        var lines: [String] = []
+        if let existing = try? String(contentsOfFile: path, encoding: .utf8) {
+            for line in existing.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if let eqIndex = trimmed.firstIndex(of: "="),
+                   trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces) == "profile" {
+                    continue
+                }
+                lines.append(line)
+            }
+            while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+                lines.removeLast()
+            }
+        }
+
+        var profileLines: [String] = []
+        for profile in profiles {
+            let name = profile.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            for (key, value) in profile.env.sorted(by: { $0.key < $1.key }) where !key.isEmpty {
+                profileLines.append("profile = \(name):\(key)=\(value)")
+            }
+        }
+        if !profileLines.isEmpty {
+            if !lines.isEmpty { lines.append("") }
+            lines.append(contentsOf: profileLines)
         }
 
         // Ensure trailing newline

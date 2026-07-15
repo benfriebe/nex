@@ -65,6 +65,12 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
     /// popover. User info: `paneID`, `tabID`, `itemID`.
     static let batchItemRemovedFromPopoverNotification = Notification.Name("WebPaneCoordinator.batchItemRemovedFromPopover")
 
+    /// Notification posted after an in-page find pass completes.
+    /// User info: `paneID`, `tabID`, `total: Int`, `current: Int`
+    /// (`current` is `-1` when there is no active match). `ContentView`
+    /// translates this into `searchTotalUpdated` / `searchSelectedUpdated`.
+    static let findResultNotification = Notification.Name("WebPaneCoordinator.findResult")
+
     /// KVO tokens per webview, so deinit (or destroy) can detach.
     private var kvoTokens: [UUID: [NSKeyValueObservation]] = [:]
 
@@ -94,6 +100,13 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
     /// URL; we re-emit this value through `stateDidChangeNotification`
     /// so the URL bar keeps showing what the user tried.
     private var lastAttemptedURL: [UUID: String] = [:]
+
+    /// Active find needle per tab, if the find bar is open against it.
+    /// Kept so a navigation / reload (which wipes the injected marks and
+    /// rebuilds `window.__nexWebFind` fresh) can re-apply the search in
+    /// `didFinish` instead of leaving a stale match count in the overlay.
+    /// Cleared by `runFindClose`.
+    private var lastFindNeedle: [UUID: String] = [:]
 
     init(
         paneID: UUID,
@@ -159,6 +172,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         webViews.removeValue(forKey: tabID)
         lastAttemptedURL.removeValue(forKey: tabID)
         lastPostedProgress.removeValue(forKey: tabID)
+        lastFindNeedle.removeValue(forKey: tabID)
         showingErrorPage.remove(tabID)
         // Drop the inspector arm if it pointed at the destroyed tab
         // — a late click against the gone WebView could otherwise
@@ -194,6 +208,7 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         config.userContentController.add(handler, name: "nexConsole")
         config.userContentController.add(handler, name: "nexInspect")
         config.userContentController.add(handler, name: "nexBatchMarker")
+        config.userContentController.add(handler, name: "nexWebFind")
         // Console wraps `console.*` so we want it to run before page
         // code; `forMainFrameOnly: false` so cross-origin iframes
         // also report (still scoped to this pane's WebView).
@@ -222,6 +237,15 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         config.userContentController.addUserScript(WKUserScript(
             source: WebPaneActuatorScript.source,
             injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        // Find-in-page namespace (window.__nexWebFind). Injected at
+        // documentEnd (needs a body to walk) main-frame only, mirroring
+        // the markdown preview's find. Dormant until the reducer drives
+        // it via `runFind`.
+        config.userContentController.addUserScript(WKUserScript(
+            source: WebPaneFindScript.source,
+            injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
 
@@ -459,6 +483,16 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return true
     }
 
+    /// Step the tab's page zoom by `delta` (nil resets to 1.0),
+    /// clamped to [0.5, 3.0].
+    @discardableResult
+    func adjustPageZoom(tabID: UUID, delta: CGFloat?) -> Bool {
+        guard let webView = webViews[tabID] else { return false }
+        let target = delta.map { webView.pageZoom + $0 } ?? 1.0
+        webView.pageZoom = min(max(target, 0.5), 3.0)
+        return true
+    }
+
     /// Toggle the Safari Web Inspector docked inside the tab's
     /// `WebPaneTabContainer` via WebKit's private `_inspector` SPI.
     /// Closes the inspector if it's currently visible; otherwise
@@ -609,6 +643,42 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         webViews[tabID] != nil
     }
 
+    // MARK: - Find-in-page
+
+    /// Run (or re-run) the in-page find for `needle` against the named
+    /// tab. Remembers the needle so a later navigation can re-apply it.
+    /// An empty needle clears the highlight without forgetting the bar
+    /// is open — `runFindClose` is the explicit teardown.
+    func runFind(tabID: UUID, needle: String) {
+        lastFindNeedle[tabID] = needle
+        guard let webView = webViews[tabID] else { return }
+        let escaped = WebPaneFindScript.encodeNeedle(needle)
+        webView.evaluateJavaScript("window.__nexWebFind && window.__nexWebFind.search(\(escaped));")
+    }
+
+    /// Cycle to the next / previous match in the named tab.
+    func runFindNavigate(tabID: UUID, forward: Bool) {
+        guard let webView = webViews[tabID] else { return }
+        let fn = forward ? "next" : "prev"
+        webView.evaluateJavaScript("window.__nexWebFind && window.__nexWebFind.\(fn)();")
+    }
+
+    /// Tear down the find for the named tab — clears the highlight and
+    /// forgets the remembered needle so navigations no longer re-apply.
+    func runFindClose(tabID: UUID) {
+        lastFindNeedle.removeValue(forKey: tabID)
+        guard let webView = webViews[tabID] else { return }
+        webView.evaluateJavaScript("window.__nexWebFind && window.__nexWebFind.clear();")
+    }
+
+    /// Re-apply the remembered needle after a load finished (navigation /
+    /// reload rebuilds the DOM and a fresh `window.__nexWebFind`). No-op
+    /// when the find bar isn't open against this tab.
+    private func reapplyFind(tabID: UUID) {
+        guard let needle = lastFindNeedle[tabID], !needle.isEmpty else { return }
+        runFind(tabID: tabID, needle: needle)
+    }
+
     // MARK: - WKNavigationDelegate
 
     @preconcurrency
@@ -670,6 +740,9 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
             guard let self, let webView, let tabID = tabID(for: webView) else { return }
             if showingErrorPage.contains(tabID) { return }
             lastAttemptedURL.removeValue(forKey: tabID)
+            // The load wiped any active find marks + rebuilt a fresh
+            // `window.__nexWebFind`. Re-apply if the find bar is open.
+            reapplyFind(tabID: tabID)
         }
     }
 
@@ -1051,6 +1124,25 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
             ]
         )
     }
+
+    /// Handle a `nexWebFind` message — the `{ total, current }` result
+    /// of a find pass. Re-broadcast as `findResultNotification` for
+    /// `ContentView` to fold into the search overlay.
+    fileprivate func handleFindMessage(tabID: UUID, body: Any) {
+        guard let dict = body as? [String: Any],
+              let total = dict["total"] as? Int,
+              let current = dict["current"] as? Int else { return }
+        NotificationCenter.default.post(
+            name: Self.findResultNotification,
+            object: nil,
+            userInfo: [
+                "paneID": paneID,
+                "tabID": tabID,
+                "total": total,
+                "current": current
+            ]
+        )
+    }
 }
 
 /// Bridge between WKScriptMessageHandler (which Cocoa retains
@@ -1092,6 +1184,8 @@ private final class WebPaneScriptHandler: NSObject, WKScriptMessageHandler {
                 coord.handleInspectMessage(tabID: tabID, body: body, isMainFrame: isMainFrame)
             case "nexBatchMarker":
                 coord.handleBatchMarkerMessage(tabID: tabID, body: body, isMainFrame: isMainFrame)
+            case "nexWebFind":
+                coord.handleFindMessage(tabID: tabID, body: body)
             default:
                 break
             }

@@ -217,7 +217,8 @@ actor PersistenceService {
                         lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
                         labels: labels,
                         icon: icon,
-                        webPanes: webPanes
+                        webPanes: webPanes,
+                        profileName: record.profileName
                     )
                     workspaces.append(workspace)
                 }
@@ -324,7 +325,8 @@ struct PersistenceSnapshot {
                 lastAccessedAt: workspace.lastAccessedAt.timeIntervalSince1970,
                 sortOrder: index,
                 labelsJSON: labelsJSON,
-                icon: workspace.icon?.storageString
+                icon: workspace.icon?.storageString,
+                profileName: workspace.profileName
             )
         }
 

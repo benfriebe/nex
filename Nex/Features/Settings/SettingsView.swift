@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Identifier for the Settings TabView's tabs, used for deep-linking
 /// from the web pane's "Manage favourites…" menu.
-enum SettingsTab: Hashable { case general, appearance, repos, labels, keybindings, web }
+enum SettingsTab: Hashable { case general, appearance, repos, labels, profiles, keybindings, web }
 
 struct SettingsView: View {
     let store: StoreOf<AppReducer>
@@ -40,6 +40,12 @@ struct SettingsView: View {
                     }
                     .tag(SettingsTab.labels)
 
+                ProfilesSettingsView()
+                    .tabItem {
+                        Label("Profiles", systemImage: "person.badge.key")
+                    }
+                    .tag(SettingsTab.profiles)
+
                 KeybindingsSettingsView(store: store)
                     .tabItem {
                         Label("Keybindings", systemImage: "command")
@@ -67,6 +73,9 @@ struct SettingsView: View {
             // would leave the toggle stale until next launch (issue #129).
             .onReceive(NotificationCenter.default.publisher(for: QuitGate.confirmQuitChangedNotification)) { _ in
                 store.send(.settings(.refreshConfirmQuitWhenActive))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: WorkspaceDeleteGate.confirmChangedNotification)) { _ in
+                store.send(.settings(.refreshConfirmWorkspaceDeleteWhenActive))
             }
             // Deep-link from a web pane's "Manage favourites…" menu.
             // `pendingSettingsTab` covers cold-open (notification has
@@ -176,6 +185,14 @@ private struct GeneralSettingsView: View {
                     Text("Where a newly created group is inserted in the sidebar. \"Next to selection\" places it after the active workspace (or its parent group when nested). \"End of list\" always appends it to the bottom.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Toggle("Confirm before deleting a workspace with active agents", isOn: Binding(
+                        get: { settingsStore.confirmWorkspaceDeleteWhenActive },
+                        set: { settingsStore.send(.setConfirmWorkspaceDeleteWhenActive($0)) }
+                    ))
+                    Text("Show a confirmation dialog when deleting a workspace that still has running or waiting agents, so an accidental delete doesn't lose work. The CLI's `nex workspace delete --force` bypasses this check regardless of this setting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Panes") {
@@ -203,56 +220,6 @@ private struct GeneralSettingsView: View {
                                 .frame(width: 55, alignment: .trailing)
                         }
                     }
-                }
-
-                Section("Status bar") {
-                    Toggle("Show system stats", isOn: Binding(
-                        get: { settingsStore.showSystemStats },
-                        set: { settingsStore.send(.setShowSystemStats($0)) }
-                    ))
-                    if settingsStore.showSystemStats {
-                        ForEach(SystemStatKind.allCases) { kind in
-                            Toggle(isOn: Binding(
-                                get: { settingsStore.enabledSystemStats.contains(kind.rawValue) },
-                                set: { settingsStore.send(.setSystemStatEnabled(kind, $0)) }
-                            )) {
-                                Label(kind.displayName, systemImage: kind.systemImage)
-                            }
-                            .padding(.leading, 16)
-                        }
-                        DisclosureGroup("Mini graphs") {
-                            Toggle("Show mini graphs", isOn: Binding(
-                                get: { settingsStore.showSystemStatGraphs },
-                                set: { settingsStore.send(.setShowSystemStatGraphs($0)) }
-                            ))
-                            Picker("Graph style", selection: Binding(
-                                get: { SparklineStyle(rawValue: settingsStore.sparklineStyle) ?? .line },
-                                set: { settingsStore.send(.setSparklineStyle($0.rawValue)) }
-                            )) {
-                                ForEach(SparklineStyle.allCases) { style in
-                                    Text(style.displayName).tag(style)
-                                }
-                            }
-                            ColorPicker("Graph colour", selection: Binding(
-                                get: { Color(chromeHex: settingsStore.sparklineColorHex) ?? chromeTheme.textSecondary },
-                                set: { if let hex = $0.chromeHexString { settingsStore.send(.setSparklineColor(hex)) } }
-                            ), supportsOpacity: false)
-                            HStack {
-                                Text("Graph width")
-                                Slider(value: Binding(
-                                    get: { settingsStore.sparklineWidth },
-                                    set: { settingsStore.send(.setSparklineWidth($0)) }
-                                ), in: 16 ... 80, step: 2)
-                                Text("\(Int(settingsStore.sparklineWidth))")
-                                    .monospacedDigit()
-                                    .frame(width: 32, alignment: .trailing)
-                            }
-                            Button("Reset graph colour") { settingsStore.send(.setSparklineColor("")) }
-                        }
-                    }
-                    Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Quit") {
@@ -462,6 +429,56 @@ private struct AppearanceSettingsView: View {
                     value: $store.backgroundOpacity.sending(\.setBackgroundOpacity),
                     in: 0.1 ... 1.0
                 )
+            }
+
+            Section("Status bar") {
+                Toggle("Show system stats", isOn: Binding(
+                    get: { store.showSystemStats },
+                    set: { store.send(.setShowSystemStats($0)) }
+                ))
+                if store.showSystemStats {
+                    ForEach(SystemStatKind.allCases) { kind in
+                        Toggle(isOn: Binding(
+                            get: { store.enabledSystemStats.contains(kind.rawValue) },
+                            set: { store.send(.setSystemStatEnabled(kind, $0)) }
+                        )) {
+                            Label(kind.displayName, systemImage: kind.systemImage)
+                        }
+                        .padding(.leading, 16)
+                    }
+                    DisclosureGroup("Mini graphs") {
+                        Toggle("Show mini graphs", isOn: Binding(
+                            get: { store.showSystemStatGraphs },
+                            set: { store.send(.setShowSystemStatGraphs($0)) }
+                        ))
+                        Picker("Graph style", selection: Binding(
+                            get: { SparklineStyle(rawValue: store.sparklineStyle) ?? .line },
+                            set: { store.send(.setSparklineStyle($0.rawValue)) }
+                        )) {
+                            ForEach(SparklineStyle.allCases) { style in
+                                Text(style.displayName).tag(style)
+                            }
+                        }
+                        ColorPicker("Graph colour", selection: Binding(
+                            get: { Color(chromeHex: store.sparklineColorHex) ?? chromeTheme.textSecondary },
+                            set: { if let hex = $0.chromeHexString { store.send(.setSparklineColor(hex)) } }
+                        ), supportsOpacity: false)
+                        HStack {
+                            Text("Graph width")
+                            Slider(value: Binding(
+                                get: { store.sparklineWidth },
+                                set: { store.send(.setSparklineWidth($0)) }
+                            ), in: 16 ... 80, step: 2)
+                            Text("\(Int(store.sparklineWidth))")
+                                .monospacedDigit()
+                                .frame(width: 32, alignment: .trailing)
+                        }
+                        Button("Reset graph colour") { store.send(.setSparklineColor("")) }
+                    }
+                }
+                Text("Live system metrics on the right of the bottom status bar. Hover any metric for a detail graph over time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

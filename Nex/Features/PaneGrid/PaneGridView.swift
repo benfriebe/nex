@@ -76,6 +76,9 @@ struct PaneGridView: View {
     var favourites: [Favourite] = []
     var onToggleFavourite: ((String, String) -> Void)?
     var onOpenFavourite: ((UUID, String) -> Void)?
+    /// Workspace-profile name, threaded to `SurfaceContainerView` so its
+    /// lazy-create fallback injects the same env as the reducer effect.
+    var profileName: String?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.chromeTheme) private var chromeTheme
@@ -136,79 +139,107 @@ struct PaneGridView: View {
         }
     }
 
+    /// The pane header, rendered as two stacked layers so an open right-click
+    /// submenu (Status / Move to Workspace) survives agent-activity
+    /// re-renders — the pane-header counterpart to the sidebar fix in issue
+    /// #227. Without this, the header re-renders on every status/title tick
+    /// while an agent works, rebuilding its `.contextMenu` NSMenu and
+    /// dismissing whatever submenu the cursor is in.
+    @ViewBuilder
+    private func paneHeaderLayers(pane: Pane) -> some View {
+        let header = makePaneHeader(pane: pane)
+        ZStack {
+            // Menu-host layer: `.equatable()` lets SwiftUI skip re-rendering
+            // (and rebuilding the `.contextMenu`) when only the agent-churny
+            // fields changed — see `PaneHeaderView.==`. Fully interactive
+            // (buttons, focus tap, drag, right-click menu); its frozen visuals
+            // sit hidden behind the opaque live overlay on top.
+            header.equatable()
+            // Live overlay: redraws the status dot / path / agent badge every
+            // tick. Non-hit-testing, so every click (including the right-click
+            // that opens the menu) falls through to the stable host beneath.
+            header.allowsHitTesting(false)
+        }
+    }
+
+    private func makePaneHeader(pane: Pane) -> PaneHeaderView {
+        PaneHeaderView(
+            pane: pane,
+            isFocused: pane.id == focusedPaneID,
+            onFocus: { onFocusPane(pane.id) },
+            onSplitHorizontal: { onSplitPane(pane.id, .horizontal) },
+            onSplitVertical: { onSplitPane(pane.id, .vertical) },
+            onClose: { onClosePane(pane.id) },
+            isZoomed: isZoomed,
+            onToggleZoom: onToggleZoom,
+            isEditing: pane.isEditing,
+            onToggleEdit: pane.type == .markdown ? { onToggleMarkdownEdit(pane.id) } : nil,
+            onCopyMarkdown: pane.type == .markdown
+                ? { postMarkdownCopy(pane.id, kind: .markdown) }
+                : nil,
+            onCopyRichText: pane.type == .markdown
+                ? { postMarkdownCopy(pane.id, kind: .richText) }
+                : nil,
+            onRefreshDiff: pane.type == .diff
+                ? { diffRefreshTokens[pane.id, default: 0] &+= 1 }
+                : nil,
+            onDragChanged: { point in
+                dragSourcePaneID = pane.id
+                let bounds = CGRect(origin: .zero, size: gridSize)
+                let frames = layout.paneFrames(in: bounds)
+                // Hit-test: find which pane contains the cursor
+                var hitTarget: UUID?
+                for (id, rect) in frames {
+                    if id != pane.id, rect.contains(point) {
+                        hitTarget = id
+                        break
+                    }
+                }
+                dragTargetPaneID = hitTarget
+                if let hitTarget, let rect = frames[hitTarget] {
+                    dragDropZone = PaneLayout.DropZone.calculate(at: point, in: rect)
+                } else {
+                    dragDropZone = nil
+                }
+            },
+            onDragEnded: {
+                if let source = dragSourcePaneID,
+                   let target = dragTargetPaneID,
+                   let zone = dragDropZone {
+                    onMovePane?(source, target, zone)
+                }
+                dragSourcePaneID = nil
+                dragTargetPaneID = nil
+                dragDropZone = nil
+            },
+            otherWorkspaces: otherWorkspaces,
+            onRename: onRenamePane.map { handler in { handler(pane.id) } },
+            onMoveToWorkspace: onMovePaneToWorkspace.map { handler in
+                { targetWS in handler(pane.id, targetWS) }
+            },
+            onSetStatus: pane.type == .shell
+                ? onSetPaneStatus.map { handler in { status in handler(pane.id, status) } }
+                : nil,
+            onOpenWebPane: onOpenWebPane.map { handler in { direction in handler(pane.id, direction) } },
+            isSyncExcluded: syncInputExcluded.contains(pane.id),
+            workspaceSyncActive: isSyncInputActive,
+            onToggleSyncExcluded: onToggleSyncExcluded.map { handler in
+                { handler(pane.id) }
+            }
+        )
+    }
+
     private func paneView(pane: Pane, frame: CGRect) -> some View {
         VStack(spacing: 0) {
-            PaneHeaderView(
-                pane: pane,
-                isFocused: pane.id == focusedPaneID,
-                onFocus: { onFocusPane(pane.id) },
-                onSplitHorizontal: { onSplitPane(pane.id, .horizontal) },
-                onSplitVertical: { onSplitPane(pane.id, .vertical) },
-                onClose: { onClosePane(pane.id) },
-                isZoomed: isZoomed,
-                onToggleZoom: onToggleZoom,
-                isEditing: pane.isEditing,
-                onToggleEdit: pane.type == .markdown ? { onToggleMarkdownEdit(pane.id) } : nil,
-                onCopyMarkdown: pane.type == .markdown
-                    ? { postMarkdownCopy(pane.id, kind: .markdown) }
-                    : nil,
-                onCopyRichText: pane.type == .markdown
-                    ? { postMarkdownCopy(pane.id, kind: .richText) }
-                    : nil,
-                onRefreshDiff: pane.type == .diff
-                    ? { diffRefreshTokens[pane.id, default: 0] &+= 1 }
-                    : nil,
-                onDragChanged: { point in
-                    dragSourcePaneID = pane.id
-                    let bounds = CGRect(origin: .zero, size: gridSize)
-                    let frames = layout.paneFrames(in: bounds)
-                    // Hit-test: find which pane contains the cursor
-                    var hitTarget: UUID?
-                    for (id, rect) in frames {
-                        if id != pane.id, rect.contains(point) {
-                            hitTarget = id
-                            break
-                        }
-                    }
-                    dragTargetPaneID = hitTarget
-                    if let hitTarget, let rect = frames[hitTarget] {
-                        dragDropZone = PaneLayout.DropZone.calculate(at: point, in: rect)
-                    } else {
-                        dragDropZone = nil
-                    }
-                },
-                onDragEnded: {
-                    if let source = dragSourcePaneID,
-                       let target = dragTargetPaneID,
-                       let zone = dragDropZone {
-                        onMovePane?(source, target, zone)
-                    }
-                    dragSourcePaneID = nil
-                    dragTargetPaneID = nil
-                    dragDropZone = nil
-                },
-                otherWorkspaces: otherWorkspaces,
-                onRename: onRenamePane.map { handler in { handler(pane.id) } },
-                onMoveToWorkspace: onMovePaneToWorkspace.map { handler in
-                    { targetWS in handler(pane.id, targetWS) }
-                },
-                onSetStatus: pane.type == .shell
-                    ? onSetPaneStatus.map { handler in { status in handler(pane.id, status) } }
-                    : nil,
-                onOpenWebPane: onOpenWebPane.map { handler in { direction in handler(pane.id, direction) } },
-                isSyncExcluded: syncInputExcluded.contains(pane.id),
-                workspaceSyncActive: isSyncInputActive,
-                onToggleSyncExcluded: onToggleSyncExcluded.map { handler in
-                    { handler(pane.id) }
-                }
-            )
+            paneHeaderLayers(pane: pane)
 
             switch pane.type {
             case .shell:
                 SurfaceContainerView(
                     paneID: pane.id,
                     workingDirectory: pane.workingDirectory,
-                    isFocused: pane.id == focusedPaneID
+                    isFocused: pane.id == focusedPaneID,
+                    profileName: profileName
                 )
             case .markdown:
                 if pane.isEditing {
@@ -220,7 +251,8 @@ struct PaneGridView: View {
                             paneID: pane.id,
                             workingDirectory: pane.workingDirectory,
                             isFocused: pane.id == focusedPaneID,
-                            command: editorCommand
+                            command: editorCommand,
+                            profileName: profileName
                         )
                     } else {
                         MarkdownEditorView(

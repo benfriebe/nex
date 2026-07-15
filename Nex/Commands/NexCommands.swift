@@ -161,10 +161,39 @@ final class PaneShortcutMonitor {
         monitor = nil
     }
 
+    /// Whether pane shortcuts should defer to the key window instead of being
+    /// consumed — true when a secondary window (Settings, Help) is key.
+    ///
+    /// The key window counts as the main window when it matches the
+    /// authoritative `MainWindowRegistry.primary` (which the app claims only
+    /// for the main `WindowGroup` content window — never Settings/Help). We
+    /// only fall back to the positional `mainWindowCandidate` heuristic — the
+    /// first visible, non-panel window in `NSApp.windows` — in the brief
+    /// interval before that primary is claimed. That heuristic is fragile
+    /// because `NSApp.windows` ordering is not guaranteed by AppKit: any stray
+    /// visible window (Help, a transient duplicate main window, a lingering
+    /// helper) sorting ahead of the focused main window would make the guard
+    /// wrongly conclude the main window "isn't the main window" and stop
+    /// consuming Cmd+W / Cmd+D (issue #251).
+    static func shouldDeferToSecondaryWindow(
+        keyWindow: NSWindow?,
+        primary: NSWindow?,
+        mainWindowCandidate: @autoclosure () -> NSWindow?
+    ) -> Bool {
+        guard let keyWindow else { return false }
+        if let primary {
+            return keyWindow !== primary
+        }
+        return keyWindow !== mainWindowCandidate()
+    }
+
     func handleKeyEvent(_ event: NSEvent) -> Bool {
         // Don't consume shortcuts when a secondary window (Help, Settings) is key.
-        if let keyWindow = NSApp.keyWindow,
-           keyWindow != NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
+        if Self.shouldDeferToSecondaryWindow(
+            keyWindow: NSApp.keyWindow,
+            primary: MainWindowRegistry.primary,
+            mainWindowCandidate: NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) })
+        ) {
             return false
         }
 
@@ -191,11 +220,13 @@ final class PaneShortcutMonitor {
         if store.configHotkey.globalHotkey == trigger { return false }
 
         // Web pane priority layer: when the focused pane is a `.web`
-        // pane, consult a hard-coded ⌘L / ⌘R / ⌘[ / ⌘] map *before*
+        // pane, consult a hard-coded ⌘L / ⌘R / ⌘← / ⌘→ map *before*
         // falling through to the normal keybinding lookup. This way
         // the global defaults (close pane / focus prev / focus next /
         // markdown font) keep working for every other pane type while
-        // web panes get browser-style shortcuts.
+        // web panes get browser-style shortcuts. Back/forward use ⌘← /
+        // ⌘→ (not ⌘[ / ⌘]) so ⌘[ / ⌘] stay free for focus prev/next
+        // even inside a web pane (issue #229).
         if let consumed = handleWebPanePriorityShortcut(
             event: event,
             trigger: trigger,
@@ -215,7 +246,7 @@ final class PaneShortcutMonitor {
     /// Web pane priority layer. Returns:
     /// - `true`  - event consumed by a web action
     /// - `false` - event consumed by an intentional fall-through
-    ///   (e.g. URL bar editing + ⌘[ shouldn't trip back)
+    ///   (e.g. URL bar editing + ⌘← shouldn't trip back)
     /// - `nil`   - not applicable, the main layer should run
     private func handleWebPanePriorityShortcut(
         event _: NSEvent,
@@ -230,9 +261,9 @@ final class PaneShortcutMonitor {
         // ⌘ alone, no shift / ctrl / option.
         let isPlainCommand = trigger.modifiers == .command
         let isCmdShift = trigger.modifiers == [.command, .shift]
-        // ⌘[ / ⌘] — only intercept when the URL bar isn't editing.
-        // The bar is an NSTextField, which becomes the window's
-        // firstResponder via its NSText editor when typing.
+        // ⌘← / ⌘→ (back/forward) — only intercept when the URL bar
+        // isn't editing. The bar is an NSTextField, which becomes the
+        // window's firstResponder via its NSText editor when typing.
         let urlBarIsEditing: Bool = {
             guard let keyWindow = NSApp.keyWindow,
                   let responder = keyWindow.firstResponder else { return false }
@@ -249,14 +280,14 @@ final class PaneShortcutMonitor {
                 action: .webPaneReload(paneID: focusedID, hard: false)
             )))
             return true
-        case (33, true, _): // ⌘[
-            if urlBarIsEditing { return nil } // fall through to focusPreviousPane
+        case (123, true, _): // ⌘← → back
+            if urlBarIsEditing { return nil } // fall through so ⌘← moves the text cursor
             store.send(.workspaces(.element(
                 id: id,
                 action: .webPaneBack(paneID: focusedID)
             )))
             return true
-        case (30, true, _): // ⌘]
+        case (124, true, _): // ⌘→ → forward
             if urlBarIsEditing { return nil }
             store.send(.workspaces(.element(
                 id: id,
@@ -282,6 +313,24 @@ final class PaneShortcutMonitor {
         case (30, false, true): // ⌘⇧] → next tab
             if urlBarIsEditing { return nil }
             store.send(.webPaneTabCycleFocused(offset: 1))
+            return true
+        case (24, true, _), (24, false, true): // ⌘= / ⌘⇧= (⌘+) → zoom in
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: 0.1)
+            )))
+            return true
+        case (27, true, _): // ⌘- → zoom out
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: -0.1)
+            )))
+            return true
+        case (29, true, _): // ⌘0 → reset zoom
+            store.send(.workspaces(.element(
+                id: id,
+                action: .webPaneZoom(paneID: focusedID, delta: nil)
+            )))
             return true
         default:
             return nil
@@ -446,6 +495,21 @@ final class PaneShortcutMonitor {
                 .webPaneTabCycleFocused(offset: 1)
             }
 
+        case .webZoomIn:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: 0.1)))
+            }
+
+        case .webZoomOut:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: -0.1)))
+            }
+
+        case .webZoomReset:
+            return handleWebAction(activeWorkspaceID: id) { paneID in
+                .workspaces(.element(id: id, action: .webPaneZoom(paneID: paneID, delta: nil)))
+            }
+
         default:
             return false
         }
@@ -473,9 +537,16 @@ final class PaneShortcutMonitor {
               let focusedID = workspace.focusedPaneID
         else { return false }
 
-        // Last pane — close the workspace instead
+        // Last pane — close the workspace instead. Warn first if it has
+        // active agents (same gate as the sidebar Delete item), so ⌘W
+        // can't silently terminate a running session.
         if workspace.panes.count <= 1 {
-            store.send(.deleteWorkspace(id))
+            if WorkspaceDeleteGate.shouldDelete(
+                workspaceName: workspace.name,
+                activeAgentCount: workspace.activeAgentCount
+            ) {
+                store.send(.deleteWorkspace(id))
+            }
             return true
         }
 

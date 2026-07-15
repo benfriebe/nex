@@ -253,6 +253,28 @@ extension AppReducer {
                         id: workspace.id, action: .movePaneInDirection(direction)
                     )))
 
+                case let .paneResize(paneID, target, workspace, ratio, delta):
+                    return handlePaneResize(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        workspaceFilter: workspace,
+                        ratio: ratio,
+                        delta: delta,
+                        reply: reply
+                    )
+
+                case let .paneMoveAdjacent(paneID, target, anchor, zone, workspace):
+                    return handlePaneMoveAdjacent(
+                        state: &state,
+                        paneID: paneID,
+                        target: target,
+                        anchor: anchor,
+                        zone: zone,
+                        workspaceFilter: workspace,
+                        reply: reply
+                    )
+
                 case .paneMoveToWorkspace(let paneID, let toWorkspace, let create):
                     // Find source workspace
                     guard let sourceWS = state.workspaces.first(where: { $0.panes[id: paneID] != nil })
@@ -394,13 +416,23 @@ extension AppReducer {
 
                 // MARK: Workspace commands
 
-                case .workspaceCreate(let name, let path, let color, let group):
+                case .workspaceList(let group):
+                    handleWorkspaceList(state: state, group: group, reply: reply)
+                    return .none
+
+                case .workspaceCreate(let name, let path, let color, let group, let profile, let worktree, let branch, let updateMain, let repo):
                     return handleSocketWorkspaceCreate(
                         &state,
                         name: name,
                         path: path,
                         color: color,
-                        group: group
+                        group: group,
+                        profile: profile,
+                        worktree: worktree,
+                        branch: branch,
+                        updateMain: updateMain,
+                        repo: repo,
+                        reply: reply
                     )
 
                 case .workspaceMove(let nameOrID, let group, let index):
@@ -410,6 +442,36 @@ extension AppReducer {
                         group: group,
                         index: index
                     )
+
+                case .workspaceDelete(let nameOrID, let force):
+                    return handleWorkspaceDelete(
+                        state: state,
+                        nameOrID: nameOrID,
+                        force: force,
+                        reply: reply
+                    )
+
+                case .workspaceProfile(let nameOrID, let profile):
+                    // UUID-wins / unique-name / ambiguous→no-op semantics
+                    // come from `resolveWorkspace`, matching workspace-move.
+                    guard let workspace = state.resolveWorkspace(nameOrID) else { return .none }
+                    return .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .setProfile(profile)
+                    )))
+
+                case .workspaceLabel(let nameOrID, let op, let values):
+                    return handleWorkspaceLabel(
+                        &state,
+                        nameOrID: nameOrID,
+                        op: op,
+                        values: values,
+                        reply: reply
+                    )
+
+                case .groupList:
+                    handleGroupList(state: state, reply: reply)
+                    return .none
 
                 case .groupCreate(let name, let color):
                     return handleSocketGroupCreate(&state, name: name, color: color)
@@ -421,6 +483,26 @@ extension AppReducer {
                 case .groupDelete(let nameOrID, let cascade):
                     guard let group = state.resolveGroup(nameOrID) else { return .none }
                     return .send(.deleteGroup(id: group.id, cascade: cascade))
+
+                case .groupReorder(let nameOrID, let order):
+                    return handleGroupReorder(
+                        &state,
+                        nameOrID: nameOrID,
+                        explicitOrder: order,
+                        sortBy: nil,
+                        descending: false,
+                        reply: reply
+                    )
+
+                case .groupSort(let nameOrID, let by, let descending):
+                    return handleGroupReorder(
+                        &state,
+                        nameOrID: nameOrID,
+                        explicitOrder: nil,
+                        sortBy: by,
+                        descending: descending,
+                        reply: reply
+                    )
 
                 // MARK: File commands
 
@@ -813,19 +895,152 @@ extension AppReducer {
         name: String?,
         path: String?,
         color: WorkspaceColor?,
-        group: String?
+        group: String?,
+        profile: String? = nil,
+        worktree: String? = nil,
+        branch: String? = nil,
+        updateMain: Bool = false,
+        repo: String? = nil,
+        reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        let createEffect: Effect<Action> = .send(.createWorkspace(
-            name: name ?? "Workspace",
-            color: color,
-            workingDirectory: path
-        ))
+        let workspaceName = name ?? "Workspace"
+
+        /// Success ack: `{ok, workspace_id, workspace_name, group?}`.
+        /// `reply == nil` is the legacy fire-and-forget path.
+        func succeed(id: UUID, group groupName: String? = nil) {
+            var payload: [String: Any] = [
+                "ok": true,
+                "workspace_id": id.uuidString,
+                "workspace_name": workspaceName
+            ]
+            if let groupName { payload["group"] = groupName }
+            reply?.send(payload)
+            reply?.close()
+        }
+
+        // Inline worktree flow (issue #222). When `--worktree` is set, create
+        // the worktree first (async), then dispatch `.createWorkspace` with
+        // the resolved seed so the first pane opens in it. `--group` composes
+        // with an *existing* group (mirrors the GUI, which only offers
+        // existing groups): the resolved group id is threaded into
+        // `.createWorkspace`. An unknown or ambiguous group name is rejected
+        // — the worktree path does not create groups (that would leave an
+        // orphaned empty group if the async worktree add then fails).
+        if let worktree, !worktree.isEmpty {
+            let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var resolvedGroupID: UUID?
+            if let trimmedGroup, !trimmedGroup.isEmpty {
+                if let existingGroup = state.resolveGroup(trimmedGroup) {
+                    resolvedGroupID = existingGroup.id
+                } else if state.groups.contains(where: { $0.name == trimmedGroup }) {
+                    reply?.send(["ok": false, "error": "group name is ambiguous: \(trimmedGroup) (use the id or rename an existing group)"])
+                    reply?.close()
+                    return .none
+                } else {
+                    reply?.send(["ok": false, "error": "unknown group: \(trimmedGroup) — --worktree only supports existing groups; create it first (`nex group create`) or omit --group"])
+                    reply?.close()
+                    return .none
+                }
+            }
+            // The CLI always sends the source repo path (cwd fallback) when
+            // `--worktree` is set. Guard defensively.
+            guard let repoPathRaw = repo ?? path, !repoPathRaw.isEmpty else {
+                reply?.send(["ok": false, "error": "--worktree requires a source repo (pass --repo <path>)"])
+                reply?.close()
+                return .none
+            }
+            let sourceRepoPath = (repoPathRaw as NSString).standardizingPath
+
+            // Sanitize names — same single source of truth as the GUI/inspector.
+            let worktreeBranch = (branch?.isEmpty == false) ? branch! : worktree
+            guard let folderName = WorkspaceFeature.State.sanitizedGitName(from: worktree) else {
+                reply?.send(["ok": false, "error": "\"\(worktree)\" isn't a usable worktree name"])
+                reply?.close()
+                return .none
+            }
+            guard let safeBranch = WorkspaceFeature.State.sanitizedGitName(from: worktreeBranch) else {
+                reply?.send(["ok": false, "error": "\"\(worktreeBranch)\" isn't a usable branch name"])
+                reply?.close()
+                return .none
+            }
+
+            // Find or mint the source Repo so `.createWorkspace` can register
+            // it and attach a worktree association.
+            let sourceRepo: Repo = if let existing = state.repoRegistry.first(where: {
+                ($0.path as NSString).standardizingPath == sourceRepoPath
+            }) {
+                existing
+            } else {
+                Repo(
+                    id: uuid(),
+                    path: sourceRepoPath,
+                    name: (sourceRepoPath as NSString).lastPathComponent
+                )
+            }
+
+            let basePath = state.settings.resolvedWorktreeBasePath(forRepoPath: sourceRepoPath)
+            let worktreePath = "\(basePath)/\(folderName)"
+            let newID = uuid()
+            let colorValue = color
+            let profileValue = profile
+            let wsName = workspaceName
+            let groupID = resolvedGroupID
+            let groupName = (resolvedGroupID != nil) ? trimmedGroup : nil
+            return .run { [gitService] send in
+                do {
+                    try await performWorktreeAdd(
+                        gitService: gitService,
+                        repoPath: sourceRepoPath,
+                        worktreePath: worktreePath,
+                        branch: safeBranch,
+                        updateMain: updateMain
+                    )
+                    await send(.createWorkspace(
+                        name: wsName,
+                        color: colorValue,
+                        repos: [sourceRepo],
+                        groupID: groupID,
+                        profileName: profileValue,
+                        id: newID,
+                        worktree: WorktreeSeed(path: worktreePath, branchName: safeBranch)
+                    ))
+                    var payload: [String: Any] = [
+                        "ok": true,
+                        "workspace_id": newID.uuidString,
+                        "workspace_name": wsName,
+                        "worktree_path": worktreePath,
+                        "branch": safeBranch
+                    ]
+                    if let groupName { payload["group"] = groupName }
+                    reply?.send(payload)
+                    reply?.close()
+                } catch {
+                    reply?.send(["ok": false, "error": worktreeErrorMessage(error)])
+                    reply?.close()
+                }
+            }
+        }
+
         // A missing `group` OR a group that's all whitespace falls
         // back to the top-level create path. Whitespace-only names
         // wouldn't survive the existing `createGroup` trim check
         // anyway, so treat them as "no group specified."
         let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmedGroup, !trimmedGroup.isEmpty else { return createEffect }
+        guard let trimmedGroup, !trimmedGroup.isEmpty else {
+            // Top-level create. Pre-mint the id (after this guard, so the
+            // uuid sequence is unchanged for the ambiguity/error paths)
+            // and thread it so `.createWorkspace` uses the same one the
+            // reply reports.
+            let newID = uuid()
+            succeed(id: newID)
+            return .send(.createWorkspace(
+                name: workspaceName,
+                color: color,
+                workingDirectory: path,
+                profileName: profile,
+                id: newID
+            ))
+        }
 
         // Resolve BEFORE any state mutation so an ambiguous-name
         // match can cleanly abort the whole message. `resolveGroup`
@@ -839,6 +1054,8 @@ extension AppReducer {
             // create a third. The user needs to disambiguate (e.g.
             // by passing a UUID) or rename one of the existing
             // groups first.
+            reply?.send(["ok": false, "error": "group name is ambiguous: \(trimmedGroup) (use the id or rename an existing group)"])
+            reply?.close()
             return .none
         }
 
@@ -850,12 +1067,18 @@ extension AppReducer {
         let newWorkspaceID = uuid()
         let workspace = WorkspaceFeature.State(
             id: newWorkspaceID,
-            name: name ?? "Workspace",
+            name: workspaceName,
             color: color ?? state.workspaces.nextRandomColor()
         )
         var seeded = workspace
         if let path {
             seeded.panes[seeded.panes.startIndex].workingDirectory = path
+        }
+        // Must land before `seeded` is appended into state below — a later
+        // assignment would mutate a dead local. The surface effect at the
+        // bottom of this handler resolves env from this value.
+        if let profile {
+            seeded.profileName = WorkspaceProfilesClient.normalizedAssignment(profile)
         }
         // Capture the anchor for `.nearSelection` BEFORE overwriting
         // `activeWorkspaceID` — the previously active workspace is what
@@ -902,21 +1125,28 @@ extension AppReducer {
             }
         }()
 
+        succeed(id: newWorkspaceID, group: trimmedGroup)
+
         // Create the initial surface for the workspace, then move it
         // under the resolved group, then persist. Mirrors the
         // effects `createWorkspace` would run in the non-group path.
         let paneID = seeded.panes.first!.id
         let cwd = seeded.panes.first!.workingDirectory
         let opacity = ghosttyConfig.backgroundOpacity
+        let profileName = seeded.profileName
         // `moveWorkspaceToGroup` persists, so an explicit persist
         // here would race it. Only the surface-creation side-effect
         // needs to fire alongside.
         return .merge(
             .run { _ in
+                let env = workspaceProfiles.resolveEnv(
+                    profileName ?? WorkspaceProfilesClient.defaultProfileName
+                )
                 await surfaceManager.createSurface(
                     paneID: paneID,
                     workingDirectory: cwd,
-                    backgroundOpacity: opacity
+                    backgroundOpacity: opacity,
+                    env: env
                 )
             },
             .send(.moveWorkspaceToGroup(
@@ -952,6 +1182,90 @@ extension AppReducer {
         ))
     }
 
+    /// Resolve + dispatch a `workspace-delete` request. Mirrors the
+    /// `handlePaneClose` reply shape. Refuses to delete the last
+    /// remaining workspace so the scripting path matches the GUI
+    /// context-menu Delete item, disabled at `workspaces.count <= 1`
+    /// (`WorkspaceListView`). Note this is deliberately stricter than
+    /// the app's runtime invariant — closing the last pane of the only
+    /// workspace via ⌘W does reach zero workspaces — but a bulk
+    /// scripted delete draining every workspace is a footgun worth
+    /// refusing. On success the reply carries the deleted workspace's
+    /// directory (a shell pane's *current* working directory, if any)
+    /// so `nex workspace delete --prune-worktree` can remove the
+    /// underlying git worktree client-side; an empty workspace has no
+    /// pane and therefore no `path`. `reply == nil` is the legacy
+    /// fire-and-forget path — the guards still apply and the delete is
+    /// dispatched on success, dropped silently on failure.
+    ///
+    /// `force` (from `--force`/`-y`) bypasses the running-agents guard:
+    /// unless forced, deleting a workspace that still has active agents
+    /// (panes or parked panes with a non-idle status) is refused, so a
+    /// scripted cleanup can't silently kill live agents. This mirrors
+    /// the app-quit warning; the GUI shows a "Delete anyway?" dialog for
+    /// the same case (see `WorkspaceDeleteGate`), while the CLI's
+    /// explicit `--force` is the scripting equivalent and is honoured
+    /// independent of that dialog's "Don't ask again" setting.
+    func handleWorkspaceDelete(
+        state: State,
+        nameOrID: String,
+        force: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ error: String, extra: [String: Any] = [:]) -> Effect<Action> {
+            reply?.send(["ok": false, "error": error].merging(extra) { _, new in new })
+            reply?.close()
+            return .none
+        }
+
+        guard let workspace = state.resolveWorkspace(nameOrID) else {
+            // `resolveWorkspace` returns nil for both "no match" and a
+            // non-unique name; distinguish them so a scripted bulk
+            // cleanup gets an actionable message instead of a
+            // misleading "not found" on a name that does exist.
+            if UUID(uuidString: nameOrID) == nil,
+               state.workspaces.count(where: { $0.name == nameOrID }) > 1 {
+                return fail("workspace name is ambiguous: \(nameOrID) (use the id)")
+            }
+            return fail("workspace not found: \(nameOrID)")
+        }
+
+        // Match the GUI's `.disabled(store.workspaces.count <= 1)`:
+        // never let a scripted delete drain the app to zero workspaces.
+        guard state.workspaces.count > 1 else {
+            return fail("refusing to delete the last workspace")
+        }
+
+        // Running-agents guard (mirrors the app-quit warning). An
+        // "active agent" is any pane — visible or parked — whose status
+        // is not `.idle`, matching `State.activeAgentSummary`.
+        let activeAgents = workspace.activeAgentCount
+        if !force, activeAgents > 0 {
+            let noun = activeAgents == 1 ? "agent" : "agents"
+            return fail(
+                "workspace \(workspace.name) has \(activeAgents) running \(noun); pass --force to delete anyway",
+                extra: ["active_agents": activeAgents]
+            )
+        }
+
+        var payload: [String: Any] = [
+            "ok": true,
+            "workspace_id": workspace.id.uuidString,
+            "workspace_name": workspace.name
+        ]
+        // Prefer a shell pane's cwd — that's the one rooted in the
+        // worktree. Any pane resolves to the same worktree root, but a
+        // markdown/web first pane may sit elsewhere (e.g. $HOME).
+        let prunePath = workspace.panes.first(where: { $0.type == .shell })?.workingDirectory
+            ?? workspace.panes.first?.workingDirectory
+        if let prunePath {
+            payload["path"] = prunePath
+        }
+        reply?.send(payload)
+        reply?.close()
+        return .send(.deleteWorkspace(workspace.id))
+    }
+
     /// Dispatch `group-create`. Trims + rejects whitespace-only
     /// names to match the existing `.createGroup` reducer handler
     /// — a blank group name would render as empty header chrome
@@ -972,6 +1286,353 @@ extension AppReducer {
         // Scroll the new group header into view (issue #187).
         state.sidebarScrollTarget = .group(newID)
         return .send(.persistState)
+    }
+
+    /// Build and send the read-only `workspace-list` response. Workspaces
+    /// follow sidebar order: top-level entries in `topLevelOrder`, and each
+    /// group's members (regardless of the group's collapse state, unlike
+    /// `visibleWorkspaceOrder`) in child order. Any workspace unreachable
+    /// through `topLevelOrder` (a recoverable ordering inconsistency) is
+    /// appended in state order so the CLI never hides it. Each entry carries
+    /// its parent group's `group_id` / `group_name` (absent for top-level
+    /// workspaces), matching the fields on `pane-list`.
+    func handleWorkspaceList(
+        state: State,
+        group groupFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        // `--group` scopes the listing to one group's members (in child
+        // order). An unknown/ambiguous group name is an error, not an
+        // empty list, so scripts can tell "no such group" from "empty
+        // group".
+        var restrictTo: Set<UUID>?
+        if let groupFilter, !groupFilter.isEmpty {
+            guard let group = state.resolveGroup(groupFilter) else {
+                reply.send(["ok": false, "error": "no group matches '\(groupFilter)'"])
+                reply.close()
+                return
+            }
+            restrictTo = Set(group.childOrder)
+        }
+
+        var orderedWorkspaceIDs: [UUID] = []
+        var seen = Set<UUID>()
+        for item in state.topLevelOrder {
+            switch item {
+            case .workspace(let id):
+                if state.workspaces[id: id] != nil, seen.insert(id).inserted {
+                    orderedWorkspaceIDs.append(id)
+                }
+            case .group(let groupID):
+                guard let group = state.groups[id: groupID] else { continue }
+                for childID in group.childOrder
+                    where state.workspaces[id: childID] != nil && seen.insert(childID).inserted {
+                    orderedWorkspaceIDs.append(childID)
+                }
+            }
+        }
+        for workspace in state.workspaces where seen.insert(workspace.id).inserted {
+            orderedWorkspaceIDs.append(workspace.id)
+        }
+
+        if let restrictTo {
+            orderedWorkspaceIDs = orderedWorkspaceIDs.filter { restrictTo.contains($0) }
+        }
+
+        let iso = ISO8601DateFormatter()
+        let workspaces: [[String: Any]] = orderedWorkspaceIDs.compactMap { workspaceID in
+            guard let workspace = state.workspaces[id: workspaceID] else { return nil }
+            var entry: [String: Any] = [
+                "id": workspace.id.uuidString,
+                "name": workspace.name,
+                "color": workspace.color.rawValue,
+                "pane_count": workspace.panes.count,
+                "is_active": workspace.id == state.activeWorkspaceID,
+                "created_at": iso.string(from: workspace.createdAt),
+                "last_accessed_at": iso.string(from: workspace.lastAccessedAt),
+                "labels": Array(workspace.labels)
+            ]
+            // Workspaces have no activity timestamp of their own; surface
+            // the most recent across their panes so scripts can rank by
+            // "last touched".
+            if let latest = workspace.panes.map(\.lastActivityAt).max() {
+                entry["last_activity_at"] = iso.string(from: latest)
+            }
+            // The issue's staleness use case keys off the workspace's
+            // agent session; expose the first pane that carries one.
+            if let session = workspace.panes.compactMap(\.agentSessionID).first {
+                entry["agent_session_id"] = session
+            }
+            if let groupID = state.groupID(forWorkspace: workspace.id),
+               let group = state.groups[id: groupID] {
+                entry["group_id"] = group.id.uuidString
+                entry["group_name"] = group.name
+            }
+            return entry
+        }
+
+        reply.send(["ok": true, "workspaces": workspaces])
+        reply.close()
+    }
+
+    /// `workspace-label` — apply a set/add/remove/clear mutation to a
+    /// workspace's labels and reply with the resulting set. Mutating
+    /// inline (rather than dispatching `.addLabel` etc.) lets the reply
+    /// reflect the post-mutation labels in the same reducer run.
+    func handleWorkspaceLabel(
+        _ state: inout State,
+        nameOrID: String,
+        op: String,
+        values: [String],
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ message: String) -> Effect<Action> {
+            reply?.sendAndClose(["ok": false, "error": message])
+            return .none
+        }
+
+        guard let resolved = state.resolveWorkspace(nameOrID) else {
+            return fail("no workspace matches '\(nameOrID)'")
+        }
+        let workspaceID = resolved.id
+
+        let normalizedValues = values
+            .map { WorkspaceFeature.normalizeLabel($0) }
+            .filter { !$0.isEmpty }
+
+        // Labels introduced by set/add that need a backing LabelPreset so
+        // they aren't orphaned (invisible/unmanaged in Settings ▸ Labels).
+        var introduced: [String] = []
+
+        switch op {
+        case "set":
+            // A `set` whose values all normalize away (e.g. `--set ""`) would
+            // silently clear every label. Reject it so an accidental wipe
+            // can't masquerade as a set; `--clear` is the explicit path.
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to set (use --clear to remove all labels)")
+            }
+            var seen = Set<String>()
+            var deduped: [String] = []
+            for value in normalizedValues where seen.insert(value).inserted {
+                deduped.append(value)
+            }
+            state.workspaces[id: workspaceID]?.labels = deduped
+            introduced = deduped
+        case "add":
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to add")
+            }
+            for value in normalizedValues
+                where state.workspaces[id: workspaceID]?.labels.contains(value) == false {
+                state.workspaces[id: workspaceID]?.labels.append(value)
+            }
+            introduced = normalizedValues
+        case "remove":
+            guard !normalizedValues.isEmpty else {
+                return fail("no label value to remove")
+            }
+            // Removing a label from a workspace does not delete its preset
+            // (mirrors the GUI — presets persist independently of use).
+            state.workspaces[id: workspaceID]?.labels.removeAll { normalizedValues.contains($0) }
+        case "clear":
+            state.workspaces[id: workspaceID]?.labels = []
+        default:
+            return fail("unknown label operation '\(op)'")
+        }
+
+        let resultLabels = Array(state.workspaces[id: workspaceID]?.labels ?? [])
+        reply?.sendAndClose([
+            "ok": true,
+            "workspace_id": workspaceID.uuidString,
+            "workspace_name": state.workspaces[id: workspaceID]?.name ?? "",
+            "labels": resultLabels
+        ])
+
+        // Ensure each introduced label has a (gray, recolorable) preset so a
+        // CLI-tagged workspace is consistent with the GUI, where every applied
+        // label is a managed preset. `addLabelPreset` is a no-op for names that
+        // already exist, so it never recolors a user's preset.
+        var effects: [Effect<Action>] = [.send(.persistState)]
+        for name in introduced {
+            effects.append(.send(.presets(.addLabelPreset(name: name, color: .named(.gray)))))
+        }
+        return .merge(effects)
+    }
+
+    /// `group-reorder` / `group-sort` — rewrite a group's `childOrder`.
+    /// `childOrder` (not `workspace.sortOrder`) is the actual render
+    /// order, so writing it here is what makes same-group reordering
+    /// take effect (the gap the issue calls out for `workspace move
+    /// --index`). Exactly one of `explicitOrder` / `sortBy` is set.
+    func handleGroupReorder(
+        _ state: inout State,
+        nameOrID: String,
+        explicitOrder: [String]?,
+        sortBy: String?,
+        descending: Bool,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        func fail(_ message: String) -> Effect<Action> {
+            reply?.sendAndClose(["ok": false, "error": message])
+            return .none
+        }
+
+        guard let group = state.resolveGroup(nameOrID) else {
+            return fail("no group matches '\(nameOrID)'")
+        }
+        // Only members that still exist as workspaces are orderable.
+        // Dedup defensively: a corrupted `childOrder` holding a duplicate
+        // id would otherwise trap the per-key `Dictionary(uniqueKeysWithValues:)`
+        // build in the sort branch.
+        var memberSet = Set<UUID>()
+        let members = group.childOrder.filter {
+            state.workspaces[id: $0] != nil && memberSet.insert($0).inserted
+        }
+
+        var newOrder: [UUID]
+        if let explicitOrder {
+            // Resolve each token to a member (UUID, or a name unique
+            // within the group). Reject anything that isn't a member so
+            // typos surface instead of silently dropping.
+            var resolved: [UUID] = []
+            var seen = Set<UUID>()
+            for token in explicitOrder {
+                guard let id = resolveGroupMember(token, members: members, state: state) else {
+                    return fail("'\(token)' is not a workspace in group '\(group.name)'")
+                }
+                guard seen.insert(id).inserted else {
+                    return fail("workspace '\(token)' listed more than once")
+                }
+                resolved.append(id)
+            }
+            // Members omitted from --order keep their relative order at the tail.
+            newOrder = resolved
+            for id in members where !seen.contains(id) {
+                newOrder.append(id)
+            }
+        } else if let sortBy {
+            // Precompute the sort key per member into a local (avoids
+            // capturing `inout state` in the comparator closure).
+            let key = sortBy.lowercased()
+            let comparator: (UUID, UUID) -> Bool
+            switch key {
+            case "name":
+                let names = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, state.workspaces[id: $0]?.name ?? "")
+                })
+                comparator = { (names[$0] ?? "").localizedCaseInsensitiveCompare(names[$1] ?? "") == .orderedAscending }
+            case "last-activity", "last_activity":
+                let dates = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, activityDate($0, state: state))
+                })
+                comparator = { (dates[$0] ?? .distantPast) < (dates[$1] ?? .distantPast) }
+            case "last-accessed", "last_accessed", "last-modified", "last_modified":
+                let dates = Dictionary(uniqueKeysWithValues: members.map {
+                    ($0, state.workspaces[id: $0]?.lastAccessedAt ?? .distantPast)
+                })
+                comparator = { (dates[$0] ?? .distantPast) < (dates[$1] ?? .distantPast) }
+            default:
+                return fail("unknown sort key '\(sortBy)' (use name|last-activity|last-accessed)")
+            }
+            // Stable sort with the original index as a tiebreaker so equal
+            // keys keep their prior relative order. For `--desc` we invert
+            // the key comparison (not a whole-array reverse), so ties still
+            // keep their original order rather than flipping.
+            let indexed = members.enumerated().map { ($0.offset, $0.element) }
+            let sorted = indexed.sorted { lhs, rhs in
+                let aFirst = descending ? comparator(rhs.1, lhs.1) : comparator(lhs.1, rhs.1)
+                let bFirst = descending ? comparator(lhs.1, rhs.1) : comparator(rhs.1, lhs.1)
+                if aFirst { return true }
+                if bFirst { return false }
+                return lhs.0 < rhs.0
+            }
+            newOrder = sorted.map(\.1)
+        } else {
+            return fail("no order or sort key given")
+        }
+
+        // Preserve any children whose workspace vanished mid-flight at the
+        // tail so we never drop ids from `childOrder`.
+        for id in group.childOrder where !memberSet.contains(id) {
+            newOrder.append(id)
+        }
+
+        state.groups[id: group.id]?.childOrder = newOrder
+
+        reply?.sendAndClose([
+            "ok": true,
+            "group_id": group.id.uuidString,
+            "group_name": group.name,
+            "order": newOrder.filter { memberSet.contains($0) }.map(\.uuidString)
+        ])
+        return .send(.persistState)
+    }
+
+    /// Resolve a `group-reorder` token to a member workspace id: a UUID
+    /// that is a member, or a name that uniquely matches a member.
+    private func resolveGroupMember(
+        _ token: String,
+        members: [UUID],
+        state: State
+    ) -> UUID? {
+        if let uuid = UUID(uuidString: token), members.contains(uuid) {
+            return uuid
+        }
+        let matches = members.filter { state.workspaces[id: $0]?.name == token }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    /// Most recent pane activity in a workspace, or `.distantPast` when
+    /// it has no panes — used as the `last-activity` sort key.
+    private func activityDate(_ workspaceID: UUID, state: State) -> Date {
+        state.workspaces[id: workspaceID]?.panes.map(\.lastActivityAt).max() ?? .distantPast
+    }
+
+    /// Build and send the read-only `group-list` response. Groups follow
+    /// their header order in the sidebar; any unplaced groups are appended
+    /// in state order so a recoverable ordering inconsistency cannot hide
+    /// them from the CLI. Member workspaces follow each group's child order.
+    func handleGroupList(
+        state: State,
+        reply: SocketServer.ReplyHandle?
+    ) {
+        guard let reply else { return }
+
+        // Route both the sidebar-order scan and the state-order append
+        // through the same `seen` filter so a corrupted `topLevelOrder`
+        // holding a duplicate `.group(id)` can't list a group twice.
+        var orderedGroupIDs: [UUID] = []
+        var seenGroupIDs = Set<UUID>()
+        for groupID in state.topLevelOrder.compactMap(\.groupID)
+            where seenGroupIDs.insert(groupID).inserted {
+            orderedGroupIDs.append(groupID)
+        }
+        for group in state.groups where seenGroupIDs.insert(group.id).inserted {
+            orderedGroupIDs.append(group.id)
+        }
+
+        let groups: [[String: Any]] = orderedGroupIDs.compactMap { groupID in
+            guard let group = state.groups[id: groupID] else { return nil }
+            let workspaces: [[String: Any]] = state.workspaces(inGroup: groupID).map { workspace in
+                [
+                    "id": workspace.id.uuidString,
+                    "name": workspace.name
+                ]
+            }
+            var entry: [String: Any] = [
+                "id": group.id.uuidString,
+                "name": group.name,
+                "workspaces": workspaces
+            ]
+            if let color = group.color { entry["color"] = color.rawValue }
+            return entry
+        }
+
+        reply.send(["ok": true, "groups": groups])
+        reply.close()
     }
 
     /// Shared success reply for `pane-split` / `pane-create`: the new
@@ -1116,6 +1777,8 @@ extension AppReducer {
 
         var panes: [[String: Any]] = []
         for workspace in workspaces {
+            let parentGroup = state.groupID(forWorkspace: workspace.id)
+                .flatMap { state.groups[id: $0] }
             for paneID in workspace.layout.allPaneIDs {
                 guard let pane = workspace.panes[id: paneID] else { continue }
                 var entry: [String: Any] = [
@@ -1136,6 +1799,10 @@ extension AppReducer {
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
                 if pane.backgroundTaskCount > 0 { entry["background_tasks"] = pane.backgroundTaskCount }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
+                if let parentGroup {
+                    entry["group_id"] = parentGroup.id.uuidString
+                    entry["group_name"] = parentGroup.name
+                }
                 panes.append(entry)
             }
         }
@@ -1560,6 +2227,163 @@ extension AppReducer {
         }
 
         return .send(.persistState)
+    }
+
+    /// Dispatch `pane-resize` (issue #241). Resolves the target pane, maps
+    /// it to the enclosing split's `splitPath`, translates the requested
+    /// pane *share* (absolute `--ratio` or relative `--grow`/`--shrink`
+    /// `delta`) into the split's stored first-child ratio, and applies it.
+    /// Because the split ratio is always the first child's fraction, a
+    /// second-child pane's share is `1 - ratio`. Effective share clamps to
+    /// `[0.1, 0.9]` (same bounds `updatingSplitRatio` enforces).
+    func handlePaneResize(
+        state: inout State,
+        paneID: UUID?,
+        target: String?,
+        workspaceFilter: String?,
+        ratio: Double?,
+        delta: Double?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let resolvedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            resolvedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // While a pane is zoomed the live layout is a single leaf (the real
+        // tree is parked in `savedLayout`), so a resize can't map to a
+        // split. Give a specific error instead of the misleading
+        // "only pane in its workspace" below.
+        if workspace.zoomedPaneID != nil {
+            reply?.error("cannot resize while a pane is zoomed — un-zoom first")
+            return .none
+        }
+
+        guard let enclosing = workspace.layout.enclosingSplitPath(of: resolvedID) else {
+            reply?.error("pane \(resolvedID.uuidString) has no sibling to resize against (it is the only pane in its workspace)")
+            return .none
+        }
+
+        // Translate the desired pane share into a first-child ratio.
+        let desiredShare: Double
+        if let ratio {
+            desiredShare = ratio
+        } else if let delta {
+            let currentRatio = workspace.layout.ratio(atPath: enclosing.path) ?? 0.5
+            let currentShare = enclosing.paneIsFirst ? currentRatio : (1 - currentRatio)
+            desiredShare = currentShare + delta
+        } else {
+            reply?.error("pane resize requires --ratio or --grow/--shrink")
+            return .none
+        }
+
+        let clampedShare = min(max(desiredShare, 0.1), 0.9)
+        let newRatio = enclosing.paneIsFirst ? clampedShare : (1 - clampedShare)
+
+        state.workspaces[id: workspace.id]?.layout = workspace.layout.updatingSplitRatio(
+            atPath: enclosing.path, to: newRatio
+        )
+        // Mirror `updateSplitRatio`: a manual ratio breaks the predefined
+        // layout, so drop the tracked index.
+        state.workspaces[id: workspace.id]?.currentLayoutIndex = nil
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": resolvedID.uuidString,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name,
+                "split_path": enclosing.path,
+                "ratio": newRatio,
+                "target_share": clampedShare
+            ]
+            if let label = workspace.panes[id: resolvedID]?.label { payload["label"] = label }
+            reply.sendAndClose(payload)
+        }
+
+        return .send(.persistState)
+    }
+
+    /// Dispatch `pane-move-adjacent` (issue #241): the CLI form of GUI
+    /// drag-and-drop. Resolves the moved pane (`target`) and the anchor
+    /// pane it docks against (`anchor`) — both within the *same* workspace
+    /// — then reuses `WorkspaceFeature.Action.movePane` to re-parent the
+    /// moved pane onto the given `zone` edge of the anchor.
+    func handlePaneMoveAdjacent(
+        state: inout State,
+        paneID: UUID?,
+        target: String,
+        anchor: String,
+        zone: PaneLayout.DropZone,
+        workspaceFilter: String?,
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        let movedID: UUID
+        let workspace: WorkspaceFeature.State
+        switch resolvePaneTarget(state: state, paneID: paneID, target: target, workspaceFilter: workspaceFilter) {
+        case .found(let resolved, let ws):
+            movedID = resolved
+            workspace = ws
+        case .error(let error):
+            reply?.error(error)
+            return .none
+        }
+
+        // The anchor must live in the *same* workspace as the moved pane
+        // (movePane operates on a single workspace's layout).
+        guard let anchorID = resolvePaneInWorkspace(workspace, ref: anchor) else {
+            reply?.error("no pane matching '\(anchor)' in workspace '\(workspace.name)'")
+            return .none
+        }
+        if anchorID == movedID {
+            reply?.error("cannot move a pane adjacent to itself")
+            return .none
+        }
+
+        let zoneName = switch zone {
+        case .top: "above"
+        case .bottom: "below"
+        case .left: "left-of"
+        case .right: "right-of"
+        }
+
+        if let reply {
+            var payload: [String: Any] = [
+                "ok": true,
+                "pane_id": movedID.uuidString,
+                "anchor_id": anchorID.uuidString,
+                "zone": zoneName,
+                "workspace_id": workspace.id.uuidString,
+                "workspace_name": workspace.name
+            ]
+            if let label = workspace.panes[id: movedID]?.label { payload["label"] = label }
+            reply.sendAndClose(payload)
+        }
+
+        return .merge(
+            .send(.workspaces(.element(
+                id: workspace.id,
+                action: .movePane(paneID: movedID, targetPaneID: anchorID, zone: zone)
+            ))),
+            .send(.persistState)
+        )
+    }
+
+    /// Resolve a pane reference (UUID or unique label) to a concrete pane
+    /// id *within a single workspace*. Used for the `pane-move-adjacent`
+    /// anchor, which must share the moved pane's workspace.
+    private func resolvePaneInWorkspace(_ ws: WorkspaceFeature.State, ref: String) -> UUID? {
+        if let uuid = UUID(uuidString: ref) {
+            return ws.panes[id: uuid] != nil ? uuid : nil
+        }
+        let matches = ws.panes.filter { $0.label == ref }
+        return matches.count == 1 ? matches.first?.id : nil
     }
 
     // MARK: - Sync-input socket handlers (issue #121)
