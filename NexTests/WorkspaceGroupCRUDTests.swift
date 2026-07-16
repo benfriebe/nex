@@ -493,6 +493,19 @@ struct WorkspaceGroupCRUDTests {
         }
     }
 
+    @Test func confirmGroupCustomEmojiAcceptsNonEmojiPictograph() async {
+        let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
+        let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
+
+        await store.send(.requestGroupCustomEmoji(Self.groupA))
+        // ⛙ (U+26D9) has no Unicode emoji properties but comes straight
+        // out of the macOS character palette (issue #254).
+        await store.send(.confirmGroupCustomEmoji("⛙")) { state in
+            #expect(state.groups[id: Self.groupA]?.icon == .emoji("⛙"))
+            #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
     @Test func confirmGroupCustomEmojiRejectsNonEmoji() async {
         let group = WorkspaceGroup(id: Self.groupA, name: "Work", childOrder: [])
         let store = makeStore(groups: [group], topLevelOrder: [.group(Self.groupA)])
@@ -503,6 +516,31 @@ struct WorkspaceGroupCRUDTests {
         await store.send(.confirmGroupCustomEmoji("a")) { state in
             #expect(state.groups[id: Self.groupA]?.icon == nil)
             #expect(state.groupCustomEmojiPrompt == nil)
+        }
+    }
+
+    @Test func confirmWorkspaceCustomEmojiAcceptsNonEmojiPictograph() async {
+        // The workspace guard duplicates the group guard's logic in
+        // AppReducer rather than sharing it — mirror the ⛙ case so the
+        // copy can't silently drift (issue #254).
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let store = makeStore(workspaces: [ws], topLevelOrder: [.workspace(Self.wsID1)])
+
+        await store.send(.requestWorkspaceCustomEmoji(Self.wsID1))
+        await store.send(.confirmWorkspaceCustomEmoji("⛙")) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.icon == .emoji("⛙"))
+            #expect(state.workspaceCustomEmojiPrompt == nil)
+        }
+    }
+
+    @Test func confirmWorkspaceCustomEmojiRejectsNonEmoji() async {
+        let ws = Self.makeWorkspace(id: Self.wsID1, name: "A")
+        let store = makeStore(workspaces: [ws], topLevelOrder: [.workspace(Self.wsID1)])
+
+        await store.send(.requestWorkspaceCustomEmoji(Self.wsID1))
+        await store.send(.confirmWorkspaceCustomEmoji("a")) { state in
+            #expect(state.workspaces[id: Self.wsID1]?.icon == nil)
+            #expect(state.workspaceCustomEmojiPrompt == nil)
         }
     }
 
