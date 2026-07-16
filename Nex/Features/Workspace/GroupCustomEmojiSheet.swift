@@ -25,7 +25,7 @@ struct GroupCustomEmojiSheet: View {
             Text("Custom Emoji for \"\(subjectName)\"")
                 .font(.headline)
 
-            Text("Type or paste a single emoji. Use \u{2303}\u{2318}Space, or the button below, to search every emoji. Non-emoji input is rejected.")
+            Text("Type or paste a single emoji or symbol. Use \u{2303}\u{2318}Space, or the button below, to search every emoji. Letters, digits, and punctuation are rejected.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
