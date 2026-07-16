@@ -16,7 +16,6 @@ NEX_HOOKS = {
     ],
     "SessionStart": [
         {
-            "matcher": "startup|resume|clear|compact",
             "hooks": [{"type": "command", "command": "nex event session-start"}],
         }
     ],
@@ -81,7 +80,10 @@ class MergeHooksTests(unittest.TestCase):
         self.assertIn("my-custom-stop", commands)
         self.assertIn("nex event stop", commands)
 
-    def test_updates_stale_matcher(self):
+    def test_migrates_pre_v019_startup_matcher(self):
+        # Pre-v0.19 installs wrote `"matcher": "startup"`, which never
+        # fires for resumed sessions (issue #181). Re-running the
+        # installer must replace that group with the matcher-less one.
         settings = {
             "hooks": {
                 "SessionStart": [
@@ -96,8 +98,26 @@ class MergeHooksTests(unittest.TestCase):
         }
         merge_hooks(settings, copy.deepcopy(NEX_HOOKS))
         matchers = [g.get("matcher") for g in settings["hooks"]["SessionStart"]]
-        self.assertEqual(matchers, ["startup|resume|clear|compact"])
-        self.assertNotIn("startup", [m for m in matchers if m != "startup|resume|clear|compact"])
+        self.assertEqual(matchers, [None])
+
+    def test_migrates_v019_widened_matcher(self):
+        # v0.19 through v0.31 wrote an explicit source list; the
+        # matcher-less group supersedes it (fires for future sources too).
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup|resume|clear|compact",
+                        "hooks": [
+                            {"type": "command", "command": "nex event session-start"}
+                        ],
+                    }
+                ]
+            }
+        }
+        merge_hooks(settings, copy.deepcopy(NEX_HOOKS))
+        matchers = [g.get("matcher") for g in settings["hooks"]["SessionStart"]]
+        self.assertEqual(matchers, [None])
 
     def test_dedupe_across_groups(self):
         settings = {
@@ -116,6 +136,72 @@ class MergeHooksTests(unittest.TestCase):
         ]
         self.assertEqual(commands.count("nex event stop"), 1)
         self.assertIn("keep-me", commands)
+
+    def test_dedupes_absolute_path_nex_commands(self):
+        # A hand-edited absolute-path variant is still the nex hook;
+        # leaving it alongside the bare command would double-fire, and
+        # a stale matcher on its group would survive "repair" runs.
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/Applications/Nex.app/Contents/Helpers/nex event session-start",
+                            }
+                        ],
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "/usr/local/bin/nex event stop"}
+                        ]
+                    }
+                ],
+            }
+        }
+        merge_hooks(settings, copy.deepcopy(NEX_HOOKS))
+        ss_commands = [
+            h["command"]
+            for g in settings["hooks"]["SessionStart"]
+            for h in g["hooks"]
+        ]
+        self.assertEqual(ss_commands, ["nex event session-start"])
+        self.assertEqual(
+            [g.get("matcher") for g in settings["hooks"]["SessionStart"]], [None]
+        )
+        stop_commands = [
+            h["command"] for g in settings["hooks"]["Stop"] for h in g["hooks"]
+        ]
+        self.assertEqual(stop_commands, ["nex event stop"])
+
+    def test_mixed_group_keeps_user_command(self):
+        # Stripping the nex command from a shared group must not drop
+        # the user's own hook that lives beside it.
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {"type": "command", "command": "nex event session-start"},
+                            {"type": "command", "command": "my-own-session-logger"},
+                        ],
+                    }
+                ]
+            }
+        }
+        merge_hooks(settings, copy.deepcopy(NEX_HOOKS))
+        all_hooks = [
+            (g.get("matcher"), h["command"])
+            for g in settings["hooks"]["SessionStart"]
+            for h in g["hooks"]
+        ]
+        self.assertIn(("startup", "my-own-session-logger"), all_hooks)
+        self.assertIn((None, "nex event session-start"), all_hooks)
 
     def test_preserves_non_command_hook_types(self):
         settings = {

@@ -208,19 +208,27 @@ touching the GUI. The effective share clamps to `[0.1, 0.9]`.
 
 If `nex` commands suddenly start failing with `Error: nex …: cannot reach
 Nex …` or `no response from Nex`, run `nex doctor` first.
-It runs five named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
+It runs six named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
 plus a concrete repair line for any failure:
 
 - `transport` — Unix socket path or TCP destination in use.
 - `socket` / `resolve` — file exists on disk (Unix) or hostname resolves (TCP).
 - `ping` — round-trip a `ping` command and parse the JSON reply.
-- `process` — `pgrep` for `Nex.app`. If `ping` failed but the process is up,
-  the app is wedged (restart it); if no process, Nex isn't running.
+- `process` — scans the process list (`ps`) for `Nex.app`. If `ping` failed
+  but the process is up, the app is wedged (restart it); if no process, Nex
+  isn't running.
 - `version` — CLI version vs running-app version. Warn on drift (rebuild Nex).
+- `hooks` — the user-level Claude Code hook config (`~/.claude/settings.json`
+  plus `settings.local.json`) still carries every nex hook, and the
+  `SessionStart` entry fires for resumed sessions. Warn on drift: a stale
+  matcher means `claude --continue` / `--resume` panes never bind their
+  session id, so scripts that gate on `agent_session_id != null` silently
+  skip them (issue #181). Repair by re-running the bundled
+  `install-hooks.sh`. Skipped when no `~/.claude` directory exists.
 
-Pass `--json` for a machine-readable report. Exit 0 if all checks pass,
-non-zero if any failed. Use this as the first triage step before
-restarting the app.
+Pass `--json` for a machine-readable report. Exits non-zero only when a
+check FAILs; WARNs are reported but leave the exit code 0. Use this as
+the first triage step before restarting the app.
 
 Every CLI error now emits an `Error: …\nRepair: …` pair pointing at the
 matching repair step. Fire-and-forget commands (`nex event …`, hooks)
