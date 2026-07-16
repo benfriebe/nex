@@ -8,6 +8,10 @@ struct ClosedPaneSnapshot: Equatable {
     var filePath: String?
     var scratchpadContent: String?
     var agentSessionID: String?
+    /// Which agent CLI the captured `agentSessionID` belongs to, so
+    /// reopen resumes with the right command (`claude --resume` vs
+    /// `codex resume`). Nil when no agent was ever seen (issue #101).
+    var agentKind: AgentKind?
     var markdownFontSize: Double = 14
     /// Captured web-pane sidecar at the moment of close, so
     /// `reopenClosedPane` can restore the same URL/tab set. Nil for
@@ -301,7 +305,11 @@ struct WorkspaceFeature {
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
         case movePane(paneID: UUID, targetPaneID: UUID, zone: PaneLayout.DropZone)
-        case agentStarted(paneID: UUID)
+        /// `agent` = which CLI fired the hook (default `.claude` for all
+        /// existing call sites; `.codex` via `nex event --agent codex`,
+        /// issue #101). Stored on the pane to drive the running badge and
+        /// the restart resume command.
+        case agentStarted(paneID: UUID, agent: AgentKind = .claude)
         /// The agent's turn ended. `backgroundTaskCount` > 0 means
         /// `run_in_background` shells / background subagents are still in
         /// flight (issues #215, #220): keep the pane `.running` instead of
@@ -309,7 +317,7 @@ struct WorkspaceFeature {
         case agentStopped(paneID: UUID, backgroundTaskCount: Int)
         case agentError(paneID: UUID)
         case setPaneStatus(paneID: UUID, status: PaneStatus)
-        case sessionStarted(paneID: UUID, sessionID: String)
+        case sessionStarted(paneID: UUID, sessionID: String, agent: AgentKind = .claude)
         case sessionEnded(paneID: UUID, sessionID: String)
         case clearPaneStatus(UUID)
         case paneBranchChanged(paneID: UUID, branch: String?)
@@ -1260,6 +1268,7 @@ struct WorkspaceFeature {
                             filePath: pane.filePath,
                             scratchpadContent: pane.scratchpadContent,
                             agentSessionID: pane.agentSessionID,
+                            agentKind: pane.agentKind,
                             markdownFontSize: pane.markdownFontSize,
                             webState: snapshotWebState
                         )
@@ -1407,13 +1416,14 @@ struct WorkspaceFeature {
                 state.currentLayoutIndex = nil
                 return .none
 
-            case .agentStarted(let paneID):
+            case .agentStarted(let paneID, let agent):
                 state.mutatePane(id: paneID) {
                     // Start the elapsed clock only on a fresh run (a
                     // non-running → running transition) so repeated start
                     // pings within one run don't reset "claude · mm:ss".
                     if $0.status != .running { $0.agentStartedAt = now }
                     $0.status = .running
+                    $0.agentKind = agent
                     // A fresh turn supersedes any background snapshot from
                     // the previous turn.
                     $0.backgroundTaskCount = 0
@@ -1467,9 +1477,10 @@ struct WorkspaceFeature {
                 }
                 return .none
 
-            case .sessionStarted(let paneID, let sessionID):
+            case .sessionStarted(let paneID, let sessionID, let agent):
                 state.mutatePane(id: paneID) {
                     $0.agentSessionID = sessionID
+                    $0.agentKind = agent
                     // A brand-new session carries no inherited background work.
                     // Clearing here also bounds a stuck `.running`: if the
                     // final empty `Stop` was dropped (Nex wedged / restarting)
@@ -1886,6 +1897,7 @@ struct WorkspaceFeature {
                     filePath: snapshot.filePath,
                     isEditing: snapshot.type == .scratchpad,
                     scratchpadContent: snapshot.scratchpadContent,
+                    agentKind: snapshot.agentKind,
                     markdownFontSize: snapshot.markdownFontSize
                 )
 
@@ -1910,10 +1922,11 @@ struct WorkspaceFeature {
 
                 let opacity = ghosttyConfig.backgroundOpacity
                 let sessionID = snapshot.agentSessionID
+                let agentKind = snapshot.agentKind ?? .claude
                 let profileName = state.profileName
                 return .run { _ in
                     // The profile env is baked into the spawned PTY, so the
-                    // `claude --resume` typed below inherits it — a reopened
+                    // resume command typed below inherits it — a reopened
                     // agent stays on the workspace's account.
                     let env = workspaceProfiles.resolveEnv(
                         profileName ?? WorkspaceProfilesClient.defaultProfileName
@@ -1924,11 +1937,14 @@ struct WorkspaceFeature {
                         backgroundOpacity: opacity,
                         env: env
                     )
-                    if let sessionID {
+                    // nil command = session id failed the shell-safety
+                    // allowlist; skip the resume rather than type it.
+                    if let sessionID,
+                       let command = agentKind.resumeCommand(sessionID: sessionID) {
                         try? await Task.sleep(for: .seconds(2))
                         await surfaceManager.sendCommand(
                             to: newPaneID,
-                            command: "claude --resume \(sessionID)"
+                            command: command
                         )
                     }
                 }

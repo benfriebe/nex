@@ -135,6 +135,7 @@ actor PersistenceService {
                             scratchpadContent: pr.content,
                             status: PaneStatus(rawValue: pr.status) ?? .idle,
                             agentSessionID: pr.agentSessionID,
+                            agentKind: pr.agentKind.flatMap(AgentKind.init(rawValue:)),
                             createdAt: Date(timeIntervalSince1970: pr.createdAt),
                             lastActivityAt: Date(timeIntervalSince1970: pr.lastActivityAt)
                         )
@@ -366,6 +367,7 @@ struct PersistenceSnapshot {
                     filePath: pane.filePath,
                     content: pane.scratchpadContent,
                     agentSessionID: pane.agentSessionID,
+                    agentKind: pane.agentKind?.rawValue,
                     status: pane.status.rawValue,
                     createdAt: pane.createdAt.timeIntervalSince1970,
                     lastActivityAt: pane.lastActivityAt.timeIntervalSince1970,

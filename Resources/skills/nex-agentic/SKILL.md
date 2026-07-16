@@ -208,7 +208,7 @@ touching the GUI. The effective share clamps to `[0.1, 0.9]`.
 
 If `nex` commands suddenly start failing with `Error: nex …: cannot reach
 Nex …` or `no response from Nex`, run `nex doctor` first.
-It runs six named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
+It runs seven named checks and prints `[PASS|FAIL|WARN] <name>: <detail>`
 plus a concrete repair line for any failure:
 
 - `transport` — Unix socket path or TCP destination in use.
@@ -225,6 +225,11 @@ plus a concrete repair line for any failure:
   session id, so scripts that gate on `agent_session_id != null` silently
   skip them (issue #181). Repair by re-running the bundled
   `install-hooks.sh`. Skipped when no `~/.claude` directory exists.
+- `codex-hooks` — same idea for `~/.codex/hooks.json` (Codex CLI ≥ 0.142,
+  issue #101). Skipped when no `~/.codex` directory exists; WARN-only.
+  Doctor cannot see codex's hook *trust* state — if the wiring passes but
+  codex panes never change status, run `/hooks` inside codex and trust
+  the nex hooks.
 
 Pass `--json` for a machine-readable report. Exits non-zero only when a
 check FAILs; WARNs are reported but leave the exit code 0. Use this as
@@ -348,6 +353,7 @@ nex event error --message "..."    # Signal error
 nex event notification --title "..." --body "..."  # Desktop notification
 nex event session-start            # Attach the pane to a Claude session id (SessionStart hook)
 nex event session-end              # Detach the session id so an exited session isn't resumed (SessionEnd hook)
+nex event start --agent codex      # Same lifecycle verbs, fired from Codex CLI hooks (issue #101)
 ```
 
 `session-start` / `session-end` read the `session_id` from the hook's
@@ -366,6 +372,20 @@ still has background work in flight reads correctly. The count shows in
 `nex pane list --json` as `background_tasks` and in the pane header as
 "· N running". No extra hook wiring is needed — it rides on the existing
 `Stop` / `Notification` hooks.
+
+**Codex CLI panes (issue #101)**: workers running Codex CLI (≥ 0.142) get
+the same native status tracking — `install-hooks.sh` wires Codex's
+`UserPromptSubmit` / `Stop` / `PermissionRequest` / `SessionStart` hooks
+to these verbs with `--agent codex`. `pane list --json` then reports an
+`agent` field (`"claude"` / `"codex"`). Two orchestration caveats:
+
+- `agent` is the *last-known* kind for the pane, not proof an agent is
+  attached right now (codex has no SessionEnd, so its session id and
+  kind persist after codex exits).
+- Run codex workers in their **own** panes. Codex hooks inherit
+  `NEX_PANE_ID`, so a claude agent shelling out to `codex exec` inside
+  its own pane overwrites that pane's session id and kind with the
+  throwaway codex session's.
 
 ### Workspace Commands
 

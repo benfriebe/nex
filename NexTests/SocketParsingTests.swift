@@ -100,6 +100,43 @@ struct SocketParsingTests {
         #expect(result == nil)
     }
 
+    // MARK: - parseWireMessage — Agent kind (issue #101)
+
+    @Test func parseStartCommandWithCodexAgent() {
+        let data = jsonData("""
+        {"command":"start","pane_id":"\(Self.paneIDString)","agent":"codex"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .agentStarted(paneID: Self.paneUUID, agent: .codex))
+    }
+
+    @Test func parseStartCommandWithExplicitClaudeAgent() {
+        let data = jsonData("""
+        {"command":"start","pane_id":"\(Self.paneIDString)","agent":"claude"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .agentStarted(paneID: Self.paneUUID, agent: .claude))
+    }
+
+    @Test func parseStartCommandUnknownAgentFallsBackToClaude() {
+        // An unrecognized agent string (future CLI, typo'd hand-wired
+        // hook) must degrade to today's behaviour, never crash or drop
+        // the event.
+        let data = jsonData("""
+        {"command":"start","pane_id":"\(Self.paneIDString)","agent":"gemini"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .agentStarted(paneID: Self.paneUUID, agent: .claude))
+    }
+
+    @Test func parseSessionStartCommandWithCodexAgent() {
+        let data = jsonData("""
+        {"command":"session-start","pane_id":"\(Self.paneIDString)","session_id":"sess-abc","agent":"codex"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .sessionStarted(paneID: Self.paneUUID, sessionID: "sess-abc", agent: .codex))
+    }
+
     // MARK: - parseWireMessage — Pane commands
 
     @Test func parsePaneSplitCommand() {
@@ -651,6 +688,20 @@ struct SocketParsingTests {
         #expect(results.count == 2)
         #expect(results[0] == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
         #expect(results[1] == .sessionStarted(paneID: Self.paneUUID, sessionID: "sess-xyz"))
+    }
+
+    @Test func parseSessionIDDualFireCarriesCodexAgent() {
+        // A codex `stop` carrying session_id must dual-fire a
+        // .sessionStarted tagged codex — an untagged dual-fire would
+        // flip the pane's agent kind back to claude on every turn end
+        // (issue #101).
+        let input = """
+        {"command":"stop","pane_id":"\(Self.paneIDString)","session_id":"sess-xyz","agent":"codex"}
+        """
+        let results = SocketServer.parseMessages(jsonData(input))
+        #expect(results.count == 2)
+        #expect(results[0] == .agentStopped(paneID: Self.paneUUID, backgroundTaskCount: 0))
+        #expect(results[1] == .sessionStarted(paneID: Self.paneUUID, sessionID: "sess-xyz", agent: .codex))
     }
 
     @Test func parseSessionStartNoDualFire() {

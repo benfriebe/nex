@@ -3,8 +3,12 @@ import Foundation
 
 /// Message received from the `nex` CLI via the Unix socket.
 enum SocketMessage: Equatable {
-    /// Agent lifecycle
-    case agentStarted(paneID: UUID)
+    /// Agent lifecycle. `agent` identifies which CLI fired the hook
+    /// (`nex event --agent codex`; absent on the wire = `.claude`, so an
+    /// old CLI keeps today's behaviour). Carried on the two "beginning"
+    /// signals — `agentStarted` and `sessionStarted` (dual-fires
+    /// included) — which is where the pane's `agentKind` gets set.
+    case agentStarted(paneID: UUID, agent: AgentKind = .claude)
     /// The main agent loop finished responding (Claude Code `Stop` hook).
     /// `backgroundTaskCount` is the number of `run_in_background` shells +
     /// background subagents still running, read from the hook payload's
@@ -18,7 +22,7 @@ enum SocketMessage: Equatable {
     /// `agentStopped`: > 0 keeps the pane `.running` (the notification
     /// fired while background work is still in flight).
     case notification(paneID: UUID, title: String, body: String, backgroundTaskCount: Int)
-    case sessionStarted(paneID: UUID, sessionID: String)
+    case sessionStarted(paneID: UUID, sessionID: String, agent: AgentKind = .claude)
     /// A Claude Code session ended (SessionEnd hook: the agent process
     /// exited, the user logged out, or `/clear` retired the old id).
     /// Carries the ending `sessionID` so the reducer only clears the
@@ -777,6 +781,10 @@ final class SocketServer: Sendable {
         /// flight, derived CLI-side from the hook payload's
         /// `background_tasks` array (issues #215, #220). Absent / nil → 0.
         var backgroundTasks: Int?
+        /// Agent lifecycle events — which agent CLI fired the hook
+        /// (`nex event --agent codex`). Absent / unrecognized → `.claude`
+        /// via `AgentKind.fromWire` (issue #101).
+        var agent: String?
         var direction: String?
         var path: String?
         var name: String?
@@ -925,6 +933,7 @@ final class SocketServer: Sendable {
             case message, title, body
             case sessionID = "session_id"
             case backgroundTasks = "background_tasks"
+            case agent
             case direction, path, name, color, target, text, key, bare
             case newName = "new_name"
             case cascade, force, index, group, profile
@@ -1600,7 +1609,7 @@ final class SocketServer: Sendable {
         let socketMessage: SocketMessage
         switch wire.command {
         case "start":
-            socketMessage = .agentStarted(paneID: paneID)
+            socketMessage = .agentStarted(paneID: paneID, agent: AgentKind.fromWire(wire.agent))
         case "stop":
             socketMessage = .agentStopped(paneID: paneID, backgroundTaskCount: wire.backgroundTasks ?? 0)
         case "error":
@@ -1614,7 +1623,9 @@ final class SocketServer: Sendable {
             )
         case "session-start":
             guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
-            socketMessage = .sessionStarted(paneID: paneID, sessionID: sessionID)
+            socketMessage = .sessionStarted(
+                paneID: paneID, sessionID: sessionID, agent: AgentKind.fromWire(wire.agent)
+            )
         case "session-end":
             guard let sessionID = wire.sessionID, !sessionID.isEmpty else { return nil }
             socketMessage = .sessionEnded(paneID: paneID, sessionID: sessionID)
@@ -1664,16 +1675,25 @@ final class SocketServer: Sendable {
             guard let (message, wire) = parseWireMessage(jsonData) else { continue }
             results.append((message, wire.command))
 
-            // session_id is a common field on all Claude Code hook stdin JSON.
-            // Fire .sessionStarted whenever it's present (unless the command
-            // itself is already session-start, to avoid a duplicate, or
-            // session-end, whose whole purpose is to *drop* the id — a
-            // dual-fire would immediately re-attach it).
+            // session_id is a common field on all Claude Code and Codex hook
+            // stdin JSON. Fire .sessionStarted whenever it's present (unless
+            // the command itself is already session-start, to avoid a
+            // duplicate, or session-end, whose whole purpose is to *drop*
+            // the id — a dual-fire would immediately re-attach it). The
+            // synthesized message carries the wire's agent kind so a codex
+            // `stop`/`notification` can't flip the pane's kind back to
+            // claude (issue #101).
             if wire.command != "session-start", wire.command != "session-end",
                let paneIDString = wire.paneID,
                let paneID = UUID(uuidString: paneIDString),
                let sessionID = wire.sessionID, !sessionID.isEmpty {
-                results.append((.sessionStarted(paneID: paneID, sessionID: sessionID), wire.command))
+                results.append((
+                    .sessionStarted(
+                        paneID: paneID, sessionID: sessionID,
+                        agent: AgentKind.fromWire(wire.agent)
+                    ),
+                    wire.command
+                ))
             }
         }
         return results

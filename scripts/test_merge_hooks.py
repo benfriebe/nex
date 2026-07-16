@@ -203,6 +203,88 @@ class MergeHooksTests(unittest.TestCase):
         self.assertIn(("startup", "my-own-session-logger"), all_hooks)
         self.assertIn((None, "nex event session-start"), all_hooks)
 
+    def test_codex_flagged_command_replaces_hand_wired_bare_command(self):
+        # Issue #101 migration wart: early adopters hand-wired bare
+        # `nex event ...` commands into ~/.codex/hooks.json before the
+        # installer grew codex support. The incoming flagged variant
+        # (`--agent codex`) must replace them — a survivor would
+        # double-fire AND flip the pane's agent kind back to claude on
+        # every event (its session_id dual-fire parses as claude).
+        codex_hooks = {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "nex event stop --agent codex"}
+                    ]
+                }
+            ]
+        }
+        settings = {
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "nex event stop"}]}
+                ]
+            }
+        }
+        merge_hooks(settings, codex_hooks)
+        commands = [
+            h["command"] for g in settings["hooks"]["Stop"] for h in g["hooks"]
+        ]
+        self.assertEqual(commands, ["nex event stop --agent codex"])
+
+    def test_codex_flagged_command_idempotent(self):
+        codex_hooks = {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "nex event stop --agent codex"}
+                    ]
+                }
+            ]
+        }
+        settings = {}
+        merge_hooks(settings, copy.deepcopy(codex_hooks))
+        merge_hooks(settings, copy.deepcopy(codex_hooks))
+        commands = [
+            h["command"] for g in settings["hooks"]["Stop"] for h in g["hooks"]
+        ]
+        self.assertEqual(commands, ["nex event stop --agent codex"])
+
+    def test_flagged_dedupe_keeps_user_command(self):
+        # The flag-less base ("nex event stop") must only sweep up
+        # nex-managed variants, not a user's own hook on the same event.
+        codex_hooks = {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "nex event stop --agent codex"}
+                    ]
+                }
+            ]
+        }
+        settings = {
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "my-custom-stop"}]},
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/usr/local/bin/nex event stop --agent codex",
+                            }
+                        ]
+                    },
+                ]
+            }
+        }
+        merge_hooks(settings, codex_hooks)
+        commands = [
+            h["command"] for g in settings["hooks"]["Stop"] for h in g["hooks"]
+        ]
+        self.assertEqual(
+            commands, ["my-custom-stop", "nex event stop --agent codex"]
+        )
+
     def test_preserves_non_command_hook_types(self):
         settings = {
             "hooks": {

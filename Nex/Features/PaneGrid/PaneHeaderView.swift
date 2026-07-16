@@ -307,7 +307,7 @@ struct PaneHeaderView: View {
         switch pane.status {
         case .running:
             HStack(spacing: 3) {
-                Text("claude")
+                Text(pane.agentKind?.rawValue ?? "claude")
                 if let started = pane.agentStartedAt {
                     Text("·")
                     TimelineView(.periodic(from: .now, by: 1)) { context in
