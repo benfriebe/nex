@@ -159,7 +159,7 @@ struct StatusBarView: View {
         switch pane.status {
         case .running:
             HStack(spacing: 4) {
-                Text("claude").foregroundStyle(theme.activeAgent)
+                Text(pane.agentKind?.rawValue ?? "claude").foregroundStyle(theme.activeAgent)
                 // Elapsed only when we have a start time (nil after a
                 // relaunch-restored `.running` pane until the agent
                 // re-emits a start).

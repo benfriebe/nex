@@ -32,7 +32,7 @@ extension AppReducer {
                 switch message {
                 // MARK: Agent lifecycle
 
-                case .agentStarted(let paneID):
+                case .agentStarted(let paneID, let agent):
                     guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
@@ -46,7 +46,7 @@ extension AppReducer {
                     }
 
                     return .merge(
-                        .send(.workspaces(.element(id: workspace.id, action: .agentStarted(paneID: paneID)))),
+                        .send(.workspaces(.element(id: workspace.id, action: .agentStarted(paneID: paneID, agent: agent)))),
                         .send(.updateExternalIndicators)
                     )
 
@@ -134,14 +134,14 @@ extension AppReducer {
                     }
                     return .merge(effects)
 
-                case .sessionStarted(let paneID, let sessionID):
+                case .sessionStarted(let paneID, let sessionID, let agent):
                     guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
                     return .merge(
                         .send(.workspaces(.element(
                             id: workspace.id,
-                            action: .sessionStarted(paneID: paneID, sessionID: sessionID)
+                            action: .sessionStarted(paneID: paneID, sessionID: sessionID, agent: agent)
                         ))),
                         .send(.updateExternalIndicators)
                     )
@@ -1797,6 +1797,10 @@ extension AppReducer {
                 if let title = pane.title { entry["title"] = title }
                 if let branch = pane.gitBranch { entry["git_branch"] = branch }
                 if let sessionID = pane.agentSessionID { entry["agent_session_id"] = sessionID }
+                // Last-known agent kind ("claude" / "codex") — set by
+                // lifecycle events and never cleared, so it means "the
+                // agent last seen here", not "an agent is attached now".
+                if let agentKind = pane.agentKind { entry["agent"] = agentKind.rawValue }
                 if pane.backgroundTaskCount > 0 { entry["background_tasks"] = pane.backgroundTaskCount }
                 if let filePath = pane.filePath { entry["file_path"] = filePath }
                 if let parentGroup {

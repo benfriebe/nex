@@ -135,6 +135,30 @@ struct PaneListTests {
         #expect(pane3Entry?["is_active_workspace"] as? Bool == false)
     }
 
+    @Test func paneListIncludesAgentKindWhenKnown() async {
+        var codexPane = Pane(id: Self.pane1, workingDirectory: "/tmp/a", status: .running)
+        codexPane.agentKind = .codex
+        let plainPane = Pane(id: Self.pane2, workingDirectory: "/tmp/b")
+        let ws = makeWorkspace(id: Self.ws1ID, name: "alpha", panes: [codexPane, plainPane])
+        let store = makeStore(workspaces: [ws], activeWorkspaceID: Self.ws1ID)
+
+        let sink = CaptureSink()
+        let handle = makeCaptureHandle(sink)
+
+        await store.send(.socketMessage(
+            .paneList(paneID: nil, workspace: nil, scope: nil),
+            reply: handle
+        ))
+
+        let panes = (sink.payloads.first?["panes"] as? [[String: Any]]) ?? []
+        let codexEntry = panes.first(where: { ($0["id"] as? String) == Self.pane1.uuidString })
+        #expect(codexEntry?["agent"] as? String == "codex")
+        // No agent ever seen → field absent, not "claude" — the JSON
+        // mirrors the last-known-kind semantics.
+        let plainEntry = panes.first(where: { ($0["id"] as? String) == Self.pane2.uuidString })
+        #expect(plainEntry?["agent"] == nil)
+    }
+
     @Test func paneListWorkspaceFilterByNameNarrowsResults() async {
         let ws1 = makeWorkspace(
             id: Self.ws1ID, name: "alpha",

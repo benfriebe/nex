@@ -37,6 +37,15 @@ struct DatabaseMigrationTests {
         }
     }
 
+    @Test func v18AddsPaneAgentKindColumn() throws {
+        let db = try DatabaseService(inMemory: true)
+
+        try db.writer.read { db in
+            let columns = try Set(db.columns(in: "pane").map(\.name))
+            #expect(columns.contains("agentKind"))
+        }
+    }
+
     @Test func repoRecordInsertAndFetch() throws {
         let db = try DatabaseService(inMemory: true)
 

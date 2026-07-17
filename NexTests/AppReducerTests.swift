@@ -915,6 +915,7 @@ struct AppReducerTests {
     @Test func stateLoadedClearsSessionIDs() async {
         var ws = Self.makeWorkspace(id: Self.wsID1, name: "WS", paneID: Self.paneID1)
         ws.panes[id: Self.paneID1]?.agentSessionID = "session-xyz"
+        ws.panes[id: Self.paneID1]?.agentKind = .codex
         ws.panes[id: Self.paneID1]?.status = .running
 
         let store = makeStore()
@@ -928,6 +929,10 @@ struct AppReducerTests {
         )) { state in
             #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.agentSessionID == nil)
             #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.status == .idle)
+            // agentKind deliberately survives the clear: it's a last-known
+            // display value, and the resume tuples captured before the
+            // clear need it to compose `codex resume` (issue #101).
+            #expect(state.workspaces[id: Self.wsID1]?.panes[id: Self.paneID1]?.agentKind == .codex)
         }
     }
 

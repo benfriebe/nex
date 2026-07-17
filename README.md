@@ -144,6 +144,24 @@ Manual setup (skip if `install-hooks.sh` did it):
 }
 ```
 
+### Codex CLI
+
+OpenAI Codex CLI (≥ 0.142) gets the same native status tracking via its lifecycle hooks system. `install-hooks.sh` detects `~/.codex` and wires four hooks into `~/.codex/hooks.json`:
+
+| Hook | What Nex does |
+| --- | --- |
+| `UserPromptSubmit` (`nex event start --agent codex`) | Pane shows "running" with a `codex` badge |
+| `Stop` (`nex event stop --agent codex`) | Pane flips to "waiting for input"; desktop notification if unfocused |
+| `PermissionRequest` (`nex event notification --agent codex`) | Pane shows "waiting"; notification names the tool awaiting approval |
+| `SessionStart` (`nex event session-start --agent codex`) | Pane attaches to the codex session ID; restart resumes it via `codex resume` |
+
+Two codex-specific notes:
+
+- **Trust**: Codex requires one-time approval of new hooks — run `/hooks` inside codex after installing (and again if the file changes). Until trusted, the hooks silently don't fire (`nex doctor`'s `codex-hooks` check can verify the wiring but not the trust state).
+- **No SessionEnd**: Codex has no session-end hook, so a pane keeps its last codex session id after codex exits; a Nex restart will `codex resume` that session in the pane.
+
+Manual setup for `~/.codex/hooks.json` mirrors the JSON above with `--agent codex` appended to each command (events: `Stop`, `PermissionRequest`, `SessionStart`, `UserPromptSubmit`).
+
 ## Git and worktrees
 
 ### Repo registry
@@ -225,7 +243,7 @@ When `nex` commands stop reaching the app, run the doctor first:
 nex doctor [--json]
 ```
 
-It runs six named checks (`transport`, `socket`/`resolve`, `ping`, `process`, `version`, `hooks`) and prints a `[PASS|FAIL|WARN]` line plus a concrete repair tip for each failure: `ping` round-trips a real socket command, `process` distinguishes "Nex isn't running" from "Nex is wedged", `version` flags CLI/app drift, and `hooks` verifies the user-level Claude Code hook config (`~/.claude/settings.json` + `settings.local.json`) still carries every nex hook (a stale pre-v0.19 `SessionStart` matcher silently stops resumed sessions binding their session id — issue #181; re-run `install-hooks.sh` to migrate — note a re-run normalises nex-managed hook matchers). Exits non-zero only when a check FAILs; WARNs (like hook drift) are reported but leave the exit code 0. Every other CLI error now prints a paired `Error: … / Repair: …` message; fire-and-forget event hooks stay exit-0 but emit a `Warning:` (silence with `NEX_SILENT=1`).
+It runs seven named checks (`transport`, `socket`/`resolve`, `ping`, `process`, `version`, `hooks`, `codex-hooks`) and prints a `[PASS|FAIL|WARN]` line plus a concrete repair tip for each failure: `ping` round-trips a real socket command, `process` distinguishes "Nex isn't running" from "Nex is wedged", `version` flags CLI/app drift, and `hooks` verifies the user-level Claude Code hook config (`~/.claude/settings.json` + `settings.local.json`) still carries every nex hook (a stale pre-v0.19 `SessionStart` matcher silently stops resumed sessions binding their session id — issue #181; re-run `install-hooks.sh` to migrate — note a re-run normalises nex-managed hook matchers). `codex-hooks` does the same for `~/.codex/hooks.json` (skipped when Codex CLI isn't installed; WARN-only; can't verify codex's hook trust state — run `/hooks` inside codex if wired hooks don't fire). Exits non-zero only when a check FAILs; WARNs (like hook drift) are reported but leave the exit code 0. Every other CLI error now prints a paired `Error: … / Repair: …` message; fire-and-forget event hooks stay exit-0 but emit a `Warning:` (silence with `NEX_SILENT=1`).
 
 ### Web pane automation
 

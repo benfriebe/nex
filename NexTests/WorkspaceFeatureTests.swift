@@ -562,6 +562,26 @@ struct WorkspaceFeatureTests {
         // A fresh turn supersedes the previous turn's background snapshot.
         await store.send(.agentStarted(paneID: paneID)) { state in
             state.panes[id: paneID]?.backgroundTaskCount = 0
+            state.panes[id: paneID]?.agentKind = .claude
+        }
+    }
+
+    @Test func agentStartedStoresCodexAgentKind() async {
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.status = .idle
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.date = .constant(Date(timeIntervalSince1970: 2000))
+        }
+
+        await store.send(.agentStarted(paneID: paneID, agent: .codex)) { state in
+            state.panes[id: paneID]?.status = .running
+            state.panes[id: paneID]?.agentStartedAt = Date(timeIntervalSince1970: 2000)
+            state.panes[id: paneID]?.agentKind = .codex
         }
     }
 
@@ -635,6 +655,7 @@ struct WorkspaceFeatureTests {
         // Stop was dropped, the count can't pin the pane past a new session.
         await store.send(.sessionStarted(paneID: paneID, sessionID: "sess-new")) { state in
             state.panes[id: paneID]?.agentSessionID = "sess-new"
+            state.panes[id: paneID]?.agentKind = .claude
             state.panes[id: paneID]?.backgroundTaskCount = 0
         }
     }
@@ -667,6 +688,42 @@ struct WorkspaceFeatureTests {
 
         await store.send(.sessionStarted(paneID: paneID, sessionID: "abc-123")) {
             $0.panes[id: paneID]?.agentSessionID = "abc-123"
+            $0.panes[id: paneID]?.agentKind = .claude
+        }
+    }
+
+    @Test func sessionStartedStoresCodexAgentKind() async {
+        let workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.sessionStarted(paneID: paneID, sessionID: "codex-1", agent: .codex)) {
+            $0.panes[id: paneID]?.agentSessionID = "codex-1"
+            $0.panes[id: paneID]?.agentKind = .codex
+        }
+    }
+
+    @Test func sessionEndedKeepsAgentKind() async {
+        // agentKind is a last-known display value — dropping the session
+        // id must not blank the badge's label source.
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let paneID = workspace.panes.first!.id
+        workspace.panes[id: paneID]?.agentSessionID = "codex-1"
+        workspace.panes[id: paneID]?.agentKind = .codex
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.sessionEnded(paneID: paneID, sessionID: "codex-1")) {
+            $0.panes[id: paneID]?.agentSessionID = nil
         }
     }
 
@@ -785,6 +842,42 @@ struct WorkspaceFeatureTests {
             )
             state.focusedPaneID = newPaneID
         }
+    }
+
+    @Test func closeReopenRoundTripsAgentKind() async {
+        // The snapshot must carry agentKind so reopen resumes a codex
+        // pane with `codex resume` and the pane keeps its badge label
+        // (review of #101).
+        var workspace = WorkspaceFeature.State(name: "Test")
+        let firstPaneID = workspace.panes.first!.id
+        let secondPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000042")!
+        var codexPane = Pane(id: secondPaneID, workingDirectory: "/tmp/codex")
+        codexPane.agentSessionID = "codex-sess-1"
+        codexPane.agentKind = .codex
+        workspace.panes.append(codexPane)
+        workspace.layout = .split(
+            .horizontal,
+            ratio: 0.5,
+            first: .leaf(firstPaneID),
+            second: .leaf(secondPaneID)
+        )
+        workspace.focusedPaneID = secondPaneID
+
+        let newPaneID = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+            $0.uuid = .constant(newPaneID)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.closePane(secondPaneID))
+        #expect(store.state.recentlyClosedPanes.last?.agentKind == .codex)
+        #expect(store.state.recentlyClosedPanes.last?.agentSessionID == "codex-sess-1")
+
+        await store.send(.reopenClosedPane)
+        #expect(store.state.panes[id: newPaneID]?.agentKind == .codex)
     }
 
     @Test func reopenEmptyStackIsNoop() async {

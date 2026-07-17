@@ -143,6 +143,50 @@ struct PersistenceTests {
         #expect(loadedPane.status == .running)
     }
 
+    @Test func agentKindRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let codexPaneID = UUID()
+        let codexPane = Pane(
+            id: codexPaneID,
+            type: .shell,
+            workingDirectory: "/tmp",
+            agentSessionID: "codex-session-1",
+            agentKind: .codex
+        )
+        let plainPaneID = UUID()
+        let plainPane = Pane(id: plainPaneID, type: .shell, workingDirectory: "/tmp")
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: wsID,
+            name: "Kind Test",
+            slug: "kind-test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .blue,
+            panes: [codexPane, plainPane],
+            layout: .split(
+                .horizontal, ratio: 0.5,
+                first: .leaf(codexPaneID), second: .leaf(plainPaneID)
+            ),
+            focusedPaneID: codexPaneID,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 2000)
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(workspace)
+
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        let loaded = result.workspaces.first!.panes
+        #expect(loaded[id: codexPaneID]?.agentKind == .codex)
+        #expect(loaded[id: plainPaneID]?.agentKind == nil)
+    }
+
     @Test func scratchpadContentRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)

@@ -2068,11 +2068,19 @@ struct AppReducer {
                 // Collect panes eligible for auto-resume before clearing.
                 // Any pane with a agentSessionID is resumable — the session
                 // remains valid regardless of the pane's current status.
-                var resumablePanes: [(paneID: UUID, sessionID: String)] = []
+                // `agentKind` picks the resume command (`claude --resume` vs
+                // `codex resume`, issue #101) and is deliberately NOT
+                // cleared below: it's a last-known display value, and the
+                // resumable tuples must capture it before any clearing.
+                var resumablePanes: [(paneID: UUID, sessionID: String, kind: AgentKind)] = []
                 for workspace in workspaces {
                     for pane in workspace.panes {
                         if let sessionID = pane.agentSessionID {
-                            resumablePanes.append((paneID: pane.id, sessionID: sessionID))
+                            resumablePanes.append((
+                                paneID: pane.id,
+                                sessionID: sessionID,
+                                kind: pane.agentKind ?? .claude
+                            ))
                         }
                     }
                 }
@@ -2142,15 +2150,19 @@ struct AppReducer {
                                 )
                             }
 
-                            // Auto-resume Claude Code sessions after surfaces are ready.
+                            // Auto-resume agent sessions after surfaces are ready.
                             // Persist AFTER sending resume commands so session IDs survive
                             // if the app crashes before the resume actually executes.
                             if !panesToResume.isEmpty {
                                 try? await clock.sleep(for: .seconds(2))
                                 for entry in panesToResume {
+                                    // nil = session id failed the shell-safety
+                                    // allowlist; skip rather than type it.
+                                    guard let command = entry.kind.resumeCommand(sessionID: entry.sessionID)
+                                    else { continue }
                                     await surfaceManager.sendCommand(
                                         to: entry.paneID,
-                                        command: "claude --resume \(entry.sessionID)"
+                                        command: command
                                     )
                                 }
                             }

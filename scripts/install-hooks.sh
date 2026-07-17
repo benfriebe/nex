@@ -133,6 +133,90 @@ if [ -d "$SKILL_SRC" ]; then
     echo "  Installed skill to $SKILL_DEST"
 fi
 
+# Configure Codex CLI hooks (issue #101). Codex CLI ≥ 0.142 supports
+# Claude-style lifecycle hooks in ~/.codex/hooks.json (same JSON shape
+# as Claude's settings.json "hooks" key, so merge_hooks.py is reused).
+# Codex has no SessionEnd or Notification event; PermissionRequest is
+# the "waiting on approval" signal. This section runs LAST and is
+# non-fatal: a malformed ~/.codex/hooks.json must not abort an
+# installer whose primary job (Claude hooks) already succeeded.
+CODEX_DIR="$HOME/.codex"
+CODEX_HOOKS_FILE="$CODEX_DIR/hooks.json"
+
+CODEX_HOOKS='{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nex event stop --agent codex"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nex event notification --agent codex"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nex event session-start --agent codex"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nex event start --agent codex"
+          }
+        ]
+      }
+    ]
+  }
+}'
+
+if [ -d "$CODEX_DIR" ]; then
+    echo "Configuring Codex CLI hooks..."
+    if [ -f "$CODEX_HOOKS_FILE" ]; then
+        if python3 "$SCRIPT_DIR/merge_hooks.py" "$CODEX_HOOKS_FILE" "$CODEX_HOOKS"; then
+            echo "  Merged hooks into existing $CODEX_HOOKS_FILE"
+        else
+            echo "  Warning: could not merge Codex hooks into $CODEX_HOOKS_FILE (invalid JSON?)."
+            echo "  Skipping Codex hooks — Claude Code hooks above are unaffected."
+        fi
+    else
+        if echo "$CODEX_HOOKS" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+with open('$CODEX_HOOKS_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+"; then
+            echo "  Created $CODEX_HOOKS_FILE"
+        else
+            echo "  Warning: could not write $CODEX_HOOKS_FILE. Skipping Codex hooks."
+        fi
+    fi
+    echo "  Note: Codex requires one-time hook trust — run /hooks inside codex to"
+    echo "  trust the nex hooks (repeat whenever this file changes). Codex panes"
+    echo "  then get native status tracking (requires Codex CLI ≥ 0.142)."
+else
+    echo "Skipping Codex CLI hooks (no $CODEX_DIR — Codex CLI not detected)."
+fi
+
 echo ""
-echo "Done! Nex hooks and skills are configured for Claude Code."
-echo "Restart any running Claude Code sessions to pick up the new hooks."
+echo "Done! Nex hooks and skills are configured for Claude Code (and Codex CLI when detected)."
+echo "Restart any running agent sessions to pick up the new hooks."

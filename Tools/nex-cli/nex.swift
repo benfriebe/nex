@@ -4,7 +4,7 @@
 //
 // Usage:
 //   nex --version
-//   nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]
+//   nex event stop|start|error|notification|session-start|session-end [--agent claude|codex] [--message ...] [--title ...] [--body ...]
 //   nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
 //   nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -196,7 +196,7 @@ func printUsage() {
     fputs("""
     Usage:
       nex --version
-      nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]
+      nex event stop|start|error|notification|session-start|session-end [--agent claude|codex] [--message ...] [--title ...] [--body ...]
       nex pane split [--direction horizontal|vertical] [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane create [--path /dir] [--name <label>] [--target <name-or-uuid>]
       nex pane close [--target <name-or-uuid>] [--workspace <name-or-uuid>]
@@ -1118,7 +1118,7 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     }
 
     guard let eventType = args.popFirst() else {
-        fputs("Usage: nex event stop|start|error|notification|session-start|session-end [--message ...] [--title ...] [--body ...]\n", stderr)
+        fputs("Usage: nex event stop|start|error|notification|session-start|session-end [--agent claude|codex] [--message ...] [--title ...] [--body ...]\n", stderr)
         exit(1)
     }
 
@@ -1134,6 +1134,17 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     let message = parseFlag("--message", from: &args)
     var title = parseFlag("--title", from: &args)
     var body = parseFlag("--body", from: &args)
+    // `--agent codex` marks events fired by Codex CLI hooks (issue #101):
+    // the app stores the kind on the pane to label the running badge and
+    // pick the resume command. Absent = claude (all pre-#101 hook configs).
+    // A typo'd value would otherwise silently degrade to claude, so
+    // validate loudly — the error lands in the agent's hook output.
+    let agent = parseFlag("--agent", from: &args)
+    let validAgents: Set = ["claude", "codex"]
+    if let agent, !validAgents.contains(agent) {
+        fputs("Unknown --agent value: \(agent) (valid: claude, codex)\n", stderr)
+        exit(1)
+    }
 
     // Read stdin JSON when piped (Claude Code passes JSON with session_id to all hooks)
     var stdinJSON: [String: Any]?
@@ -1145,13 +1156,37 @@ func handleEvent(_ args: inout ArraySlice<String>) {
         }
     }
 
-    // Extract notification fields from stdin JSON
-    if eventType == "notification", let json = stdinJSON {
-        if title == nil {
-            title = json["title"] as? String ?? "Claude Code"
-        }
-        if body == nil {
-            body = json["message"] as? String
+    // Extract notification fields from stdin JSON. Claude Code's
+    // Notification hook sends `title`/`message`; Codex has no Notification
+    // event — its `PermissionRequest` hook is wired to `nex event
+    // notification --agent codex` and sends `tool_name` instead, so
+    // compose an approval-flavoured body from that (issue #101). The
+    // claude branch stays guarded on stdin actually carrying JSON: a
+    // manual no-stdin `nex event notification --body x` must keep
+    // omitting the title (server renders its neutral "Agent" default)
+    // exactly as before — only real hook fires get "Claude Code".
+    if eventType == "notification" {
+        if agent == "codex" {
+            let json = stdinJSON ?? [:]
+            if title == nil {
+                title = json["title"] as? String ?? "Codex"
+            }
+            if body == nil {
+                if let message = json["message"] as? String {
+                    body = message
+                } else if let tool = json["tool_name"] as? String, !tool.isEmpty {
+                    body = "Approval requested: \(tool)"
+                } else {
+                    body = "Waiting for approval"
+                }
+            }
+        } else if let json = stdinJSON {
+            if title == nil {
+                title = json["title"] as? String ?? "Claude Code"
+            }
+            if body == nil {
+                body = json["message"] as? String
+            }
         }
     }
 
@@ -1208,6 +1243,9 @@ func handleEvent(_ args: inout ArraySlice<String>) {
     if let title { payload["title"] = title }
     if let body { payload["body"] = body }
     if let sessionID { payload["session_id"] = sessionID }
+    // Only attach when the flag was passed — absent means claude on the
+    // server, keeping the common Claude-hook path wire-identical.
+    if let agent { payload["agent"] = agent }
     // Only attach when non-zero so the common no-background path stays wire-
     // identical to before (absent → server defaults to 0 → "waiting").
     if backgroundTaskCount > 0 { payload["background_tasks"] = backgroundTaskCount }
@@ -4284,6 +4322,7 @@ func handleDoctor(_ args: inout ArraySlice<String>) {
     report.addProcessCheck(transport: transport)
     report.addVersionCheck(cliVersion: nexVersion)
     report.addHooksCheck()
+    report.addCodexHooksCheck()
 
     if useJSON {
         report.printJSON()
@@ -4563,6 +4602,18 @@ struct DoctorReport {
         ("UserPromptSubmit", "nex event start")
     ]
 
+    /// The Codex CLI hooks `install-hooks.sh` wires into
+    /// `~/.codex/hooks.json` (issue #101). Codex has no SessionEnd or
+    /// Notification event; PermissionRequest is the "waiting on
+    /// approval" signal. Kept adjacent to `expectedHooks` for the same
+    /// installer/doctor anti-drift reason.
+    static let expectedCodexHooks: [(event: String, command: String)] = [
+        ("Stop", "nex event stop --agent codex"),
+        ("PermissionRequest", "nex event notification --agent codex"),
+        ("SessionStart", "nex event session-start --agent codex"),
+        ("UserPromptSubmit", "nex event start --agent codex")
+    ]
+
     /// SessionStart hook sources the config must cover. A pre-v0.19
     /// `install-hooks.sh` wrote `"matcher": "startup"`, and app
     /// auto-updates never touch `~/.claude/settings.json` — so those
@@ -4738,6 +4789,86 @@ struct DoctorReport {
                 name: "hooks",
                 status: .warn,
                 detail: "hook config drift in \(claudeDir) (checked \(scope); project-level settings scopes not checked): \(problems.joined(separator: "; "))",
+                repair: repair
+            ))
+        }
+    }
+
+    /// Verify `~/.codex/hooks.json` still carries every nex Codex hook
+    /// (issue #101). Mirrors `addHooksCheck`'s states: skip when Codex
+    /// isn't on this machine, WARN (never FAIL) on drift. Two documented
+    /// limitations: inline `[hooks]` tables in `config.toml` are not
+    /// parsed (hooks wired only there will false-warn), and Codex's
+    /// hook *trust* state isn't inspectable — a wired-but-untrusted
+    /// hook passes here yet never fires, so the repair always mentions
+    /// the `/hooks` trust step.
+    mutating func addCodexHooksCheck(codexDir: String = "~/.codex") {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let dir = codexDir.hasPrefix("~/") || codexDir == "~"
+            ? home + codexDir.dropFirst(1)
+            : codexDir
+        let repair = "Re-run the bundled installer (/Applications/Nex.app/Contents/Resources/scripts/install-hooks.sh), then run /hooks inside codex once to trust the nex hooks."
+
+        var isDir: ObjCBool = false
+        let dirExists = FileManager.default.fileExists(atPath: dir, isDirectory: &isDir)
+            && isDir.boolValue
+        guard dirExists else {
+            // No ~/.codex at all: this machine doesn't run Codex CLI,
+            // so missing hooks aren't drift — don't nag.
+            append(DoctorCheck(
+                name: "codex-hooks",
+                status: .skip,
+                detail: "skipped (no \(codexDir) directory — Codex CLI not detected)",
+                repair: nil
+            ))
+            return
+        }
+
+        guard let data = FileManager.default.contents(atPath: dir + "/hooks.json") else {
+            append(DoctorCheck(
+                name: "codex-hooks",
+                status: .warn,
+                detail: "no hooks.json in \(codexDir) — nex Codex hooks are not installed, so Codex panes won't track status or session ids (needs Codex CLI ≥ 0.142).",
+                repair: repair
+            ))
+            return
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            append(DoctorCheck(
+                name: "codex-hooks",
+                status: .warn,
+                detail: "\(codexDir)/hooks.json is not valid JSON (Codex itself needs it parseable).",
+                repair: repair
+            ))
+            return
+        }
+
+        let hooks = json["hooks"] as? [String: Any] ?? [:]
+        func groupsWiring(_ event: String, _ command: String) -> Bool {
+            let groups = (hooks[event] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+            return groups.contains { group in
+                let inner = (group["hooks"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+                return inner.contains { hook in
+                    (hook["command"] as? String)?.contains(command) == true
+                }
+            }
+        }
+
+        let missing = Self.expectedCodexHooks
+            .filter { !groupsWiring($0.event, $0.command) }
+            .map { "\($0.event) → `\($0.command)`" }
+        if missing.isEmpty {
+            append(DoctorCheck(
+                name: "codex-hooks",
+                status: .pass,
+                detail: "all nex Codex hooks wired in \(codexDir)/hooks.json (trust state not verifiable — run /hooks inside codex if they don't fire; inline [hooks] in config.toml not checked)",
+                repair: nil
+            ))
+        } else {
+            append(DoctorCheck(
+                name: "codex-hooks",
+                status: .warn,
+                detail: "Codex hook config drift in \(codexDir)/hooks.json (inline [hooks] in config.toml not checked): missing hook(s): \(missing.joined(separator: ", "))",
                 repair: repair
             ))
         }

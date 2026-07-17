@@ -254,6 +254,17 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v18_pane_agent_kind") { db in
+            // Which agent CLI the pane's session belongs to ("claude" /
+            // "codex", issue #101) — picks the resume command on restart.
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("agentKind") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "agentKind", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -293,6 +304,11 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     var filePath: String?
     var content: String?
     var agentSessionID: String?
+    /// Raw `AgentKind` ("claude" / "codex") the session belongs to
+    /// (issue #101). Defaulted so existing memberwise-init call sites
+    /// keep compiling; the persistence round-trip test forces the
+    /// save-side mapping.
+    var agentKind: String? = nil
     var status: String
     var createdAt: Double
     var lastActivityAt: Double

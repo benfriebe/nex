@@ -180,6 +180,59 @@ struct AgentLifecycleTests {
             .workspaces(.element(id: wsID, action: .sessionStarted(paneID: paneID, sessionID: "abc-123")))
         ) { state in
             state.workspaces[id: wsID]?.panes[id: paneID]?.agentSessionID = "abc-123"
+            state.workspaces[id: wsID]?.panes[id: paneID]?.agentKind = .claude
+        }
+    }
+
+    @Test func resumeCommandPerAgentKind() {
+        // The restore path can't spy SurfaceManager.sendCommand, so pin
+        // the command strings here (issue #101).
+        #expect(AgentKind.claude.resumeCommand(sessionID: "abc-123_x.Y") == "claude --resume abc-123_x.Y")
+        #expect(AgentKind.codex.resumeCommand(sessionID: "abc") == "codex resume abc")
+    }
+
+    @Test func resumeCommandRejectsShellMetacharacters() {
+        // session_id arrives on the wire and is typed into a PTY —
+        // anything outside the allowlist must never become a command
+        // (review of #101).
+        #expect(AgentKind.claude.resumeCommand(sessionID: "x; touch /tmp/pwned #") == nil)
+        #expect(AgentKind.codex.resumeCommand(sessionID: "a && curl evil") == nil)
+        #expect(AgentKind.claude.resumeCommand(sessionID: "a\nnewline") == nil)
+        #expect(AgentKind.claude.resumeCommand(sessionID: "$(id)") == nil)
+        #expect(AgentKind.claude.resumeCommand(sessionID: "") == nil)
+        #expect(AgentKind.claude.resumeCommand(sessionID: String(repeating: "a", count: 129)) == nil)
+    }
+
+    @Test func agentKindFromWire() {
+        #expect(AgentKind.fromWire("codex") == .codex)
+        #expect(AgentKind.fromWire("Codex") == .codex)
+        #expect(AgentKind.fromWire("claude") == .claude)
+        #expect(AgentKind.fromWire(nil) == .claude)
+        #expect(AgentKind.fromWire("gemini") == .claude)
+    }
+
+    @Test func codexSessionStartedStoresAgentKind() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+
+        let ws = WorkspaceFeature.State(
+            id: wsID, name: "WS", slug: "ws", color: .blue,
+            panes: [Pane(id: paneID)], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws],
+            activeWorkspaceID: wsID
+        )
+
+        await store.send(.socketMessage(.sessionStarted(paneID: paneID, sessionID: "codex-1", agent: .codex), reply: nil))
+
+        await store.receive(
+            .workspaces(.element(id: wsID, action: .sessionStarted(paneID: paneID, sessionID: "codex-1", agent: .codex)))
+        ) { state in
+            state.workspaces[id: wsID]?.panes[id: paneID]?.agentSessionID = "codex-1"
+            state.workspaces[id: wsID]?.panes[id: paneID]?.agentKind = .codex
         }
     }
 
