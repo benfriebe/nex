@@ -834,7 +834,7 @@ struct AppReducer {
         return .resolved(results)
     }
 
-    private func sessionJSON(_ session: GraftSession) -> [String: Any] {
+    private static func sessionJSON(_ session: GraftSession) -> [String: Any] {
         let statusString = switch session.status {
         case .starting: "starting"
         case .watching: "watching"
@@ -920,7 +920,7 @@ struct AppReducer {
         paneID: UUID?,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        let assocs: [RepoAssociation]
+        var assocs: [RepoAssociation] = []
         switch resolveGraftAssociations(
             state: state,
             workspaceFilter: workspaceFilter,
@@ -930,30 +930,62 @@ struct AppReducer {
         case .resolved(let resolved):
             assocs = resolved
         case .failure(let error):
-            reply?.send(["ok": false, "error": error])
-            reply?.close()
-            return .none
+            // A bare repo filter that matches no association is NOT
+            // fatal: the session's owning association may have been
+            // deleted with its workspace (issue #231), in which case
+            // only the service still knows it — the fallback below
+            // matches it by path. Everything else (no scope at all,
+            // unknown workspace) stays an error.
+            guard repoFilter != nil, workspaceFilter == nil else {
+                reply?.send(["ok": false, "error": error])
+                reply?.close()
+                return .none
+            }
         }
 
-        // Only stop associations that actually have a live session.
-        let activeIDs = Set(state.graft.sessions.ids)
-        let targets = assocs.filter { activeIDs.contains($0.id) }
-        if targets.isEmpty {
-            reply?.send(["ok": true, "stopped": []])
-            reply?.close()
-            return .none
-        }
-
+        let assocIDs = Set(assocs.map(\.id))
         return .run { [graftService] _ in
+            // Filter against the SERVICE's live sessions, not the
+            // reducer mirror — the two can diverge, and a session the
+            // mirror lost track of must still be stoppable from the
+            // CLI (issue #231). The empty-targets reply lives inside
+            // the effect for the same reason: an empty mirror must
+            // not short-circuit ahead of the service check.
+            let active = await graftService.activeSessions()
+            var targetIDs = active.map(\.id).filter { assocIDs.contains($0) }
+            if let repoFilter {
+                // Orphan fallback: a session whose association is gone
+                // can never resolve via workspaces, but `--repo` can
+                // still address it by worktree path, parent repo root,
+                // or their last path components (mirroring the
+                // association matching in `resolveGraftAssociations`).
+                for session in active where !targetIDs.contains(session.id) {
+                    let candidates = [
+                        session.worktreePath,
+                        (session.worktreePath as NSString).lastPathComponent,
+                        session.parentRepoRoot,
+                        (session.parentRepoRoot as NSString).lastPathComponent
+                    ]
+                    if candidates.contains(repoFilter)
+                        || candidates.contains(Self.standardizedPath(repoFilter)) {
+                        targetIDs.append(session.id)
+                    }
+                }
+            }
+            if targetIDs.isEmpty {
+                reply?.send(["ok": true, "stopped": []])
+                reply?.close()
+                return
+            }
             var stopped: [String] = []
             var failures: [[String: Any]] = []
-            for assoc in targets {
+            for targetID in targetIDs {
                 do {
-                    try await graftService.stop(assoc.id)
-                    stopped.append(assoc.id.uuidString)
+                    try await graftService.stop(targetID)
+                    stopped.append(targetID.uuidString)
                 } catch {
                     failures.append([
-                        "association_id": assoc.id.uuidString,
+                        "association_id": targetID.uuidString,
                         "error": String(describing: error)
                     ])
                 }
@@ -967,17 +999,34 @@ struct AppReducer {
         }
     }
 
+    /// Expand + canonicalize a user-supplied path argument so it can
+    /// be compared against the service's canonicalized session paths.
+    /// Mirrors `GraftServiceImpl.canonicalize` (standardize, then
+    /// resolve symlinks — e.g. /tmp → /private/tmp) plus tilde
+    /// expansion for CLI ergonomics.
+    private static func standardizedPath(_ raw: String) -> String {
+        (((raw as NSString).expandingTildeInPath as NSString)
+            .standardizingPath as NSString)
+            .resolvingSymlinksInPath
+    }
+
     func handleGraftStatus(
-        state: State,
+        state _: State,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
-        let payload: [String: Any] = [
-            "ok": true,
-            "sessions": state.graft.sessions.map(sessionJSON)
-        ]
-        reply?.send(payload)
-        reply?.close()
-        return .none
+        // Report the SERVICE's sessions, not the reducer mirror — the
+        // service is the source of truth, and a session the mirror
+        // lost track of must still show up here so `alreadyActive`
+        // rejections are always explainable via `status` (issue #231).
+        .run { [graftService] _ in
+            let sessions = await graftService.activeSessions()
+            let payload: [String: Any] = [
+                "ok": true,
+                "sessions": sessions.map(Self.sessionJSON)
+            ]
+            reply?.send(payload)
+            reply?.close()
+        }
     }
 
     /// `nex ping` — cheap IPC round-trip used by `nex doctor` and as
@@ -1244,11 +1293,6 @@ struct AppReducer {
                 let paneIDs = workspace.layout.allPaneIDs
                     + workspace.parkedPanes.map(\.id)
                 let assocIDs = workspace.repoAssociations.map(\.id)
-                // Capture associations with live graft sessions BEFORE
-                // removal so we can issue `forceStop` for each — head
-                // watcher cancellation alone leaves the graft mirroring
-                // a worktree whose association is gone.
-                let liveGraftAssocIDs = assocIDs.filter { state.graft.sessions[id: $0] != nil }
                 state.workspaces.remove(id: id)
                 state.topLevelOrder.removeAll { $0 == .workspace(id) }
                 for groupID in state.groups.ids {
@@ -1275,7 +1319,12 @@ struct AppReducer {
                 }
 
                 let stopEffects = assocIDs.map { Effect.send(Action.stopHeadWatcher(associationID: $0)) }
-                let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                // `forceStop` every removed association unconditionally
+                // — filtering by the reducer's session mirror used to
+                // skip cleanup whenever the mirror had lost track of a
+                // live service session (issue #231). Stop is a cheap
+                // no-op for associations without one.
+                let graftStopEffects = assocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 let mgr = surfaceManager
                 return .merge(
                     [
@@ -1548,18 +1597,16 @@ struct AppReducer {
                 guard ids.count < state.workspaces.count else { return .none }
 
                 var panesToDestroy: [UUID] = []
-                // Capture associations with live graft sessions BEFORE
-                // removal — otherwise the graft keeps mirroring a
-                // worktree whose association is gone with no UI/CLI
-                // path to stop it.
-                var liveGraftAssocIDs: [UUID] = []
+                // Capture association ids BEFORE removal so we can
+                // `forceStop` each — unconditionally, since filtering
+                // by the reducer's session mirror used to skip live
+                // service sessions the mirror lost track of (#231).
+                var graftAssocIDs: [UUID] = []
                 for id in ids {
                     guard let workspace = state.workspaces[id: id] else { continue }
                     panesToDestroy.append(contentsOf: workspace.layout.allPaneIDs)
                     panesToDestroy.append(contentsOf: workspace.parkedPanes.map(\.id))
-                    liveGraftAssocIDs.append(contentsOf: workspace.repoAssociations
-                        .map(\.id)
-                        .filter { state.graft.sessions[id: $0] != nil })
+                    graftAssocIDs.append(contentsOf: workspace.repoAssociations.map(\.id))
                     state.workspaces.remove(id: id)
                 }
                 let removedSet = Set(ids)
@@ -1588,7 +1635,7 @@ struct AppReducer {
 
                 let paneIDs = panesToDestroy
                 let deletedWorkspaceIDs = ids
-                let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                let graftStopEffects = graftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 let mgr = surfaceManager
                 return .merge(
                     [
@@ -1804,18 +1851,17 @@ struct AppReducer {
                     // Drop each child workspace. Mirrors `deleteWorkspace` so
                     // surfaces are destroyed and downstream state stays clean.
                     var paneIDs: [UUID] = []
-                    // Capture associations with live graft sessions
-                    // BEFORE removal so we can issue `forceStop` for
-                    // each — otherwise grafts on child workspaces
-                    // keep running with no way to stop them.
-                    var liveGraftAssocIDs: [UUID] = []
+                    // Capture association ids BEFORE removal so we can
+                    // `forceStop` each — unconditionally, since
+                    // filtering by the reducer's session mirror used
+                    // to skip live service sessions the mirror lost
+                    // track of (#231).
+                    var graftAssocIDs: [UUID] = []
                     for wsID in childIDs {
                         guard let workspace = state.workspaces[id: wsID] else { continue }
                         paneIDs.append(contentsOf: workspace.layout.allPaneIDs)
                         paneIDs.append(contentsOf: workspace.parkedPanes.map(\.id))
-                        liveGraftAssocIDs.append(contentsOf: workspace.repoAssociations
-                            .map(\.id)
-                            .filter { state.graft.sessions[id: $0] != nil })
+                        graftAssocIDs.append(contentsOf: workspace.repoAssociations.map(\.id))
                         state.workspaces.remove(id: wsID)
                     }
                     let removedSet = Set(childIDs)
@@ -1839,7 +1885,7 @@ struct AppReducer {
 
                     let captured = paneIDs
                     let cascadedWorkspaceIDs = childIDs
-                    let graftStopEffects = liveGraftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
+                    let graftStopEffects = graftAssocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                     let mgr = surfaceManager
                     return .merge(
                         [

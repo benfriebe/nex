@@ -237,6 +237,157 @@ struct GraftServiceTests {
         try await impl.stop(env.association.id)
     }
 
+    /// Heart of issue #231 at the service level: a live session whose
+    /// sync failed (worktree deleted) still holds the parent-root
+    /// claim — a second start must be rejected — but the claim is
+    /// derived from the session itself, so `stop` releases it and a
+    /// retry succeeds. Under the old standalone `busyRoots` set, a
+    /// removal path that skipped `stop` left the claim held forever.
+    @Test func erroredSessionBlocksSecondStartUntilStopped() async throws {
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let secondWorktree = try addSiblingWorktree(parent: env.parent, name: "feature-2")
+        let secondAssoc = RepoAssociation(
+            id: UUID(),
+            repoID: UUID(),
+            worktreePath: secondWorktree,
+            branchName: "feature-2"
+        )
+        let watcher = RecursiveFSWatcher(backend: .test)
+        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
+
+        _ = try await impl.start(env.association)
+
+        // Delete the worktree out from under the session, then poke
+        // the watcher — the sync pass fails with `missingWorktree`
+        // and the session flips to `.error` while staying live.
+        try FileManager.default.removeItem(atPath: env.worktree)
+        watcher.inject(
+            [(env.worktree as NSString).appendingPathComponent("gone.txt")],
+            into: env.worktree
+        )
+        try await pollUntilAsync(timeout: .seconds(5)) {
+            let sessions = await impl.activeSessions()
+            if case .error = sessions.first(where: { $0.id == env.association.id })?.status {
+                return true
+            }
+            return false
+        }
+
+        // The errored session still owns the parent root.
+        do {
+            _ = try await impl.start(secondAssoc)
+            Issue.record("expected GraftError.alreadyActive")
+        } catch let error as GraftError {
+            if case .alreadyActive = error {
+                // ok
+            } else {
+                Issue.record("unexpected error: \(error)")
+            }
+        }
+
+        // Stopping the errored session releases the claim...
+        try await impl.stop(env.association.id)
+        let after = await impl.activeSessions()
+        #expect(after.isEmpty)
+
+        // ...so the retry on the same parent root now succeeds.
+        let session = try await impl.start(secondAssoc)
+        #expect(session.parentRepoRoot.hasSuffix((env.parent as NSString).lastPathComponent))
+        try await impl.stop(secondAssoc.id)
+    }
+
+    /// A start that fails (parent mid-merge) must release the
+    /// mid-start root claim so a later attempt isn't rejected with a
+    /// phantom `alreadyActive`.
+    @Test func failedStartReleasesRootClaimForRetry() async throws {
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+
+        // Fake an in-progress merge in the parent.
+        let headSha = try shell("git", ["rev-parse", "HEAD"], at: env.parent)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let mergeHead = (env.parent as NSString)
+            .appendingPathComponent(".git/MERGE_HEAD")
+        try headSha.write(toFile: mergeHead, atomically: true, encoding: .utf8)
+
+        do {
+            _ = try await impl.start(env.association)
+            Issue.record("expected GraftError.repoBusy")
+        } catch let error as GraftError {
+            if case .repoBusy = error {
+                // ok
+            } else {
+                Issue.record("unexpected error: \(error)")
+            }
+        }
+
+        // Clear the merge state; the retry must not hit alreadyActive.
+        try FileManager.default.removeItem(atPath: mergeHead)
+        _ = try await impl.start(env.association)
+        try await impl.stop(env.association.id)
+    }
+
+    /// Concurrent stops of the same session coalesce onto one
+    /// teardown: both callers succeed, the stash pops exactly once,
+    /// and neither returns before the teardown finished.
+    @Test func concurrentStopsCoalesceAndPopStashOnce() async throws {
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        // Dirty the parent so a stash exists — a double-run of the
+        // stop sequence would pop twice and the second would throw a
+        // spurious stashPopConflict.
+        let dirty = (env.parent as NSString).appendingPathComponent("dirty.txt")
+        try "dirty contents".write(toFile: dirty, atomically: true, encoding: .utf8)
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+        _ = try await impl.start(env.association)
+
+        let assocID = env.association.id
+        async let first: Void = impl.stop(assocID)
+        async let second: Void = impl.stop(assocID)
+        try await first
+        try await second
+
+        let stashList = try shell("git", ["stash", "list"], at: env.parent)
+        #expect(!stashList.contains("nex-graft"))
+        let restored = try String(contentsOfFile: dirty)
+        #expect(restored == "dirty contents")
+        let breadcrumbPath = (env.parent as NSString)
+            .appendingPathComponent(".git/\(GraftServiceImpl.breadcrumbName)")
+        #expect(!FileManager.default.fileExists(atPath: breadcrumbPath))
+        let after = await impl.activeSessions()
+        #expect(after.isEmpty)
+    }
+
+    /// `stop` for an id the service doesn't know is a silent no-op:
+    /// no throw, no published `.stopped` event (so reducer mirrors
+    /// are never perturbed by stops of start-failure placeholders).
+    @Test func stopUnknownAssociationIsSilentNoOp() async throws {
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+        let events = LockedEventCount()
+        let stream = impl.updates()
+        let listener = Task {
+            for await _ in stream {
+                events.increment()
+            }
+        }
+
+        try await impl.stop(UUID())
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(events.value == 0)
+        listener.cancel()
+    }
+
     @Test func detectOrphansReturnsPreseededBreadcrumb() async throws {
         let env = try makeRepoEnv()
         defer { env.cleanup() }
@@ -397,6 +548,21 @@ struct GraftServiceTests {
         return try JSONDecoder().decode(DecodedBreadcrumb.self, from: data)
     }
 
+    private func pollUntilAsync(
+        timeout: Duration,
+        _ predicate: @escaping () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock().now.advanced(by: timeout)
+        while ContinuousClock().now < deadline {
+            if await predicate() { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw NSError(
+            domain: "GraftTestShell", code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "poll timed out"]
+        )
+    }
+
     private func pollUntil(
         timeout: Duration,
         _ predicate: @escaping () -> Bool
@@ -411,4 +577,14 @@ struct GraftServiceTests {
             userInfo: [NSLocalizedDescriptionKey: "poll timed out"]
         )
     }
+}
+
+private final class LockedEventCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+    func increment() {
+        lock.withLock { _value += 1 }
+    }
+
+    var value: Int { lock.withLock { _value } }
 }

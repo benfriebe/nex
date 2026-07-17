@@ -174,19 +174,18 @@ struct NexApp: App {
                     }
 
                     QuitGate.shared.flushGraftSessions = {
-                        // Snapshot active session IDs from the store and
-                        // call graftService.stop on each. Block (with a
+                        // Stop every session the SERVICE holds (not the
+                        // store's mirror — the mirror can lose track of
+                        // live sessions, issue #231). Block (with a
                         // 2-second cap) so the breadcrumb files are
                         // gone before the process exits. Sessions that
                         // can't stop in time fall back to the orphan
                         // recovery path on next launch.
-                        let sessionIDs = store.withState { $0.graft.sessions.ids }
-                        guard !sessionIDs.isEmpty else { return }
                         let service = GraftService.liveValue
                         let semaphore = DispatchSemaphore(value: 0)
                         Task.detached {
-                            for id in sessionIDs {
-                                try? await service.stop(id)
+                            for session in await service.activeSessions() {
+                                try? await service.stop(session.id)
                             }
                             semaphore.signal()
                         }

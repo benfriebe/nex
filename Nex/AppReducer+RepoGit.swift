@@ -88,11 +88,12 @@ extension AppReducer {
                 let stopEffects = removedAssociationIDs.map {
                     Effect.send(Action.stopHeadWatcher(associationID: $0))
                 }
-                // Stop any live graft sessions on removed associations.
-                // Without this, removing the repo leaves grafts mirroring
-                // a worktree whose association is gone.
+                // Stop any graft sessions on removed associations —
+                // unconditionally, since filtering by the reducer's
+                // session mirror used to skip live service sessions
+                // the mirror lost track of (#231). Stop is a cheap
+                // no-op for associations without one.
                 let graftStopEffects = removedAssociationIDs
-                    .filter { state.graft.sessions[id: $0] != nil }
                     .map { Effect.send(Action.graft(.forceStop($0))) }
                 return .merge(stopEffects + graftStopEffects + [.send(.persistState)])
 
@@ -178,25 +179,20 @@ extension AppReducer {
                       let assoc = workspace.repoAssociations[id: associationID],
                       let repo = state.repoRegistry[id: assoc.repoID] else { return .none }
 
-                // Stop any active graft session FIRST. Otherwise the
-                // session keeps trying to mirror a worktree that no
-                // longer has an association (and, in the
-                // `deleteWorktree: true` case, is about to disappear
-                // entirely), leaving the parent root mid-mirror and
-                // the breadcrumb stranded.
-                let needsGraftStop = state.graft.sessions[id: associationID] != nil
-
                 state.workspaces[id: workspaceID]?.repoAssociations.remove(id: associationID)
                 state.gitStatuses.removeValue(forKey: associationID)
 
-                // `forceStop` (not `toggleGraft`) because the
-                // association is being deleted entirely. `toggleGraft`
-                // would retry-start a graft when the existing session
-                // is in `.error` state, which is wrong here — the
-                // worktree is going away.
-                let graftStop: Effect<Action> = needsGraftStop
-                    ? .send(.graft(.forceStop(associationID)))
-                    : .none
+                // Stop any graft session FIRST. Otherwise the session
+                // keeps trying to mirror a worktree that no longer has
+                // an association (and, in the `deleteWorktree: true`
+                // case, is about to disappear entirely), leaving the
+                // parent root mid-mirror and the breadcrumb stranded.
+                // Unconditional — filtering by the reducer's session
+                // mirror used to skip live service sessions the mirror
+                // lost track of (#231). `forceStop` (not `toggleGraft`)
+                // because the association is being deleted entirely and
+                // a retry-start would be wrong here.
+                let graftStop: Effect<Action> = .send(.graft(.forceStop(associationID)))
 
                 if deleteWorktree {
                     // graftStop and removeWorktree run in parallel —
@@ -376,12 +372,14 @@ extension AppReducer {
 
                 if removedRepoIDs.isEmpty { return .none }
                 let stopEffects = stoppedAssocIDs.map { Effect.send(Action.stopHeadWatcher(associationID: $0)) }
-                // Stop any live graft sessions for auto-unlinked
-                // associations. Otherwise a graft set up against an
-                // auto-linked worktree keeps mirroring after the pane
-                // moves out of that worktree.
+                // Stop any graft sessions for auto-unlinked
+                // associations — unconditionally, since filtering by
+                // the reducer's session mirror used to skip live
+                // service sessions the mirror lost track of (#231).
+                // Otherwise a graft set up against an auto-linked
+                // worktree keeps mirroring after the pane moves out
+                // of that worktree.
                 let graftStopEffects = stoppedAssocIDs
-                    .filter { state.graft.sessions[id: $0] != nil }
                     .map { Effect.send(Action.graft(.forceStop($0))) }
                 return .merge(stopEffects + graftStopEffects + [.send(.persistState)])
 

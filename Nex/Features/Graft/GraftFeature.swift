@@ -37,6 +37,12 @@ struct GraftFeature {
         /// swap prompt) from a generic error (which surfaces in the
         /// per-association tooltip / red dot).
         case startFailed(association: RepoAssociation, failure: GraftStartFailure)
+        /// The service reported an active session for a contested
+        /// parent root that reducer state had lost track of (an
+        /// orphan — e.g. the owning workspace was deleted). Re-adopts
+        /// the session into state and presents the swap prompt so the
+        /// user has a working stop-and-swap path.
+        case alreadyActiveOwnerFound(association: RepoAssociation, existing: GraftSession)
         case stopSucceeded(UUID)
         case stopFailed(UUID, error: String)
         case sessionEvent(GraftSessionEvent)
@@ -80,13 +86,32 @@ struct GraftFeature {
 
             case .toggleGraft(let association):
                 if let existing = state.sessions[id: association.id] {
-                    // A session in `.error` state never owns live
-                    // resources — it's just the error tooltip from
-                    // the last failed attempt. Toggle becomes "retry":
-                    // drop the error session and re-run start.
+                    // An `.error` session is either a start-failure
+                    // placeholder (owns nothing) or a LIVE session
+                    // that failed a sync — the latter still owns the
+                    // watcher, the parent-root claim, and the
+                    // breadcrumb (issue #231). Toggle becomes "retry":
+                    // unwind whatever the service still holds first
+                    // (a no-op for placeholders), then re-run start.
+                    // If the unwind fails, do NOT retry-start — a
+                    // fresh start would overwrite the recovery
+                    // breadcrumb and orphan the user's stash.
                     if case .error = existing.status {
                         state.sessions.remove(id: association.id)
-                        return .send(.toggleGraft(association))
+                        return .run { send in
+                            do {
+                                try await graftService.stop(association.id)
+                            } catch {
+                                await send(.startFailed(
+                                    association: association,
+                                    failure: .other(message:
+                                        "Couldn't unwind the previous graft: \(error). " +
+                                            "Resolve the repo state, then toggle to retry.")
+                                ))
+                                return
+                            }
+                            await send(.toggleGraft(association))
+                        }
                     }
                     return .run { send in
                         do {
@@ -128,15 +153,17 @@ struct GraftFeature {
                 }
 
             case .forceStop(let assocID):
-                guard let existing = state.sessions[id: assocID] else { return .none }
-                // A session in `.error` state never owns live
-                // resources — just drop the placeholder. Unlike
-                // `toggleGraft`, we never retry-start (the caller is
-                // a removal path; the association no longer exists).
-                if case .error = existing.status {
-                    state.sessions.remove(id: assocID)
-                    return .none
-                }
+                // Always tear down via the service — even when reducer
+                // state has no session (or only an `.error` one) for
+                // this id. A session that started fine and later hit a
+                // sync error still owns live resources (watcher,
+                // parent-root claim, breadcrumb); skipping the service
+                // stop for it leaked all of that when the owning
+                // workspace was deleted (issue #231). For ids the
+                // service doesn't know, stop() is a cheap no-op.
+                // Unlike `toggleGraft`, we never retry-start (the
+                // caller is a removal path; the association no longer
+                // exists).
                 return .run { send in
                     do {
                         try await graftService.stop(assocID)
@@ -171,8 +198,34 @@ struct GraftFeature {
                             existingWorktreePath: existing.worktreePath,
                             parentRepoRoot: parentRepoRoot
                         )
+                        return .none
                     }
-                    return .none
+                    // No reducer-visible owner. The service is the
+                    // source of truth — it may still hold a session
+                    // reducer state lost track of. Query it so the
+                    // user gets the swap prompt (a real recovery
+                    // lever) instead of a silently dead button
+                    // (issue #231).
+                    return .run { send in
+                        let sessions = await graftService.activeSessions()
+                        if let owner = sessions.first(where: { $0.parentRepoRoot == parentRepoRoot }) {
+                            await send(.alreadyActiveOwnerFound(
+                                association: association,
+                                existing: owner
+                            ))
+                        } else {
+                            // Nobody visibly owns the claim (e.g. a
+                            // start on the same root is mid-flight).
+                            // Surface a visible error instead of
+                            // nothing.
+                            await send(.startFailed(
+                                association: association,
+                                failure: .other(message:
+                                    "Another graft is already active for \(parentRepoRoot). " +
+                                        "Stop it first, then retry.")
+                            ))
+                        }
+                    }
                 case .other(let message):
                     // Re-insert the session in `.error` state so the
                     // tooltip / red dot persists until the user
@@ -189,6 +242,29 @@ struct GraftFeature {
                     return .none
                 }
 
+            case .alreadyActiveOwnerFound(let association, let existing):
+                // The service session IS this association — reducer
+                // state simply lost track of it. Re-adopt it and show
+                // it as active; a swap prompt would offer to swap the
+                // worktree with itself.
+                if existing.id == association.id {
+                    state.sessions[id: existing.id] = existing
+                    return .none
+                }
+                // Re-adopt the service-side session so the prompt's
+                // "existing" side is visible in the inspector and
+                // `status`, and remains stoppable if the user cancels.
+                state.sessions[id: existing.id] = existing
+                state.swapPrompt = GraftSwapPrompt(
+                    id: association.id,
+                    newAssociation: association,
+                    existingSessionID: existing.id,
+                    existingBranch: existing.branch,
+                    existingWorktreePath: existing.worktreePath,
+                    parentRepoRoot: existing.parentRepoRoot
+                )
+                return .none
+
             case .confirmSwap(let prompt):
                 state.swapPrompt = nil
                 // Optimistically show the new session as .starting so
@@ -203,7 +279,7 @@ struct GraftFeature {
                     lastSync: nil
                 ))
                 return .run { send in
-                    // Stop must complete (busyRoots released) before
+                    // Stop must complete (root claim released) before
                     // start can succeed — sequentially.
                     do {
                         try await graftService.stop(prompt.existingSessionID)
