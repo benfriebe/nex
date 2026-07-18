@@ -313,6 +313,284 @@ struct GraftFeatureTests {
             state.orphans = [orphan]
         }
     }
+
+    // MARK: - Issue #231 regressions
+
+    @Test func forceStopOnErroredSessionCallsServiceStop() async {
+        // THE regression for issue #231: a session in `.error` status
+        // can be a LIVE session whose sync failed — it still owns the
+        // watcher, the parent-root claim, and the breadcrumb.
+        // `forceStop` (used by every removal path) must call
+        // graftService.stop for it, not just drop the reducer state.
+        var erroredSession = makeSession()
+        erroredSession.status = .error("sync failed: worktree missing")
+        var initial = GraftFeature.State()
+        initial.sessions.append(erroredSession)
+
+        let stopCalls = ConcurrentCounter()
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                stop: { _ in stopCalls.increment() },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.forceStop(Self.assocID))
+        await store.receive(.stopSucceeded(Self.assocID)) { state in
+            state.sessions.remove(id: Self.assocID)
+        }
+        await store.finish()
+        #expect(stopCalls.value == 1)
+    }
+
+    @Test func forceStopWithoutReducerSessionStillCallsServiceStop() async {
+        // The reducer mirror can lose track of a live service session;
+        // forceStop must reach the service regardless (stop is a
+        // cheap no-op when the service doesn't know the id either).
+        let stopCalls = ConcurrentCounter()
+        let store = TestStore(initialState: GraftFeature.State()) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                stop: { _ in stopCalls.increment() },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.forceStop(Self.assocID))
+        await store.receive(.stopSucceeded(Self.assocID))
+        await store.finish()
+        #expect(stopCalls.value == 1)
+    }
+
+    @Test func toggleOnErroredSessionStopsBeforeRestarting() async {
+        // Retry on an errored session must unwind the service first
+        // (release the root claim) or the restart self-collides with
+        // its own `alreadyActive`.
+        var erroredSession = makeSession()
+        erroredSession.status = .error("sync failed")
+        var initial = GraftFeature.State()
+        initial.sessions.append(erroredSession)
+
+        let ordering = LockedArray()
+        let restarted = makeSession()
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { assoc in
+                    ordering.append("start:\(assoc.id.uuidString)")
+                    return restarted
+                },
+                stop: { id in
+                    ordering.append("stop:\(id.uuidString)")
+                },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.toggleGraft(makeAssociation())) { state in
+            state.sessions.remove(id: Self.assocID)
+        }
+        await store.receive(.startSucceeded(restarted)) { state in
+            state.sessions[id: Self.assocID] = restarted
+        }
+        await store.finish()
+
+        #expect(ordering.snapshot.first?.hasPrefix("stop:") == true)
+        #expect(ordering.snapshot.last?.hasPrefix("start:") == true)
+    }
+
+    @Test func toggleOnErroredSessionAbortsRetryWhenStopFails() async {
+        // If the unwind fails, the recovery breadcrumb (and any
+        // stash) is still on disk — retry-starting would overwrite
+        // it. The retry must abort with a visible error instead.
+        var erroredSession = makeSession()
+        erroredSession.status = .error("sync failed")
+        var initial = GraftFeature.State()
+        initial.sessions.append(erroredSession)
+
+        let startCalls = ConcurrentCounter()
+        let store = TestStore(initialState: initial) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in
+                    startCalls.increment()
+                    return .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil)
+                },
+                stop: { _ in throw GraftError.unknown("restore failed") },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let assoc = makeAssociation()
+        await store.send(.toggleGraft(assoc)) { state in
+            state.sessions.remove(id: Self.assocID)
+        }
+        await store.receive(\.startFailed)
+        await store.finish()
+
+        // A visible `.error` session is re-inserted; start never ran.
+        #expect(startCalls.value == 0)
+        let reinserted = store.state.sessions[id: Self.assocID]
+        if case .error(let message)? = reinserted?.status {
+            #expect(message.contains("Couldn't unwind"))
+        } else {
+            Issue.record("expected a visible .error session, got \(String(describing: reinserted))")
+        }
+    }
+
+    @Test func alreadyActiveWithOrphanedServiceSessionPresentsSwapPrompt() async {
+        // The silent-button fix: reducer state has NO session for the
+        // contested root, but the service still holds one (the #231
+        // orphan). The reducer must query the service, re-adopt the
+        // session, and present the swap prompt instead of doing
+        // nothing.
+        let orphanID = UUID(uuidString: "00000000-0000-0000-0000-00000000D001")!
+        let orphanSession = GraftSession(
+            id: orphanID,
+            worktreePath: "/tmp/wt-orphan",
+            parentRepoRoot: "/tmp/repo",
+            branch: "orphan-branch",
+            status: .watching,
+            stashRef: nil,
+            lastSync: nil
+        )
+        let store = TestStore(initialState: GraftFeature.State()) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in
+                    throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
+                },
+                stop: { _ in },
+                activeSessions: { [orphanSession] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let newAssoc = makeAssociation()
+        await store.send(.toggleGraft(newAssoc))
+        await store.receive(.alreadyActiveOwnerFound(
+            association: newAssoc,
+            existing: orphanSession
+        )) { state in
+            state.sessions[id: orphanID] = orphanSession
+            state.swapPrompt = GraftSwapPrompt(
+                id: newAssoc.id,
+                newAssociation: newAssoc,
+                existingSessionID: orphanID,
+                existingBranch: "orphan-branch",
+                existingWorktreePath: "/tmp/wt-orphan",
+                parentRepoRoot: "/tmp/repo"
+            )
+        }
+    }
+
+    @Test func alreadyActiveWithSameAssociationReadoptsWithoutPrompt() async {
+        // The service session belongs to the SAME association the
+        // user toggled — reducer state just lost track of it. That
+        // must repair state (session re-adopted, shown active), not
+        // offer to swap a worktree with itself.
+        let orphanSession = makeSession()
+        let store = TestStore(initialState: GraftFeature.State()) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in
+                    throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
+                },
+                stop: { _ in },
+                activeSessions: { [orphanSession] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let assoc = makeAssociation()
+        await store.send(.toggleGraft(assoc))
+        await store.receive(.alreadyActiveOwnerFound(
+            association: assoc,
+            existing: orphanSession
+        )) { state in
+            state.sessions[id: Self.assocID] = orphanSession
+        }
+        await store.finish()
+        #expect(store.state.swapPrompt == nil)
+    }
+
+    @Test func alreadyActiveWithNoVisibleOwnerSurfacesError() async {
+        // Nobody visibly owns the claim (e.g. a mid-flight start on
+        // the same root). The button must not fail silently — a
+        // visible `.error` session is inserted. Its parentRepoRoot
+        // stays empty so it can never satisfy a future swap-prompt
+        // lookup (no phantom-prompt loop).
+        let store = TestStore(initialState: GraftFeature.State()) {
+            GraftFeature()
+        } withDependencies: {
+            $0.graftService = GraftService(
+                start: { _ in
+                    throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
+                },
+                stop: { _ in },
+                activeSessions: { [] },
+                updates: { AsyncStream { _ in } },
+                detectOrphans: { _ in [] },
+                recoverOrphan: { _ in },
+                dismissOrphan: { _ in }
+            )
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let newAssoc = makeAssociation()
+        await store.send(.toggleGraft(newAssoc))
+        // First the alreadyActive failure, then the follow-up .other
+        // failure emitted after the service query finds no owner.
+        await store.receive(\.startFailed)
+        await store.receive(\.startFailed)
+        await store.finish()
+
+        let inserted = store.state.sessions[id: newAssoc.id]
+        #expect(inserted?.parentRepoRoot == "")
+        if case .error(let message)? = inserted?.status {
+            #expect(message.contains("already active"))
+        } else {
+            Issue.record("expected a visible .error session, got \(String(describing: inserted))")
+        }
+        #expect(store.state.swapPrompt == nil)
+    }
 }
 
 private final class ConcurrentCounter: @unchecked Sendable {

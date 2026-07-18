@@ -104,10 +104,23 @@ final class GraftServiceImpl: Sendable {
     /// `read-tree --reset -u` AFTER `restoreParent` (which would
     /// re-corrupt the parent and break the stash pop).
     private nonisolated(unsafe) var activeSyncTasks: [UUID: Task<Void, Never>] = [:]
-    /// Canonicalised `parentRepoRoot` paths that currently hold a graft
-    /// session. A second association targeting the same root is rejected
-    /// with `GraftError.alreadyActive`.
-    private nonisolated(unsafe) var busyRoots: Set<String> = []
+    /// Canonicalised `parentRepoRoot` paths with a `start()` currently
+    /// mid-flight (claimed before the session exists). The busy check
+    /// derives "root is claimed" from this set PLUS the live `sessions`
+    /// values — there is no separately-maintained lock that could
+    /// outlive its session. Issue #231 was exactly that: a removal
+    /// path dropped the session without releasing the old standalone
+    /// `busyRoots` set, leaving an `alreadyActive` rejection that
+    /// neither `status` nor `stop` could see until app restart.
+    private nonisolated(unsafe) var startingRoots: Set<String> = []
+    /// In-flight `stop()` work keyed by association id. Concurrent
+    /// stops for the same id coalesce onto one task and all await its
+    /// real outcome — a second caller must neither double-run the
+    /// parent restore + stash pop (spurious conflict) nor return
+    /// "stopped" before teardown actually finished (the CLI reply and
+    /// `confirmSwap`'s stop-then-start both rely on stop-returned ⇒
+    /// teardown-done).
+    private nonisolated(unsafe) var stopTasks: [UUID: Task<Void, Error>] = [:]
     private nonisolated(unsafe) var subscribers: [UUID: AsyncStream<GraftSessionEvent>.Continuation] = [:]
 
     init(
@@ -140,23 +153,29 @@ final class GraftServiceImpl: Sendable {
             throw GraftError.notAWorktree(path: worktreePath)
         }
 
-        // Reject if the parent root is already being grafted into.
+        // Reject if the parent root is already being grafted into —
+        // by a live session (whatever its status, including `.error`)
+        // or another start() that's mid-flight. Deriving the check
+        // from `sessions` means whatever holds the claim is always
+        // visible via `activeSessions()` and releasable via `stop()`.
         try lock.withLock {
-            if busyRoots.contains(parentRepoRoot) {
+            let claimed = startingRoots.contains(parentRepoRoot)
+                || sessions.values.contains { $0.parentRepoRoot == parentRepoRoot }
+            if claimed {
                 throw GraftError.alreadyActive(parentRepoRoot: parentRepoRoot)
             }
-            busyRoots.insert(parentRepoRoot)
+            startingRoots.insert(parentRepoRoot)
         }
 
         let state: RepoState
         do {
             state = try await gitService.repoState(parentRepoRoot)
         } catch {
-            releaseBusy(parentRepoRoot)
+            releaseStarting(parentRepoRoot)
             throw error
         }
         guard state == .clean else {
-            releaseBusy(parentRepoRoot)
+            releaseStarting(parentRepoRoot)
             throw GraftError.repoBusy(state: describe(state))
         }
 
@@ -172,7 +191,7 @@ final class GraftServiceImpl: Sendable {
             preGraftBranch = try await gitService.getCurrentBranch(parentRepoRoot)
             preGraftSha = try await gitService.getHeadSha(parentRepoRoot)
         } catch {
-            releaseBusy(parentRepoRoot)
+            releaseStarting(parentRepoRoot)
             throw error
         }
 
@@ -190,11 +209,11 @@ final class GraftServiceImpl: Sendable {
                 )
             }
         } catch {
-            releaseBusy(parentRepoRoot)
+            releaseStarting(parentRepoRoot)
             throw error
         }
 
-        /// Helper that undoes the stash + busyRoots side-effects when
+        /// Helper that undoes the stash + startingRoots side-effects when
         /// a later step in `start` throws. Without it, a failed
         /// initial sync would leave the user's stash on disk with no
         /// recovery breadcrumb and no in-memory session — and a
@@ -226,7 +245,7 @@ final class GraftServiceImpl: Sendable {
                     )
                 }
             }
-            releaseBusy(parentRepoRoot)
+            releaseStarting(parentRepoRoot)
             return originalError
         }
 
@@ -304,7 +323,14 @@ final class GraftServiceImpl: Sendable {
             worktreePreGraftSha: worktreePreGraftSha
         )
 
-        lock.withLock { sessions[association.id] = initialSession }
+        // Atomically publish the session and drop the mid-start claim —
+        // the root's busy claim transfers from `startingRoots` to the
+        // session itself with no gap a concurrent start could slip
+        // through.
+        lock.withLock {
+            sessions[association.id] = initialSession
+            _ = startingRoots.remove(parentRepoRoot)
+        }
         publish(.started(initialSession))
 
         // Spawn the watcher loop. Cancelling the task tears the
@@ -314,50 +340,62 @@ final class GraftServiceImpl: Sendable {
             rootPath: worktreePath,
             debounce: debounce
         )
-        let task = Task { [weak self] in
-            for await batch in watchStream {
-                guard let self else { return }
-                // Spawn each batch handler as its own Task and record
-                // it so `stop()` can await the current sync before
-                // tearing down. Without this, a sync pass already
-                // inside its `read-tree` call survives stop's watcher
-                // cancellation and re-applies the worktree's tree
-                // AFTER the parent has been restored, leaving the
-                // parent dirty and breaking the stash pop.
-                //
-                // The spawn + register MUST happen atomically under
-                // the lock, AND we must verify the watcher entry is
-                // still live AFTER the lock. Otherwise `stop()` can
-                // slip in between batch arrival and registration:
-                //   1. batch arrives, watcher about to spawn syncTask
-                //   2. stop() removes our watcherTask, reads empty
-                //      activeSyncTasks, proceeds to restoreParent
-                //   3. watcher finally spawns syncTask → read-tree
-                //      lands AFTER restore and corrupts the parent.
-                // Guarding on `watcherTasks[assocID] != nil` inside
-                // the same lock closes the race: stop's first lock
-                // (`watcherTasks.removeValue`) and our spawn-or-abort
-                // check are now totally ordered.
-                let assocID = association.id
-                let syncTask: Task<Void, Never>? = lock.withLock {
-                    guard watcherTasks[assocID] != nil else { return nil }
-                    let task = Task { [weak self] in
-                        guard let self else { return }
-                        await handleBatch(associationID: assocID, batch: batch)
+        // Create AND register the watcher task under one lock hold.
+        // The loop body's liveness guard reads `watcherTasks[assocID]`
+        // under the same lock, so a batch that arrives while we're
+        // still registering blocks until the entry exists — otherwise
+        // a fast first event could observe "not registered", bail,
+        // and permanently kill sync for a session `status` still
+        // reports as watching.
+        lock.withLock {
+            let task = Task { [weak self] in
+                for await batch in watchStream {
+                    guard let self else { return }
+                    // Spawn each batch handler as its own Task and
+                    // record it so `stop()` can await the current sync
+                    // before tearing down. Without this, a sync pass
+                    // already inside its `read-tree` call survives
+                    // stop's watcher cancellation and re-applies the
+                    // worktree's tree AFTER the parent has been
+                    // restored, leaving the parent dirty and breaking
+                    // the stash pop.
+                    //
+                    // The spawn + register MUST happen atomically
+                    // under the lock, AND we must verify the watcher
+                    // entry is still live AFTER the lock. Otherwise
+                    // `stop()` can slip in between batch arrival and
+                    // registration:
+                    //   1. batch arrives, watcher about to spawn
+                    //      syncTask
+                    //   2. stop() removes our watcherTask, reads empty
+                    //      activeSyncTasks, proceeds to restoreParent
+                    //   3. watcher finally spawns syncTask → read-tree
+                    //      lands AFTER restore and corrupts the parent.
+                    // Guarding on `watcherTasks[assocID] != nil` inside
+                    // the same lock closes the race: stop's first lock
+                    // (`watcherTasks.removeValue`) and our
+                    // spawn-or-abort check are now totally ordered.
+                    let assocID = association.id
+                    let syncTask: Task<Void, Never>? = lock.withLock {
+                        guard watcherTasks[assocID] != nil else { return nil }
+                        let task = Task { [weak self] in
+                            guard let self else { return }
+                            await handleBatch(associationID: assocID, batch: batch)
+                        }
+                        activeSyncTasks[assocID] = task
+                        return task
                     }
-                    activeSyncTasks[assocID] = task
-                    return task
+                    guard let syncTask else { return }
+                    await syncTask.value
+                    // The watcher loop is serial — only one batch can
+                    // be in flight per session at a time. If `stop()`
+                    // already pulled the entry out (it awaits and
+                    // removes via `removeValue`), this is a no-op.
+                    lock.withLock { _ = activeSyncTasks.removeValue(forKey: assocID) }
                 }
-                guard let syncTask else { return }
-                await syncTask.value
-                // The watcher loop is serial — only one batch can be
-                // in flight per session at a time. If `stop()` already
-                // pulled the entry out (it awaits and removes via
-                // `removeValue`), this is a no-op.
-                lock.withLock { _ = activeSyncTasks.removeValue(forKey: assocID) }
             }
+            watcherTasks[association.id] = task
         }
-        lock.withLock { watcherTasks[association.id] = task }
 
         return initialSession
     }
@@ -365,14 +403,46 @@ final class GraftServiceImpl: Sendable {
     // MARK: - Stop
 
     func stop(_ associationID: UUID) async throws {
-        let session: GraftSession? = lock.withLock {
-            sessions[associationID]
+        // Coalesce concurrent stops of the same association. Removal
+        // paths send `forceStop` unconditionally and the CLI stop
+        // reads service state, so two initiators can race — the
+        // second joins the first's task and reports its real outcome.
+        let (task, isOwner): (Task<Void, Error>, Bool) = lock.withLock {
+            if let existing = stopTasks[associationID] {
+                return (existing, false)
+            }
+            let task = Task<Void, Error> { [weak self] in
+                guard let self else { return }
+                try await performStop(associationID)
+            }
+            stopTasks[associationID] = task
+            return (task, true)
         }
-        guard let session else { return }
+        defer {
+            if isOwner {
+                lock.withLock { _ = stopTasks.removeValue(forKey: associationID) }
+            }
+        }
+        try await task.value
+    }
 
+    /// The actual teardown. Only ever runs on the coalesced task —
+    /// callers go through `stop(_:)`.
+    ///
+    /// Known window: stopping an association whose `start()` is still
+    /// mid-flight (no session published yet) is a no-op here, and the
+    /// start then completes into a live session with no owning
+    /// association. That session stays visible in `activeSessions()`
+    /// and recoverable — the next start on its root offers the swap
+    /// prompt, `graft stop --repo` matches it by path, and the quit
+    /// path flushes it.
+    private func performStop(_ associationID: UUID) async throws {
         // Cancel the watcher first so a NEW sync pass can't fire
         // mid-stop. Cancellation propagates to the `for await batch
         // in watchStream` loop; the next iteration won't start.
+        // This runs BEFORE the session guard below so `stop()` is a
+        // thorough no-op cleanup even for ids the sessions dict has
+        // lost track of.
         if let task = lock.withLock({ watcherTasks.removeValue(forKey: associationID) }) {
             task.cancel()
         }
@@ -386,6 +456,11 @@ final class GraftServiceImpl: Sendable {
         if let inFlight = lock.withLock({ activeSyncTasks.removeValue(forKey: associationID) }) {
             await inFlight.value
         }
+
+        let session: GraftSession? = lock.withLock {
+            sessions[associationID]
+        }
+        guard let session else { return }
 
         // Rewind the WORKTREE's branch first so the checkpoint
         // commits disappear before the parent restore renames any
@@ -412,10 +487,9 @@ final class GraftServiceImpl: Sendable {
             // LEAVE the breadcrumb in place so the orphan-recovery
             // banner can pick this up on next launch — the user's
             // stash is still on disk and they need a UI path to it.
-            // We still release `busyRoots` and drop the in-memory
-            // session so the user can retry start() on a different
-            // worktree without colliding.
-            releaseBusy(session.parentRepoRoot)
+            // Dropping the in-memory session releases the root claim
+            // so the user can retry start() on a different worktree
+            // without colliding.
             lock.withLock { _ = sessions.removeValue(forKey: associationID) }
             publish(.stopped(associationID))
             throw error
@@ -430,7 +504,6 @@ final class GraftServiceImpl: Sendable {
                 // try again later (or inspect `git stash list`). Drop
                 // the in-memory session so the toggle reflects the
                 // detached state and the user can re-attempt later.
-                releaseBusy(session.parentRepoRoot)
                 lock.withLock { _ = sessions.removeValue(forKey: associationID) }
                 publish(.stopped(associationID))
                 throw GraftError.stashPopConflict(
@@ -441,7 +514,6 @@ final class GraftServiceImpl: Sendable {
         }
 
         removeBreadcrumb(at: session.parentRepoRoot)
-        releaseBusy(session.parentRepoRoot)
         lock.withLock { _ = sessions.removeValue(forKey: associationID) }
         publish(.stopped(associationID))
     }
@@ -659,8 +731,11 @@ final class GraftServiceImpl: Sendable {
 
     // MARK: - State helpers
 
-    private func releaseBusy(_ parentRepoRoot: String) {
-        lock.withLock { _ = busyRoots.remove(parentRepoRoot) }
+    /// Release the mid-start claim on a root after a failed `start()`.
+    /// Once a session exists, the claim lives on the session itself and
+    /// is released by removing it from `sessions` (in `stop()`).
+    private func releaseStarting(_ parentRepoRoot: String) {
+        lock.withLock { _ = startingRoots.remove(parentRepoRoot) }
     }
 
     private func mutateAndPublish(
@@ -794,7 +869,13 @@ extension GraftService: DependencyKey {
                     lastSync: nil
                 )
             ),
-            stop: unimplemented("GraftService.stop"),
+            // `stop` is deliberately a no-op (not unimplemented):
+            // removal paths dispatch `forceStop` unconditionally for
+            // every removed association (issue #231), so any test
+            // that deletes a workspace/repo would otherwise trip the
+            // unimplemented sentinel. Tests that assert stop calls
+            // override with a recording closure.
+            stop: { _ in },
             activeSessions: { [] },
             updates: { AsyncStream { _ in } },
             detectOrphans: { _ in [] },

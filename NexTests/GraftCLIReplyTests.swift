@@ -30,6 +30,7 @@ struct GraftCLIReplyTests {
 
     private func makeStore(
         sessions: IdentifiedArrayOf<GraftSession> = [],
+        activeSessions: @escaping @Sendable () async -> [GraftSession] = { [] },
         graftStartResult: @escaping @Sendable (RepoAssociation) async throws -> GraftSession,
         graftStopResult: @escaping @Sendable (UUID) async throws -> Void = { _ in }
     ) -> TestStoreOf<AppReducer> {
@@ -62,7 +63,7 @@ struct GraftCLIReplyTests {
             $0.graftService = GraftService(
                 start: graftStartResult,
                 stop: graftStopResult,
-                activeSessions: { [] },
+                activeSessions: activeSessions,
                 updates: { AsyncStream { _ in } },
                 detectOrphans: { _ in [] },
                 recoverOrphan: { _ in },
@@ -160,6 +161,7 @@ struct GraftCLIReplyTests {
         let session = Self.makeSession()
         let store = makeStore(
             sessions: [session],
+            activeSessions: { [session] },
             graftStartResult: { _ in session },
             graftStopResult: { _ in }
         )
@@ -183,9 +185,69 @@ struct GraftCLIReplyTests {
             .graftStop(workspace: nil, repo: nil, paneID: Self.paneID),
             reply: makeCaptureHandle(sink)
         ))
+        await store.finish()
 
         #expect(sink.payloads[0]["ok"] as? Bool == true)
         #expect((sink.payloads[0]["stopped"] as? [String])?.isEmpty == true)
+    }
+
+    /// Issue #231: a session the reducer mirror lost track of must
+    /// still be stoppable — the stop handler filters against the
+    /// SERVICE's sessions, not reducer state.
+    @Test func graftStopReachesSessionMissingFromReducerMirror() async {
+        let session = Self.makeSession()
+        let stopCalls = LockedString()
+        let store = makeStore(
+            sessions: [],
+            activeSessions: { [session] },
+            graftStartResult: { _ in session },
+            graftStopResult: { id in stopCalls.set(id.uuidString) }
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .graftStop(workspace: nil, repo: nil, paneID: Self.paneID),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        let stopped = sink.payloads[0]["stopped"] as? [String] ?? []
+        #expect(stopped == [Self.assocID.uuidString])
+        #expect(stopCalls.value == Self.assocID.uuidString)
+    }
+
+    /// Issue #231: a session whose owning association was deleted
+    /// (workspace gone) resolves via NO workspace scope, but
+    /// `graft stop --repo <path>` must still reach it by matching the
+    /// service session's worktree path directly.
+    @Test func graftStopRepoFilterReachesOrphanWithDeletedAssociation() async {
+        let orphanID = UUID(uuidString: "70000000-0000-0000-0000-0000000000EE")!
+        let orphanSession = GraftSession(
+            id: orphanID,
+            worktreePath: "/tmp/wt-orphan",
+            parentRepoRoot: "/tmp/parent-orphan",
+            branch: "gone-branch",
+            status: .watching,
+            stashRef: nil,
+            lastSync: nil
+        )
+        let stopCalls = LockedString()
+        let store = makeStore(
+            activeSessions: { [orphanSession] },
+            graftStartResult: { _ in orphanSession },
+            graftStopResult: { id in stopCalls.set(id.uuidString) }
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .graftStop(workspace: nil, repo: "/tmp/wt-orphan", paneID: nil),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        let stopped = sink.payloads[0]["stopped"] as? [String] ?? []
+        #expect(stopped == [orphanID.uuidString])
+        #expect(stopCalls.value == orphanID.uuidString)
     }
 
     // MARK: - graft-status
@@ -194,6 +256,7 @@ struct GraftCLIReplyTests {
         let session = Self.makeSession()
         let store = makeStore(
             sessions: [session],
+            activeSessions: { [session] },
             graftStartResult: { _ in session }
         )
         let sink = CaptureSink()
@@ -201,12 +264,36 @@ struct GraftCLIReplyTests {
             .graftStatus,
             reply: makeCaptureHandle(sink)
         ))
+        await store.finish()
 
         #expect(sink.payloads[0]["ok"] as? Bool == true)
         let sessions = sink.payloads[0]["sessions"] as? [[String: Any]] ?? []
         #expect(sessions.count == 1)
         #expect(sessions.first?["branch"] as? String == "feature/x")
         #expect(sessions.first?["status"] as? String == "watching")
+    }
+
+    /// Issue #231: `status` must report what the SERVICE holds even
+    /// when the reducer mirror is empty, so an `alreadyActive`
+    /// rejection is always explainable from the CLI.
+    @Test func graftStatusShowsSessionMissingFromReducerMirror() async {
+        let session = Self.makeSession()
+        let store = makeStore(
+            sessions: [],
+            activeSessions: { [session] },
+            graftStartResult: { _ in session }
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .graftStatus,
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        let sessions = sink.payloads[0]["sessions"] as? [[String: Any]] ?? []
+        #expect(sessions.count == 1)
+        #expect(sessions.first?["association_id"] as? String == Self.assocID.uuidString)
     }
 }
 

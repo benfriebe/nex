@@ -537,6 +537,51 @@ struct AppReducerTests {
         }
     }
 
+    /// Issue #231 wiring lock-in: deleting a workspace dispatches a
+    /// graft `forceStop` (→ `graftService.stop`) for EVERY removed
+    /// association, even when the reducer's graft mirror has no
+    /// session for it — filtering by the mirror is how a live service
+    /// session got orphaned in the first place.
+    @Test func deleteWorkspaceStopsGraftForAssociationsWithEmptyMirror() async {
+        var ws1 = Self.makeWorkspace(id: Self.wsID1, name: "WS1", paneID: Self.paneID1)
+        let assocID = UUID(uuidString: "10000000-0000-0000-0000-0000000000AA")!
+        ws1.repoAssociations = [
+            RepoAssociation(
+                id: assocID,
+                repoID: UUID(),
+                worktreePath: "/tmp/wt",
+                branchName: "feature/x"
+            )
+        ]
+        let ws2 = Self.makeWorkspace(id: Self.wsID2, name: "WS2", paneID: Self.paneID2)
+
+        let store = makeStore(
+            workspaces: [ws1, ws2],
+            activeWorkspaceID: Self.wsID2
+        )
+        let stopRecorder = StopRecorder()
+        store.dependencies.graftService = GraftService(
+            start: { _ in
+                GraftSession(
+                    id: UUID(), worktreePath: "", parentRepoRoot: "",
+                    branch: "", status: .starting, stashRef: nil, lastSync: nil
+                )
+            },
+            stop: { id in stopRecorder.append(id) },
+            activeSessions: { [] },
+            updates: { AsyncStream { _ in } },
+            detectOrphans: { _ in [] },
+            recoverOrphan: { _ in },
+            dismissOrphan: { _ in }
+        )
+
+        await store.send(.deleteWorkspace(Self.wsID1)) { state in
+            #expect(state.workspaces[id: Self.wsID1] == nil)
+        }
+        await store.finish()
+        #expect(stopRecorder.values == [assocID])
+    }
+
     // MARK: - setActiveWorkspace
 
     @Test func setActiveWorkspaceUpdatesID() async {
@@ -2193,4 +2238,14 @@ struct AppReducerTests {
         let parked = store.state.workspaces[id: Self.wsID1]?.parkedPanes[id: parkedID]
         #expect(parked?.status == .waitingForInput)
     }
+}
+
+private final class StopRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [UUID] = []
+    func append(_ id: UUID) {
+        lock.withLock { _values.append(id) }
+    }
+
+    var values: [UUID] { lock.withLock { _values } }
 }
