@@ -374,6 +374,19 @@ struct WorkspaceFeature {
         /// Dispatched from `ContentView` when the coordinator posts a
         /// `consoleLineNotification`.
         case webConsoleLineReceived(paneID: UUID, line: ConsoleLine)
+        /// Follow-up sent right after `webConsoleLineReceived` appends
+        /// the line. `AppReducer`'s core switch reacts to this (not to
+        /// `webConsoleLineReceived` directly) to fan the new line out
+        /// to `webConsoleSubscribers` — that dict lives on
+        /// `AppReducer.State`, so the fan-out has to happen after this
+        /// action re-enters the top of the reducer body, by which
+        /// point the append below has already landed in `state`.
+        /// Reacting to `webConsoleLineReceived` itself would run
+        /// *before* this case's append (core's giant `Reduce` block is
+        /// listed ahead of the `.forEach(\.workspaces, ...)` reducer
+        /// that owns this case), so it would only ever see the
+        /// buffer's previous entry.
+        case webConsoleLineAppended(paneID: UUID)
         /// Drop everything from the pane's console buffer (the
         /// `--clear` flag on `nex web console`). `seq` keeps counting.
         case webConsoleClear(paneID: UUID)
@@ -1051,6 +1064,12 @@ struct WorkspaceFeature {
                 guard var webState = state.webPanes[paneID] else { return .none }
                 webState.consoleBuffer.append(line)
                 state.webPanes[paneID] = webState
+                return .send(.webConsoleLineAppended(paneID: paneID))
+
+            case .webConsoleLineAppended:
+                // No-op here — consumed by AppReducer's core switch to
+                // fan the freshly-appended line out to
+                // `webConsoleSubscribers`. See the case doc.
                 return .none
 
             case .webConsoleClear(let paneID):

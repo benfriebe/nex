@@ -234,7 +234,7 @@ func printUsage() {
       nex web open [--private] <url>
       nex web navigate <url> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web url|back|forward|reload [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
-      nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
+      nex web capture [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot|dom|all]
       nex web private on|off [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web cookies list|clear|delete [...]
       nex web click <selector> [--target X] [--workspace Y] [--double] [--right] [--at x,y] [--json]
@@ -1105,6 +1105,182 @@ func sendViaTCP(
     return reply
 }
 
+// MARK: - Streaming transport (`nex web console --follow`)
+
+/// FD of the currently open streaming connection, if any. Read by
+/// `streamSIGINTHandler` so Ctrl-C can close the socket cleanly
+/// instead of just killing the process — closing the FD is what lets
+/// the server's `clientSource.setCancelHandler` fire and release the
+/// held `ReplyHandle` server-side (`socketSubscriberDisconnected`).
+/// `nonisolated(unsafe)` because it's only ever touched from the main
+/// thread (the streaming read loop) and the signal handler, which
+/// interrupts that same thread synchronously.
+nonisolated(unsafe) var activeStreamFD: Int32 = -1
+
+private func streamSIGINTHandler(_ sig: Int32) {
+    if activeStreamFD >= 0 {
+        close(activeStreamFD)
+        activeStreamFD = -1
+    }
+    // 128 + signal number is the standard shell convention for
+    // signal-terminated exits.
+    exit(128 + sig)
+}
+
+/// Install once before entering a streaming read loop. Safe to call
+/// more than once (just re-registers the same handler).
+func installStreamSIGINTHandler() {
+    signal(SIGINT, streamSIGINTHandler)
+}
+
+/// Read newline-delimited JSON lines from `fd` until EOF, calling
+/// `onLine` with each complete line's raw bytes (no trailing
+/// newline). No read timeout is applied by the caller — the stream
+/// can legitimately idle for a long time between events.
+private func readLinesUntilEOF(fd: Int32, onLine: (Data) -> Void) {
+    var buffer = Data()
+    var readBuf = [UInt8](repeating: 0, count: 4096)
+    while true {
+        let n = read(fd, &readBuf, readBuf.count)
+        if n > 0 {
+            buffer.append(readBuf, count: n)
+            while let newlineIndex = buffer.firstIndex(of: 0x0A) {
+                onLine(Data(buffer[..<newlineIndex]))
+                buffer.removeSubrange(...newlineIndex)
+            }
+            continue
+        }
+        if n == 0 { return } // EOF — server closed the connection.
+        if errno == EINTR { continue }
+        return
+    }
+}
+
+/// Streaming counterpart to `sendJSONAndReadReply`. Sends `payload`
+/// once, then disables the read timeout entirely (`SO_RCVTIMEO` is
+/// simply never applied — a plain blocking socket already waits
+/// indefinitely) and loops on `onLine` for every newline-delimited
+/// JSON line the server writes, until EOF or the process is
+/// interrupted (`installStreamSIGINTHandler` closes the FD, which
+/// unblocks the pending `read()` with `n == 0`/an error). Returns
+/// `false` if the connection couldn't be established at all — the
+/// caller should treat that like `sendJSONAndReadReply` returning nil.
+@discardableResult
+func sendJSONAndStream(
+    _ payload: [String: Any], onLine: (Data) -> Void
+) -> Bool {
+    switch transport {
+    case .unix(let path):
+        streamViaUnix(path: path, payload: payload, onLine: onLine)
+    case .tcp(let host, let port):
+        streamViaTCP(host: host, port: port, payload: payload, onLine: onLine)
+    }
+}
+
+private func streamViaUnix(
+    path: String, payload: [String: Any], onLine: (Data) -> Void
+) -> Bool {
+    lastTransportFailure = nil
+
+    guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+          var jsonString = String(data: jsonData, encoding: .utf8)
+    else { return false }
+    jsonString += "\n"
+
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else {
+        lastTransportFailure = .createSocketFailed(errno: errno)
+        return false
+    }
+
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    path.withCString { cpath in
+        withUnsafeMutableBytes(of: &addr.sun_path) { sunPath in
+            let ptr = sunPath.baseAddress!.assumingMemoryBound(to: CChar.self)
+            strncpy(ptr, cpath, sunPath.count - 1)
+        }
+    }
+
+    let connectResult = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+            connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    guard connectResult == 0 else {
+        let err = errno
+        close(fd)
+        switch err {
+        case ENOENT:
+            lastTransportFailure = .unixSocketMissing(path: path)
+        case ECONNREFUSED:
+            lastTransportFailure = .unixConnectRefused(path: path)
+        default:
+            lastTransportFailure = .unixConnectFailed(path: path, errno: err)
+        }
+        return false
+    }
+
+    jsonString.withCString { ptr in
+        let len = strlen(ptr)
+        _ = send(fd, ptr, len, 0)
+    }
+
+    activeStreamFD = fd
+    readLinesUntilEOF(fd: fd, onLine: onLine)
+    activeStreamFD = -1
+    close(fd)
+    return true
+}
+
+private func streamViaTCP(
+    host: String, port: UInt16, payload: [String: Any], onLine: (Data) -> Void
+) -> Bool {
+    lastTransportFailure = nil
+
+    guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+          var jsonString = String(data: jsonData, encoding: .utf8)
+    else { return false }
+    jsonString += "\n"
+
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    hints.ai_socktype = SOCK_STREAM
+    var result: UnsafeMutablePointer<addrinfo>?
+    guard getaddrinfo(host, String(port), &hints, &result) == 0,
+          let addrInfo = result
+    else {
+        lastTransportFailure = .tcpResolveFailed(host: host)
+        return false
+    }
+    defer { freeaddrinfo(result) }
+
+    let fd = socket(addrInfo.pointee.ai_family, addrInfo.pointee.ai_socktype, addrInfo.pointee.ai_protocol)
+    guard fd >= 0 else {
+        lastTransportFailure = .createSocketFailed(errno: errno)
+        return false
+    }
+
+    let connectResult = connect(fd, addrInfo.pointee.ai_addr, addrInfo.pointee.ai_addrlen)
+    guard connectResult == 0 else {
+        let err = errno
+        close(fd)
+        lastTransportFailure = .tcpConnectFailed(host: host, port: port, errno: err)
+        return false
+    }
+
+    jsonString.withCString { ptr in
+        let len = strlen(ptr)
+        _ = send(fd, ptr, len, 0)
+    }
+
+    activeStreamFD = fd
+    readLinesUntilEOF(fd: fd, onLine: onLine)
+    activeStreamFD = -1
+    close(fd)
+    return true
+}
+
 // MARK: - Subcommands
 
 func handleEvent(_ args: inout ArraySlice<String>) {
@@ -1963,12 +2139,12 @@ func printWebUsage(stream: UnsafeMutablePointer<FILE>) {
       nex web back     [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web forward  [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web reload   [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
-      nex web capture  [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot]
+      nex web capture  [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--mode meta|text|screenshot|dom|all]
       nex web tabs        [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--json] [--no-header]
       nex web tab-new     [<url>] [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--no-focus]
       nex web tab-close   <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web tab-select  <ref> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
-      nex web console     [--target ...] [--workspace ...] [--since N] [--level log|debug|info|warn|error] [--clear] [--json]
+      nex web console     [--target ...] [--workspace ...] [--since N] [--level log|debug|info|warn|error] [--clear] [--follow] [--json]
       nex web inspect     [--target ...] [--workspace ...] [--send-to <pane>] [--submit] [--disarm]
       nex web inspect-result [--target ...] [--workspace ...] [--clear] [--json]
       nex web private    on|off [--target ...] [--workspace ...]
@@ -2205,9 +2381,9 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         let target = parseFlag("--target", from: &args)
         let workspace = parseFlag("--workspace", from: &args)
         let mode = parseFlag("--mode", from: &args) ?? "meta"
-        let allowed: Set = ["meta", "text", "screenshot"]
+        let allowed: Set = ["meta", "text", "screenshot", "dom", "all"]
         guard allowed.contains(mode) else {
-            fputs("nex web capture: unknown --mode '\(mode)' (allowed: meta, text, screenshot)\n", stderr)
+            fputs("nex web capture: unknown --mode '\(mode)' (allowed: meta, text, screenshot, dom, all)\n", stderr)
             exit(1)
         }
         var payload: [String: Any] = [
@@ -2274,6 +2450,7 @@ func handleWeb(_ args: inout ArraySlice<String>) {
         let level = parseFlag("--level", from: &args)
         let clear = popSwitch("--clear", from: &args)
         let asJSON = popSwitch("--json", from: &args)
+        let follow = popSwitch("--follow", from: &args)
         var payload: [String: Any] = ["command": "web-console"]
         if let sinceArg, let parsed = UInt64(sinceArg) {
             payload["since"] = parsed
@@ -2290,8 +2467,13 @@ func handleWeb(_ args: inout ArraySlice<String>) {
             payload["level"] = level
         }
         if clear { payload["clear"] = true }
+        if follow { payload["follow"] = true }
         attachWebTargetScope(&payload, target: target, workspace: workspace, command: "console")
-        sendWebReplyAndPrintConsole(payload, asJSON: asJSON)
+        if follow {
+            sendWebConsoleFollow(payload, asJSON: asJSON)
+        } else {
+            sendWebReplyAndPrintConsole(payload, asJSON: asJSON)
+        }
 
     case "inspect":
         let target = parseFlag("--target", from: &args)
@@ -2882,12 +3064,23 @@ private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
     switch mode {
     case "text":
         if let text = json["text"] as? String { print(text) }
+    case "dom":
+        if let html = json["html"] as? String { print(html) }
     case "screenshot":
         if let path = json["path"] as? String {
             print(path)
         } else if let b64 = json["png_base64"] as? String {
             // Inline: print to stdout — the caller can pipe to `base64 -D > out.png`.
             print(b64)
+        }
+    case "all":
+        // Composite of meta + text + dom + screenshot — too many
+        // shapes for a single plain-text rendering, so dump the raw
+        // reply. Screenshot bytes still land inline (`png_base64`) or
+        // as a `path`, same as the standalone `screenshot` mode.
+        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
+           let s = String(data: out, encoding: .utf8) {
+            print(s)
         }
     default:
         // meta — print URL + title + byte_count
@@ -2903,27 +3096,88 @@ private func sendWebReplyAndPrintCapture(_ payload: [String: Any]) {
     }
 }
 
+/// `[seq] level: message` — shared between the single-shot drain
+/// (`sendWebReplyAndPrintConsole`) and each streamed line
+/// (`sendWebConsoleFollow`) so both print identically.
+private func formatConsoleLinePlain(_ line: [String: Any]) -> String {
+    let seq = (line["seq"] as? UInt64) ?? 0
+    let level = (line["level"] as? String) ?? "log"
+    let message = (line["message"] as? String) ?? ""
+    return "[\(seq)] \(level): \(message)"
+}
+
+private func printJSONLine(_ json: [String: Any]) {
+    if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
+       let s = String(data: out, encoding: .utf8) {
+        print(s)
+    }
+}
+
 private func sendWebReplyAndPrintConsole(_ payload: [String: Any], asJSON: Bool) {
     let json = decodeReply(payload, command: "nex web console")
     let lines = (json["lines"] as? [[String: Any]]) ?? []
     if asJSON {
-        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
-           let s = String(data: out, encoding: .utf8) {
-            print(s)
-        }
+        printJSONLine(json)
         return
     }
     if let dropped = json["dropped"] as? Int, dropped > 0 {
         fputs("(dropped \(dropped) lines before this batch — buffer was full)\n", stderr)
     }
     for line in lines {
-        let seq = (line["seq"] as? UInt64) ?? 0
-        let level = (line["level"] as? String) ?? "log"
-        let message = (line["message"] as? String) ?? ""
-        print("[\(seq)] \(level): \(message)")
+        print(formatConsoleLinePlain(line))
     }
     if let next = json["next_since"] as? UInt64 {
         fputs("(next_since=\(next))\n", stderr)
+    }
+}
+
+/// `nex web console --follow`. The first line back is the catch-up
+/// drain (same shape as the non-follow reply); every line after that
+/// is a single streamed console entry, pushed as its own
+/// newline-delimited JSON object until the server closes the
+/// connection or the user hits Ctrl-C (`installStreamSIGINTHandler`
+/// closes the socket FD so the server's cancel handler releases the
+/// subscriber slot).
+private func sendWebConsoleFollow(_ payload: [String: Any], asJSON: Bool) {
+    installStreamSIGINTHandler()
+    var isFirstLine = true
+    let connected = sendJSONAndStream(payload) { lineData in
+        guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+            return
+        }
+        if isFirstLine {
+            isFirstLine = false
+            if let ok = json["ok"] as? Bool, ok == false {
+                let msg = (json["error"] as? String) ?? "unknown error"
+                fputs("nex web console: \(msg)\n", stderr)
+                exit(1)
+            }
+            if asJSON {
+                printJSONLine(json)
+            } else {
+                if let dropped = json["dropped"] as? Int, dropped > 0 {
+                    fputs("(dropped \(dropped) lines before this batch — buffer was full)\n", stderr)
+                }
+                let lines = (json["lines"] as? [[String: Any]]) ?? []
+                for line in lines {
+                    print(formatConsoleLinePlain(line))
+                }
+                fputs("(following — press Ctrl-C to stop)\n", stderr)
+            }
+            return
+        }
+        if asJSON {
+            printJSONLine(json)
+        } else {
+            if let dropped = json["dropped"] as? Int, dropped > 0 {
+                fputs("(dropped \(dropped) lines)\n", stderr)
+            }
+            print(formatConsoleLinePlain(json))
+        }
+    }
+    if !connected {
+        printTransportFailure(command: "nex web console --follow")
+        exit(1)
     }
 }
 

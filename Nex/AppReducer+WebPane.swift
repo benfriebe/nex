@@ -661,7 +661,7 @@ extension AppReducer {
         }
 
         guard let captureMode = WebCaptureMode(rawValue: mode) else {
-            reply?.error("unknown capture mode '\(mode)' (allowed: meta, text, screenshot)")
+            reply?.error("unknown capture mode '\(mode)' (allowed: meta, text, screenshot, dom, all)")
             return .none
         }
 
@@ -677,9 +677,11 @@ extension AppReducer {
         let isPrivate = resolved.webState.isPrivate
 
         return .run { _ in
+            let coordinator = await MainActor.run {
+                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate)
+            }
             let snapshot: (url: String, title: String) = await MainActor.run {
-                store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).currentURLAndTitle(tabID: tabID)
-                    ?? (tabURL, tabTitle)
+                coordinator.currentURLAndTitle(tabID: tabID) ?? (tabURL, tabTitle)
             }
             var payload: [String: Any] = [
                 "ok": true,
@@ -689,39 +691,62 @@ extension AppReducer {
                 "title": snapshot.title,
                 "mode": captureMode.rawValue
             ]
+
+            /// Shared inline/spill-to-disk screenshot logic used by
+            /// both `.screenshot` (top-level `byte_count`) and `.all`
+            /// (namespaced `screenshot_byte_count`, alongside the
+            /// other modes' fields in the same composite payload).
+            func captureScreenshot(byteCountKey: String) async {
+                let pngData = await coordinator.captureScreenshot(tabID: tabID)
+                guard let pngData else {
+                    payload["screenshot_error"] = "screenshot capture failed"
+                    return
+                }
+                let inlineThreshold = 1_000_000 // 1 MB
+                if pngData.count <= inlineThreshold {
+                    payload["png_base64"] = pngData.base64EncodedString()
+                    payload[byteCountKey] = pngData.count
+                } else {
+                    // Per-app temporary directory — OS prunes it
+                    // automatically (vs. `/tmp` where files lingered
+                    // until reboot).
+                    let ts = Int(Date().timeIntervalSince1970)
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("nex-web-capture-\(resolvedPaneID.uuidString)-\(ts).png")
+                    if (try? pngData.write(to: url)) != nil {
+                        payload["path"] = url.path
+                        payload[byteCountKey] = pngData.count
+                    } else {
+                        payload["screenshot_error"] = "failed to write screenshot to \(url.path)"
+                    }
+                }
+            }
+
             switch captureMode {
             case .meta:
                 break
             case .text:
-                let text = await store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).captureText(tabID: tabID)
+                let text = await coordinator.captureText(tabID: tabID)
                 payload["text"] = text
                 payload["byte_count"] = text.utf8.count
+            case .dom:
+                let html = await coordinator.captureDOM(tabID: tabID)
+                payload["html"] = html
+                payload["byte_count"] = html.utf8.count
             case .screenshot:
-                let pngData = await store.coordinator(for: resolvedPaneID, isPrivate: isPrivate).captureScreenshot(tabID: tabID)
-                if let pngData {
-                    let inlineThreshold = 1_000_000 // 1 MB
-                    if pngData.count <= inlineThreshold {
-                        payload["png_base64"] = pngData.base64EncodedString()
-                        payload["byte_count"] = pngData.count
-                    } else {
-                        // Per-app temporary directory — OS prunes it
-                        // automatically (vs. `/tmp` where files lingered
-                        // until reboot).
-                        let ts = Int(Date().timeIntervalSince1970)
-                        let url = FileManager.default.temporaryDirectory
-                            .appendingPathComponent("nex-web-capture-\(resolvedPaneID.uuidString)-\(ts).png")
-                        if (try? pngData.write(to: url)) != nil {
-                            payload["path"] = url.path
-                            payload["byte_count"] = pngData.count
-                        } else {
-                            payload["ok"] = false
-                            payload["error"] = "failed to write screenshot to \(url.path)"
-                        }
-                    }
-                } else {
+                await captureScreenshot(byteCountKey: "byte_count")
+                if payload["screenshot_error"] != nil {
                     payload["ok"] = false
-                    payload["error"] = "screenshot capture failed"
+                    payload["error"] = payload.removeValue(forKey: "screenshot_error")
                 }
+            case .all:
+                let text = await coordinator.captureText(tabID: tabID)
+                payload["text"] = text
+                payload["text_byte_count"] = text.utf8.count
+                let html = await coordinator.captureDOM(tabID: tabID)
+                payload["html"] = html
+                payload["html_byte_count"] = html.utf8.count
+                await captureScreenshot(byteCountKey: "screenshot_byte_count")
             }
             reply?.sendAndClose(payload)
         }
@@ -1208,11 +1233,12 @@ extension AppReducer {
     }
 
     func handleWebConsole(
-        state: State,
+        _ state: inout State,
         scope: WebPaneScope,
         since: UInt64,
         level: String?,
         clear: Bool,
+        follow: Bool,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
         guard let resolved = resolveWebPane(state: state, scope: scope, reply: reply)
@@ -1225,13 +1251,17 @@ extension AppReducer {
         }
         let nextSeq = resolved.webState.consoleBuffer.nextSeq
         let dropped = resolved.webState.consoleBuffer.droppedSinceLastDrain
-        reply?.sendAndClose([
+        // `follow` keeps the handle open past this first line — the
+        // catch-up drain — so the CLI's stream loop sees it as line 1
+        // of the stream rather than the whole reply.
+        reply?.send([
             "ok": true,
             "pane_id": resolved.paneID.uuidString,
             "workspace_id": resolved.workspace.id.uuidString,
             "lines": filtered.map(consoleLineJSON),
             "next_since": nextSeq,
-            "dropped": dropped
+            "dropped": dropped,
+            "follow": follow
         ])
         // Acknowledge the reported drops so the next call only
         // surfaces drops that accumulated after this drain. Always
@@ -1249,7 +1279,46 @@ extension AppReducer {
                 action: .webConsoleClear(paneID: resolved.paneID)
             ))))
         }
+        if follow, let reply {
+            state.webConsoleSubscribers[resolved.paneID, default: [:]][reply.id] = reply
+        } else {
+            reply?.close()
+        }
         return .merge(effects)
+    }
+
+    /// Push a just-appended console line out to every live
+    /// `nex web console --follow` subscriber of `paneID`. Dispatched
+    /// from `AppReducer`'s core switch in response to
+    /// `WorkspaceFeature.Action.webConsoleLineAppended` — a follow-up
+    /// action sent *after* the append lands, so `consoleBuffer.entries.last`
+    /// here is guaranteed to be the line that was just appended (see
+    /// that action's doc for why this can't be read directly off
+    /// `webConsoleLineReceived`).
+    ///
+    /// Any ring-buffer drops picked up since the last acknowledgement
+    /// (Phase 3's `droppedSinceLastDrain`, shared with the polling
+    /// `nex web console` path) ride along on this line as a `dropped`
+    /// key rather than a separate synthetic message, so the ordering
+    /// between the drop notice and the live lines is unambiguous.
+    func fanOutWebConsoleLine(
+        state: inout State, workspaceID: UUID, paneID: UUID
+    ) -> Effect<Action> {
+        guard let subscribers = state.webConsoleSubscribers[paneID], !subscribers.isEmpty
+        else { return .none }
+        guard var webState = state.workspaces[id: workspaceID]?.webPanes[paneID],
+              let entry = webState.consoleBuffer.entries.last
+        else { return .none }
+        let dropped = webState.consoleBuffer.acknowledgeDrops()
+        if dropped > 0 {
+            state.workspaces[id: workspaceID]?.webPanes[paneID] = webState
+        }
+        var payload = consoleLineJSON(entry)
+        if dropped > 0 { payload["dropped"] = dropped }
+        for (_, handle) in subscribers {
+            handle.send(payload)
+        }
+        return .none
     }
 
     func handleWebInspect(

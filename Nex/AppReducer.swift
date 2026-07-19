@@ -71,6 +71,17 @@ struct AppReducer {
         /// not state worth surfacing to the view layer or persisting.
         var webInspectArmedSubmit: [UUID: Bool] = [:]
 
+        /// Phase 7: `nex web console --follow` subscribers, keyed by
+        /// pane then by `SocketServer.ReplyHandle.id`. Each handle is
+        /// a long-lived reply channel (registered by `handleWebConsole`
+        /// when `follow` is set, never closed by the reducer) that a
+        /// new console line gets pushed to as it lands — see
+        /// `fanOutWebConsoleLine`. Entries are released on client
+        /// disconnect (`socketSubscriberDisconnected`) or when the
+        /// owning pane closes. Not persisted — a fresh launch has no
+        /// live CLI connections to resume anyway.
+        var webConsoleSubscribers: [UUID: [UInt64: SocketServer.ReplyHandle]] = [:]
+
         /// Web favourites + workspace label presets. See `PresetsFeature`.
         var presets = PresetsFeature.State()
 
@@ -2288,10 +2299,24 @@ struct AppReducer {
                     state.renamingPaneID = nil
                 }
                 state.webInspectArmedSubmit.removeValue(forKey: paneID)
+                // A closed `.web` pane can't be caught up on later —
+                // drop and close any live `nex web console --follow`
+                // subscribers rather than leaving their FDs open
+                // forever. Keyed off subscriber presence rather than
+                // `pane.type` so this doesn't depend on whether the
+                // pane is still resolvable at this point in the
+                // reduce (see the `webConsoleLineAppended` doc for why
+                // that ordering can't be assumed).
+                if let subscribers = state.webConsoleSubscribers.removeValue(forKey: paneID) {
+                    for (_, handle) in subscribers { handle.close() }
+                }
                 return .merge(
                     .send(.persistState),
                     scheduleAutoUnlink(workspaceID: wsID, in: state)
                 )
+
+            case .workspaces(.element(id: let wsID, action: .webConsoleLineAppended(let paneID))):
+                return fanOutWebConsoleLine(state: &state, workspaceID: wsID, paneID: paneID)
 
             case .workspaces(.element(_, action: .openMarkdownFile(_, .some(let reusePaneID)))):
                 // `--here` reuse parks (doesn't remove) the source

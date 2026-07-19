@@ -182,6 +182,15 @@ enum SocketMessage: Equatable {
     /// and the running app drift.
     case ping
 
+    /// Not a `nex` CLI verb — synthesised by `SocketServer` itself
+    /// (never parsed from the wire) when a client's dispatch source
+    /// cancels (EOF, SIGINT-triggered close, or an explicit
+    /// `reply.close()`). `replyID` is the `ReplyHandle.id` that just
+    /// went stale. The reducer uses this to release any held handle
+    /// in `webConsoleSubscribers` — see the cancel handler in
+    /// `acceptConnection`.
+    case socketSubscriberDisconnected(replyID: UInt64)
+
     // Web pane commands (Phase 1). `web` is a first-class top-level
     // CLI verb (not a `pane` subcommand), so the wire names follow
     // suit: `web-open` / `web-url` / etc.
@@ -225,9 +234,15 @@ enum SocketMessage: Equatable {
     /// `since` is the last seq the caller has already seen (0 = full
     /// buffer). `level` filters to a single severity. `clear` empties
     /// the buffer after the read so the next call starts fresh.
+    /// `follow` = true switches the reply from single-shot
+    /// request/response to a long-lived stream: the initial reply
+    /// (the catch-up drain) is sent without closing the `ReplyHandle`,
+    /// and every subsequent console line for this pane is pushed as
+    /// its own newline-delimited JSON object until the client
+    /// disconnects (`nex web console --follow`).
     case webConsole(
         paneID: UUID?, target: String?, workspace: String?,
-        since: UInt64, level: String?, clear: Bool
+        since: UInt64, level: String?, clear: Bool, follow: Bool
     )
     /// Arm the picker for the resolved pane's active tab. `sendTo`
     /// is an optional pane target (label or UUID) into which the
@@ -431,10 +446,25 @@ final class SocketServer: Sendable {
     /// receive `nil` and the server behaves identically to before.
     nonisolated(unsafe) var onMessage: (@Sendable (SocketMessage, ReplyHandle?) -> Void)?
 
-    /// Opaque handle the reducer uses to write a single JSON response
-    /// line and close the client connection. Safe to drop on the floor —
-    /// the existing EOF path still closes orphaned FDs when the CLI
-    /// disconnects.
+    /// Opaque handle the reducer uses to write a JSON response line
+    /// and (eventually) close the client connection. Safe to drop on
+    /// the floor — the existing EOF path still closes orphaned FDs
+    /// when the CLI disconnects.
+    ///
+    /// Two usage modes, both supported by the same handle:
+    /// - **Request/response** (the default, used by every command
+    ///   except `web-console --follow`): call `send`/`sendAndClose`
+    ///   once and stop — a single JSON line, then EOF.
+    /// - **Streaming**: call `send` any number of times without
+    ///   calling `close`. The reducer holds the handle open (e.g. in
+    ///   `AppReducer.State.webConsoleSubscribers`) and keeps writing
+    ///   newline-delimited JSON lines as events arrive. The CLI's
+    ///   `sendJSONAndStream` disables its read timeout and loops on
+    ///   the client side to match. The stream ends when the client
+    ///   disconnects (EOF / SIGINT closes its FD) — the server's
+    ///   `clientSource.setCancelHandler` detects this and dispatches
+    ///   `SocketMessage.socketSubscriberDisconnected(replyID:)` so the
+    ///   reducer can release the held handle.
     ///
     /// Closure-based so tests can supply capture stubs without a live
     /// `SocketServer`. Marked `@unchecked Sendable` because it only
@@ -669,10 +699,23 @@ final class SocketServer: Sendable {
             clientSources.removeValue(forKey: clientFD)
             // Drop any outstanding reply handles pointing at this FD.
             // The handle's `send()` / `close()` become no-ops.
+            var droppedReplyIDs: [UInt64] = []
             for (id, fd) in replyFDs where fd == clientFD {
                 replyFDs.removeValue(forKey: id)
+                droppedReplyIDs.append(id)
             }
+            let callback = onMessage
             lock.unlock()
+            // Fires for every dropped id, not just streaming
+            // subscribers — the reducer's cleanup is a cheap no-op
+            // for ids it never registered (e.g. every ordinary
+            // request/response call also ends in a cancelled source).
+            guard !droppedReplyIDs.isEmpty else { return }
+            DispatchQueue.main.async {
+                for id in droppedReplyIDs {
+                    callback?(.socketSubscriberDisconnected(replyID: id), nil)
+                }
+            }
         }
         lock.withLock { clientSources[clientFD] = clientSource }
         clientSource.resume()
@@ -838,6 +881,9 @@ final class SocketServer: Sendable {
         var level: String?
         /// `web-console --clear`, `web-inspect-result --clear`.
         var clear: Bool?
+        /// `web-console --follow` — keep the reply channel open and
+        /// stream new lines instead of a single-shot drain.
+        var follow: Bool?
         /// `web-inspect --send-to <pane-target>`.
         var sendTo: String?
         /// `web-inspect --submit`. Default false (paste only).
@@ -946,7 +992,7 @@ final class SocketServer: Sendable {
             case url, mode, hard
             case tab
             case makeActive = "make_active"
-            case since, level, clear
+            case since, level, clear, follow
             case sendTo = "send_to"
             case submit, disarm
             case isPrivate = "private"
@@ -1247,7 +1293,8 @@ final class SocketServer: Sendable {
                 workspace: scope.workspace,
                 since: wire.since ?? 0,
                 level: (wire.level?.isEmpty == true) ? nil : wire.level,
-                clear: wire.clear ?? false
+                clear: wire.clear ?? false,
+                follow: wire.follow ?? false
             ), wire)
         }
 
