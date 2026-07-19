@@ -148,6 +148,22 @@ struct KeyTriggerMatchingTests {
         let event = keyEvent(keyCode: 124, modifierFlags: [.command, .option, .numericPad, .function])
         #expect(trigger.matches(event))
     }
+
+    /// Caps Lock must not affect matching: with it engaged (or a VNC server
+    /// synthesizing an uppercase keysym via a Caps Lock toggle), every binding
+    /// would otherwise go dead and ⌘W would fall through to the menu bar's
+    /// File > Close, closing the whole window instead of the focused pane.
+    @Test func stripsCapsLockFromEvent() {
+        let trigger = KeyTrigger(keyCode: 13, modifiers: .command)
+        let event = keyEvent(keyCode: 13, modifierFlags: [.command, .capsLock])
+        #expect(trigger.matches(event))
+    }
+
+    @Test func stripsCapsLockFromEventDerivedTrigger() {
+        let event = keyEvent(keyCode: 13, modifierFlags: [.command, .capsLock])
+        let derived = KeyTrigger(event: event)
+        #expect(derived == KeyTrigger(keyCode: 13, modifiers: .command))
+    }
 }
 
 @MainActor

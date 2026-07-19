@@ -8,24 +8,32 @@ struct KeyTrigger: Hashable {
     let keyCode: UInt16
     let modifiers: NSEvent.ModifierFlags
 
-    /// Build from an NSEvent, stripping numericPad/function flags so arrow keys
-    /// match cleanly against user-specified triggers.
+    /// Flags that never distinguish one trigger from another: numericPad/function
+    /// so arrow keys match cleanly against user-specified triggers, and capsLock
+    /// because a binding must fire regardless of Caps Lock state — AppKit menu
+    /// shortcuts ignore it, so a trigger that doesn't would lose ⌘W etc. to the
+    /// menu bar's defaults whenever Caps Lock is on (VNC servers also synthesize
+    /// uppercase keysyms by wrapping a keypress in a Caps Lock toggle).
+    private static let ignoredFlags: NSEvent.ModifierFlags = [.numericPad, .function, .capsLock]
+
+    /// Build from an NSEvent, stripping the modifier flags that shouldn't
+    /// affect trigger matching.
     init(event: NSEvent) {
         keyCode = event.keyCode
         modifiers = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.numericPad, .function])
+            .subtracting(Self.ignoredFlags)
     }
 
     init(keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) {
         self.keyCode = keyCode
-        self.modifiers = modifiers.subtracting([.numericPad, .function])
+        self.modifiers = modifiers.subtracting(Self.ignoredFlags)
     }
 
     func matches(_ event: NSEvent) -> Bool {
         let eventFlags = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.numericPad, .function])
+            .subtracting(Self.ignoredFlags)
         return event.keyCode == keyCode && eventFlags == modifiers
     }
 
