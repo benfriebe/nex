@@ -590,6 +590,25 @@ final class WebPaneCoordinator: NSObject, WKNavigationDelegate {
         return truncated + "\n[truncated]"
     }
 
+    /// Full-document HTML for the active tab (`document.documentElement.outerHTML`),
+    /// clipped to `maxBytes` (default 5 MB — this is the whole DOM, not
+    /// just visible text, so pages with large inline assets or deeply
+    /// nested markup can get big). Returns the empty string when no
+    /// page has finished loading yet.
+    func captureDOM(tabID: UUID, maxBytes: Int = 5_000_000) async -> String {
+        guard let webView = webViews[tabID] else { return "" }
+        let result = try? await webView.evaluateJavaScript(
+            "document.documentElement ? document.documentElement.outerHTML : ''"
+        )
+        guard let html = result as? String else { return "" }
+        if html.utf8.count <= maxBytes { return html }
+        var truncated = html
+        while truncated.utf8.count > maxBytes {
+            truncated.removeLast()
+        }
+        return truncated + "\n<!-- truncated -->"
+    }
+
     /// Capture the visible viewport as a PNG. Returns the raw bytes;
     /// callers decide whether to inline as base64 or spill to a file.
     func captureScreenshot(tabID: UUID) async -> Data? {

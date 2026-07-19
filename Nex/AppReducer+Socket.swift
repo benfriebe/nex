@@ -604,6 +604,17 @@ extension AppReducer {
                 case .ping:
                     return handlePing(reply: reply)
 
+                case .socketSubscriberDisconnected(let replyID):
+                    // Fires for every dropped reply handle, not just
+                    // streaming ones — a miss here (the common case,
+                    // any ordinary request/response call) is just a
+                    // no-op dictionary removal.
+                    for paneID in state.webConsoleSubscribers.keys {
+                        state.webConsoleSubscribers[paneID]?.removeValue(forKey: replyID)
+                    }
+                    state.webConsoleSubscribers = state.webConsoleSubscribers.filter { !$0.value.isEmpty }
+                    return .none
+
                 case .webOpen(let paneID, let url, let isPrivate):
                     return handleWebOpen(
                         state: state,
@@ -692,13 +703,14 @@ extension AppReducer {
                         reply: reply
                     )
 
-                case .webConsole(let paneID, let target, let workspaceFilter, let since, let level, let clear):
+                case .webConsole(let paneID, let target, let workspaceFilter, let since, let level, let clear, let follow):
                     return handleWebConsole(
-                        state: state,
+                        &state,
                         scope: WebPaneScope(paneID: paneID, target: target, workspaceFilter: workspaceFilter),
                         since: since,
                         level: level,
                         clear: clear,
+                        follow: follow,
                         reply: reply
                     )
 

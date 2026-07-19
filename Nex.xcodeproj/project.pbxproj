@@ -177,6 +177,7 @@
 		DE4BB209669A230B465E2722 /* WorkspaceFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA19A5A6562DDB77C0AE44B6 /* WorkspaceFeatureTests.swift */; };
 		E02D1D3DE36CC8F66B5072AB /* GroupIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C5539104EFEFA5CCB936F1 /* GroupIcon.swift */; };
 		E0ABD2D68012C6BF24A92E7D /* KeybindingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D45D65A66C475B0CEEC53C /* KeybindingService.swift */; };
+		E14AC1E8FAC75B11E65DE35C /* WebConsoleStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C38C6C3BF0FC9672488731 /* WebConsoleStreamingTests.swift */; };
 		E19F4E0C87CB85D959F0C8F2 /* GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB94C2B6250E68349B287AF7 /* GitStatus.swift */; };
 		E31F1B84CF270603EF2B93E0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523DE37561222E411737C3F8 /* SettingsView.swift */; };
 		E56B0EC49D7AC553B5CDC2CC /* MarkdownPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02A888F436610636F5A4D55 /* MarkdownPaneView.swift */; };
@@ -242,6 +243,7 @@
 		0F0461B8E2ED8F50BA8AF0DF /* ChromeIndicatorRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeIndicatorRefreshTests.swift; sourceTree = "<group>"; };
 		110ABCD54BF803110E5F5060 /* GraftInspectorButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraftInspectorButton.swift; sourceTree = "<group>"; };
 		110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarPopoverView.swift; sourceTree = "<group>"; };
+		11C38C6C3BF0FC9672488731 /* WebConsoleStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebConsoleStreamingTests.swift; sourceTree = "<group>"; };
 		11C5539104EFEFA5CCB936F1 /* GroupIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIcon.swift; sourceTree = "<group>"; };
 		11CBC99B6D8094F73CDFBD80 /* WorktreeOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeOperationTests.swift; sourceTree = "<group>"; };
 		12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneActuatorWaitTests.swift; sourceTree = "<group>"; };
@@ -579,6 +581,7 @@
 				1F2EE712AF1A36900D281E8B /* SurfaceViewKeyboardTests.swift */,
 				09D2D521EEDB4FE47843C382 /* SyncInputTests.swift */,
 				DEA151EED6939BCA9792BBF1 /* TitlebarDoubleClickActionTests.swift */,
+				11C38C6C3BF0FC9672488731 /* WebConsoleStreamingTests.swift */,
 				9AA64A9054515A57ED6B2ECA /* WebPaneActuatorActionTests.swift */,
 				9F338E618A147E5BAAFF5FE5 /* WebPaneActuatorSelectorTests.swift */,
 				12DB8491263633C87CA73D00 /* WebPaneActuatorWaitTests.swift */,
@@ -1048,6 +1051,7 @@
 				EF4258CFC52EB748609C7F18 /* SurfaceViewKeyboardTests.swift in Sources */,
 				ECC9AA8342DF3710795427C7 /* SyncInputTests.swift in Sources */,
 				C0741544E700ECB9D719CB64 /* TitlebarDoubleClickActionTests.swift in Sources */,
+				E14AC1E8FAC75B11E65DE35C /* WebConsoleStreamingTests.swift in Sources */,
 				04A463E95398A50F5AD5AA2B /* WebPaneActuatorActionTests.swift in Sources */,
 				E5D6BDD247E0BE03F097B4A2 /* WebPaneActuatorSelectorTests.swift in Sources */,
 				B0FA5E756635F6DFC402CD7C /* WebPaneActuatorWaitTests.swift in Sources */,

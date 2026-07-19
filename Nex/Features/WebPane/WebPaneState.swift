@@ -192,9 +192,13 @@ struct WebPaneState: Equatable {
 
 /// `nex web capture` modes. `meta` returns just URL + title; `text`
 /// adds visible page text; `screenshot` adds a PNG (inline base64
-/// or `/tmp` path depending on size).
+/// or `/tmp` path depending on size); `dom` adds the full
+/// `document.documentElement.outerHTML` (clipped to 5 MB); `all` is
+/// the composite of meta + text + dom + screenshot in one payload.
 enum WebCaptureMode: String {
     case meta
     case text
     case screenshot
+    case dom
+    case all
 }

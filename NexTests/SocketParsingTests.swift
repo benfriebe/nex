@@ -968,7 +968,8 @@ struct SocketParsingTests {
             workspace: nil,
             since: 0,
             level: nil,
-            clear: false
+            clear: false,
+            follow: false
         ))
     }
 
@@ -984,7 +985,8 @@ struct SocketParsingTests {
             workspace: nil,
             since: 42,
             level: "error",
-            clear: true
+            clear: true,
+            follow: false
         ))
     }
 
@@ -999,7 +1001,8 @@ struct SocketParsingTests {
             workspace: nil,
             since: 0,
             level: nil,
-            clear: false
+            clear: false,
+            follow: false
         ))
     }
 
@@ -1022,7 +1025,24 @@ struct SocketParsingTests {
             workspace: "Dev",
             since: 0,
             level: nil,
-            clear: false
+            clear: false,
+            follow: false
+        ))
+    }
+
+    @Test func parseWebConsoleFollow() {
+        let data = jsonData("""
+        {"command":"web-console","pane_id":"\(Self.paneIDString)","follow":true}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webConsole(
+            paneID: Self.paneUUID,
+            target: nil,
+            workspace: nil,
+            since: 0,
+            level: nil,
+            clear: false,
+            follow: true
         ))
     }
 
@@ -1166,6 +1186,36 @@ struct SocketParsingTests {
         {"command":"web-navigate","pane_id":"\(Self.paneIDString)","url":""}
         """)
         #expect(SocketServer.parseWireMessage(data) == nil)
+    }
+
+    @Test func parseWebCaptureDefaultsToMeta() {
+        let data = jsonData("""
+        {"command":"web-capture","pane_id":"\(Self.paneIDString)"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCapture(
+            paneID: Self.paneUUID, target: nil, workspace: nil, mode: "meta"
+        ))
+    }
+
+    @Test func parseWebCaptureModeDom() {
+        let data = jsonData("""
+        {"command":"web-capture","pane_id":"\(Self.paneIDString)","mode":"dom"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCapture(
+            paneID: Self.paneUUID, target: nil, workspace: nil, mode: "dom"
+        ))
+    }
+
+    @Test func parseWebCaptureModeAll() {
+        let data = jsonData("""
+        {"command":"web-capture","target":"web","workspace":"Dev","mode":"all"}
+        """)
+        let result = SocketServer.parseWireMessage(data)
+        #expect(result?.0 == .webCapture(
+            paneID: nil, target: "web", workspace: "Dev", mode: "all"
+        ))
     }
 
     @Test func parseWebPrivateOn() {
