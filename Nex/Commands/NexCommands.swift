@@ -5,6 +5,26 @@ import SwiftUI
 struct NexCommands: Commands {
     let store: StoreOf<AppReducer>
 
+    @Environment(\.openWindow) private var openWindow
+
+    /// Bring the main window back, whatever state it's in: minimized →
+    /// deminiaturize, behind / on another Space → order front, closed via
+    /// the red traffic light → recreate the WindowGroup scene by id (the
+    /// closed window is released, so there is nothing left to order
+    /// front; `MainWindowRegistry` relinquished primary on close, so the
+    /// recreated window re-claims it like a Dock-icon reopen).
+    private func showMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = MainWindowRegistry.primary {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(id: NexApp.mainSceneID)
+        }
+    }
+
     var body: some Commands {
         // Replace the default "New Window" (⌘N) with "New Workspace"
         CommandGroup(replacing: .newItem) {
@@ -65,6 +85,15 @@ struct NexCommands: Commands {
 
             menuButton("Toggle Inspector", action: .toggleInspector) {
                 store.send(.toggleInspector)
+            }
+        }
+
+        // Window — recovery path for a window closed via the red traffic
+        // light: with no main window left, only the menu bar (and Dock)
+        // can bring Nex back.
+        CommandGroup(after: .windowArrangement) {
+            Button("Show Nex Window") {
+                showMainWindow()
             }
         }
 

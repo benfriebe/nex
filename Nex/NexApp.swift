@@ -37,8 +37,14 @@ struct NexApp: App {
             || NSClassFromString("XCTestCase") != nil
     }
 
+    /// Scene id of the main WindowGroup — lets the Window ▸ Show Nex Window
+    /// menu command recreate the window via `openWindow` after the user
+    /// closes it with the red traffic light (there is no window left to
+    /// order front, and only scenes with an id can be reopened by id).
+    static let mainSceneID = "main"
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: Self.mainSceneID) {
             RootChromeView(store: store)
                 .environment(\.surfaceManager, SurfaceManager.liveValue)
                 .environment(\.socketServer, SocketServer.liveValue)
