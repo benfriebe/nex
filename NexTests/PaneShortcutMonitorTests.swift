@@ -361,6 +361,32 @@ struct PaneShortcutMonitorTests {
         #expect(store.workspaces[id: Self.wsID] == nil)
     }
 
+    /// Regression test for issue #127: pressing ⌘W a second time after it
+    /// deleted the only workspace (leaving no active workspace) must still
+    /// be consumed — otherwise it falls through to AppKit's default
+    /// "Close Window" and takes the app's only window with it.
+    @Test func cmdWAfterLastWorkspaceDeletedIsStillConsumed() {
+        let ws = Self.makeWorkspace()
+        let (store, monitor) = makeStoreAndMonitor(
+            workspaces: [ws],
+            activeWorkspaceID: Self.wsID
+        )
+
+        let event = keyEvent(keyCode: 13, modifierFlags: .command)
+        #expect(monitor.handleKeyEvent(event) == true)
+        #expect(store.activeWorkspaceID == nil)
+
+        // The follow-up press, with no active workspace, must also be
+        // consumed rather than falling through.
+        #expect(monitor.handleKeyEvent(event) == true)
+    }
+
+    @Test func cmdWWithNoWorkspacesAtAllIsConsumed() {
+        let (_, monitor) = makeStoreAndMonitor()
+        let event = keyEvent(keyCode: 13, modifierFlags: .command)
+        #expect(monitor.handleKeyEvent(event) == true)
+    }
+
     // MARK: - Workspace switching
 
     @Test func cmdOptDownSwitchesToNextWorkspace() {
