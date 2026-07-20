@@ -267,15 +267,7 @@ final class GhosttyApp {
         case GHOSTTY_ACTION_OPEN_URL:
             let openUrl = action.action.open_url
             guard let urlPtr = openUrl.url else { return false }
-            // Ghostty's URL regex includes trailing spaces that run to end-of-line
-            // (see ghostty/src/config/url.zig `trailing_spaces_at_eol`), so a path
-            // matched at the end of a terminal line arrives padded with spaces.
-            // Trim before the .md suffix check or we'd silently fall through to
-            // ghostty's default opener and `open(1)` would fail.
-            var urlString = String(cString: urlPtr).trimmingCharacters(in: .whitespacesAndNewlines)
-            while urlString.hasSuffix(".") {
-                urlString.removeLast()
-            }
+            let urlString = Self.trimmedLinkString(String(cString: urlPtr))
             let path = NSString(string: urlString).standardizingPath
             guard path.hasSuffix(".md") else { return false }
             let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
@@ -401,6 +393,45 @@ final class GhosttyApp {
         default:
             return false
         }
+    }
+
+    /// Trims the padding libghostty's URL regex bakes into matched text:
+    /// trailing spaces that run to end-of-line (see
+    /// `ghostty/src/config/url.zig` `trailing_spaces_at_eol`) and a trailing
+    /// sentence-ending period. Shared by `GHOSTTY_ACTION_OPEN_URL` and the
+    /// cmd-click-while-mouse-captured path in `openExternalLink`.
+    private nonisolated static func trimmedLinkString(_ raw: String) -> String {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix(".") {
+            trimmed.removeLast()
+        }
+        return trimmed
+    }
+
+    /// Opens a link `SurfaceView.mouseDown` detected itself (via
+    /// `GhosttySurface.readText(row:columns:)`) for the cmd-click-while-
+    /// mouse-captured case, where the click is intercepted instead of
+    /// forwarded to libghostty (issue #189 — forwarding it would just hand
+    /// the click to a fullscreen TUI that has captured the mouse, instead of
+    /// opening the link). Mirrors `GHOSTTY_ACTION_OPEN_URL`'s routing: `.md`
+    /// paths open in a Nex markdown pane, everything else opens in the
+    /// default app/browser. Must be called on the main thread.
+    static func openExternalLink(_ raw: String, surface: ghostty_surface_t?) {
+        let urlString = trimmedLinkString(raw)
+        let path = NSString(string: urlString).standardizingPath
+        if path.hasSuffix(".md") {
+            NotificationCenter.default.post(
+                name: Self.openFileNotification,
+                object: nil,
+                userInfo: [
+                    "path": path,
+                    "surface": surface as Any
+                ]
+            )
+            return
+        }
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     deinit {

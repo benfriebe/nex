@@ -256,4 +256,27 @@ final class GhosttySurface {
         guard let ptr = text.text else { return "" }
         return String(cString: ptr)
     }
+
+    /// Read the text of a single viewport row (0-indexed from the top of the
+    /// visible screen). Used for local link detection on cmd-click when the
+    /// mouse is captured by the foreground program — libghostty's own
+    /// hover/click link detection doesn't run against a captured surface
+    /// (`GHOSTTY_ACTION_MOUSE_OVER_LINK` never fires with a URL there), so
+    /// `SurfaceView.mouseDown` reads the row itself and matches a link
+    /// against it (issue #189).
+    func readText(row: UInt32, columns: UInt32) -> String? {
+        guard columns > 0 else { return nil }
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: 0, y: row),
+            bottom_right: ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: columns - 1, y: row
+            ),
+            rectangle: false
+        )
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let ptr = text.text else { return "" }
+        return String(cString: ptr)
+    }
 }

@@ -465,9 +465,67 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
         return NSPoint(x: point.x, y: frame.height - point.y)
     }
 
+    /// Finds a link at a ghostty-space point by reading that row's text and
+    /// matching it with `NSDataDetector`. Used only for the mouse-captured
+    /// cmd-click path (see `mouseDown`) — libghostty's own link detection is
+    /// unavailable there, so this re-derives "what's under the cursor" from
+    /// scratch. Column math assumes one grid column per character, which
+    /// holds for the ASCII URLs/paths this targets; it isn't attempted for
+    /// wide (e.g. CJK) text preceding the link on the same row.
+    private func detectLink(at point: NSPoint) -> String? {
+        guard let ghosttySurface else { return nil }
+        let size = ghosttySurface.size
+        guard size.cell_width_px > 0, size.cell_height_px > 0, size.columns > 0, size.rows > 0 else { return nil }
+        let scale = window?.backingScaleFactor ?? 2.0
+        let cellWidth = CGFloat(size.cell_width_px) / scale
+        let cellHeight = CGFloat(size.cell_height_px) / scale
+        guard cellWidth > 0, cellHeight > 0 else { return nil }
+        let row = Int(point.y / cellHeight)
+        let col = Int(point.x / cellWidth)
+        guard row >= 0, row < Int(size.rows), col >= 0 else { return nil }
+
+        guard let rowText = ghosttySurface.readText(row: UInt32(row), columns: UInt32(size.columns)),
+              let detector = Self.linkDetector else { return nil }
+        let nsText = rowText as NSString
+        for match in detector.matches(in: rowText, range: NSRange(location: 0, length: nsText.length))
+            where match.range.location <= col && col < match.range.location + match.range.length {
+            return nsText.substring(with: match.range)
+        }
+        return nil
+    }
+
+    private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Link found under the cursor by `mouseDown`'s cmd-click interception,
+    /// carried through to `mouseUp` so the actual open happens on release
+    /// (matching the drag-away-cancels convention of a normal click) — nil
+    /// means this click isn't a link-open, so `mouseUp` forwards normally.
+    private var interceptedLinkClick: String?
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         let point = mousePoint(from: event)
+
+        // A cmd-click on a link normally opens it via libghostty's own
+        // GHOSTTY_ACTION_OPEN_URL (fired from ghostty_surface_mouse_button).
+        // But when the foreground program has captured the mouse (e.g. a
+        // fullscreen TUI like Claude Code, running in the alternate screen
+        // buffer with mouse reporting enabled), forwarding the click instead
+        // hands it to the program as a raw mouse-report escape sequence — the
+        // program doesn't understand it as "open this link" and the browser
+        // never opens (issue #189). libghostty's own link detection doesn't
+        // help here either: it skips hover/click link matching entirely on a
+        // captured surface. So detect the link ourselves from the clicked
+        // row's text and, if found, intercept the click instead of
+        // forwarding anything to the captured program.
+        interceptedLinkClick = nil
+        if event.modifierFlags.contains(.command), ghosttySurface?.mouseCaptured == true {
+            interceptedLinkClick = detectLink(at: point)
+            if interceptedLinkClick != nil {
+                return
+            }
+        }
+
         ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
         _ = ghosttySurface?.sendMouseButton(
             state: GHOSTTY_MOUSE_PRESS,
@@ -477,6 +535,15 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let link = interceptedLinkClick {
+            interceptedLinkClick = nil
+            let surface = ghosttySurface?.surface
+            MainActor.assumeIsolated {
+                GhosttyApp.openExternalLink(link, surface: surface)
+            }
+            return
+        }
+
         let point = mousePoint(from: event)
         ghosttySurface?.sendMousePos(x: point.x, y: point.y, mods: Self.mods(from: event))
         _ = ghosttySurface?.sendMouseButton(
