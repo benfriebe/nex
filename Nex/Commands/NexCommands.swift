@@ -208,9 +208,18 @@ final class PaneShortcutMonitor {
             return true
         }
 
-        guard let activeID = store.activeWorkspaceID else { return false }
-
         let trigger = KeyTrigger(event: event)
+
+        guard let activeID = store.activeWorkspaceID else {
+            // Even with no active workspace (e.g. the last one was just
+            // closed via ⌘W, landing on the "no workspace selected"
+            // placeholder), a pane-close shortcut must still be consumed
+            // here — otherwise it falls through to AppKit's default
+            // "Close Window", taking the app's only window with no way
+            // to bring it back (issue #127). Nothing to close, so it's a
+            // no-op beyond consuming the event.
+            return store.configHotkey.keybindings.action(for: trigger) == .closePane
+        }
 
         // Belt-and-braces: if the user configured a global hotkey that also
         // matches an in-app binding, skip the in-app dispatch. Carbon
@@ -535,7 +544,12 @@ final class PaneShortcutMonitor {
     private func handleClosePane(activeWorkspaceID id: UUID) -> Bool {
         guard let workspace = store.workspaces[id: id],
               let focusedID = workspace.focusedPaneID
-        else { return false }
+        else {
+            // Stale/inconsistent state (no such workspace, or no focused
+            // pane to close) — still consume so ⌘W never falls through to
+            // AppKit's default "Close Window" on the main window (#127).
+            return true
+        }
 
         // Last pane — close the workspace instead. Warn first if it has
         // active agents (same gate as the sidebar Delete item), so ⌘W
