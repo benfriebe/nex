@@ -177,10 +177,13 @@ When creating a workspace you can attach one or more registered repos and option
 Toggle graft on a repo association from the inspector to mirror the worktree's working-tree changes back into the parent checkout in real time. Useful when you want to leave your IDE pointed at the main checkout while an agent works in a worktree. State, including checkpoint SHA and pre-graft branch, is captured so toggling off restores the parent to where it was. Orphaned breadcrumbs from interrupted sessions are detected on launch and surfaced as a recovery banner.
 
 ```bash
-nex graft start   # attach the current pane's worktree to its parent repo
-nex graft status  # human-readable, or --json for tooling
+nex graft start                # attach the current pane's worktree to its parent repo
+nex graft start --into <path>  # graft into another worktree of the same repo instead of the main checkout
+nex graft status               # human-readable, or --json for tooling
 nex graft stop
 ```
+
+`--into` lets any other checkout of the same repository act as the destination — e.g. a hub worktree that runs the dev servers — instead of the repo's main checkout. It requires a single association in scope (narrow with `--repo`).
 
 ### Live git status
 
@@ -232,7 +235,7 @@ nex layout cycle | select <name>
 nex open  [--here] <path>     # routes by file type: .md→markdown preview, .html/.htm/.pdf/.svg + images→web pane
 nex md    [--here] <path>     # always opens a markdown preview pane (--here reuses the calling pane)
 nex diff  [<path>]            # opens a diff pane for the current repo
-nex graft start | stop | status [--json]
+nex graft start | stop | status [--json]   # start also takes --into <path> to target another worktree
 ```
 
 ### Diagnostics

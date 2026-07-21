@@ -580,12 +580,13 @@ extension AppReducer {
                         reply: reply
                     )
 
-                case .graftStart(let workspaceFilter, let repoFilter, let paneID):
+                case .graftStart(let workspaceFilter, let repoFilter, let paneID, let into):
                     return handleGraftStart(
                         state: state,
                         workspaceFilter: workspaceFilter,
                         repoFilter: repoFilter,
                         paneID: paneID,
+                        into: into,
                         reply: reply
                     )
 

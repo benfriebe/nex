@@ -141,7 +141,7 @@ struct GraftFeature {
                     ))
                     return .run { send in
                         do {
-                            let session = try await graftService.start(association)
+                            let session = try await graftService.start(association, nil)
                             await send(.startSucceeded(session))
                         } catch {
                             await send(.startFailed(
@@ -297,7 +297,7 @@ struct GraftFeature {
                         return
                     }
                     do {
-                        let session = try await graftService.start(prompt.newAssociation)
+                        let session = try await graftService.start(prompt.newAssociation, nil)
                         await send(.startSucceeded(session))
                     } catch {
                         // Stop succeeded; start failed. BOTH sides

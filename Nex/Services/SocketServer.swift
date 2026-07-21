@@ -166,8 +166,10 @@ enum SocketMessage: Equatable {
     /// `nex graft start` — begin worktree-to-root mirroring. `paneID`
     /// comes from `NEX_PANE_ID` and scopes resolution to the caller's
     /// workspace when neither `workspace` nor `repo` is supplied.
+    /// `into` (`--into <path>`) overrides the destination checkout —
+    /// another worktree of the same repo instead of the main checkout.
     /// Request/response — see `replyCommandAllowlist`.
-    case graftStart(workspace: String?, repo: String?, paneID: UUID?)
+    case graftStart(workspace: String?, repo: String?, paneID: UUID?, into: String?)
     /// `nex graft stop` — stop active sessions in scope.
     case graftStop(workspace: String?, repo: String?, paneID: UUID?)
     /// `nex graft status` — list active sessions across all workspaces.
@@ -862,6 +864,9 @@ final class SocketServer: Sendable {
         var scrollback: Bool?
         /// `graft-start` / `graft-stop` — repo name or path scope.
         var repo: String?
+        /// `graft-start` — explicit destination checkout path
+        /// (`--into`). Absent = the parent repo's main checkout.
+        var into: String?
         /// `web-open` / `web-url` etc. — destination URL or
         /// (for capture) the visible-text/screenshot/meta mode.
         var url: String?
@@ -989,6 +994,7 @@ final class SocketServer: Sendable {
             case targetPath = "target_path"
             case lines, scrollback
             case repo
+            case into
             case url, mode, hard
             case tab
             case makeActive = "make_active"
@@ -1187,7 +1193,8 @@ final class SocketServer: Sendable {
             let workspace = (wire.workspace?.isEmpty == true) ? nil : wire.workspace
             let repo = (wire.repo?.isEmpty == true) ? nil : wire.repo
             let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
-            return (.graftStart(workspace: workspace, repo: repo, paneID: paneID), wire)
+            let into = (wire.into?.isEmpty == true) ? nil : wire.into
+            return (.graftStart(workspace: workspace, repo: repo, paneID: paneID, into: into), wire)
         }
 
         if wire.command == "graft-stop" {

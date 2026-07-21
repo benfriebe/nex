@@ -185,6 +185,98 @@ struct GraftServiceTests {
         }
     }
 
+    @Test func startIntoSiblingWorktreeSyncsThereAndStopRestores() async throws {
+        // `--into <path>`: a linked worktree of the same repo acts as
+        // the destination (hub) instead of the main checkout.
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let hub = try addSiblingWorktree(parent: env.parent, name: "hub")
+        defer { try? FileManager.default.removeItem(atPath: hub) }
+        let watcher = RecursiveFSWatcher(backend: .test)
+        let impl = GraftServiceImpl(gitService: .live, watcher: watcher)
+
+        let hubInitialSHA = try shell("git", ["rev-parse", "HEAD"], at: hub)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let session = try await impl.start(env.association, into: hub)
+        #expect(session.parentRepoRoot.hasSuffix((hub as NSString).lastPathComponent))
+
+        // Breadcrumb lives in the hub worktree's own git dir (behind
+        // the `.git` FILE pointer), not the main checkout's `.git/`.
+        let hubGitDir = try shell(
+            "git", ["rev-parse", "--absolute-git-dir"], at: hub
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let hubBreadcrumb = (hubGitDir as NSString)
+            .appendingPathComponent(GraftServiceImpl.breadcrumbName)
+        #expect(FileManager.default.fileExists(atPath: hubBreadcrumb))
+        let mainBreadcrumb = (env.parent as NSString)
+            .appendingPathComponent(".git/\(GraftServiceImpl.breadcrumbName)")
+        #expect(!FileManager.default.fileExists(atPath: mainBreadcrumb))
+
+        // A change in the source worktree lands in the hub, NOT in
+        // the main checkout.
+        let newFile = (env.worktree as NSString).appendingPathComponent("synced.txt")
+        try "hello hub".write(toFile: newFile, atomically: true, encoding: .utf8)
+        watcher.inject([newFile], into: env.worktree)
+        let hubFile = (hub as NSString).appendingPathComponent("synced.txt")
+        try await pollUntil(timeout: .seconds(5)) {
+            FileManager.default.fileExists(atPath: hubFile)
+        }
+        let mainFile = (env.parent as NSString).appendingPathComponent("synced.txt")
+        #expect(!FileManager.default.fileExists(atPath: mainFile))
+
+        try await impl.stop(env.association.id)
+
+        // Hub restored to its pre-graft state; breadcrumb gone.
+        let hubSHAAfter = try shell("git", ["rev-parse", "HEAD"], at: hub)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(hubSHAAfter == hubInitialSHA)
+        #expect(!FileManager.default.fileExists(atPath: hubFile))
+        #expect(!FileManager.default.fileExists(atPath: hubBreadcrumb))
+        // Source worktree untouched; the user's edit survives.
+        #expect(FileManager.default.fileExists(atPath: newFile))
+    }
+
+    @Test func startIntoRejectsCheckoutOfDifferentRepo() async throws {
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let other = try makeRepoEnv()
+        defer { other.cleanup() }
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+        do {
+            _ = try await impl.start(env.association, into: other.parent)
+            Issue.record("expected GraftError.invalidGraftTarget")
+        } catch let error as GraftError {
+            if case .invalidGraftTarget = error {
+                // ok
+            } else {
+                Issue.record("unexpected error: \(error)")
+            }
+        }
+    }
+
+    @Test func startIntoRejectsSourceWorktreeItself() async throws {
+        let env = try makeRepoEnv()
+        defer { env.cleanup() }
+        let impl = GraftServiceImpl(
+            gitService: .live,
+            watcher: RecursiveFSWatcher(backend: .test)
+        )
+        do {
+            _ = try await impl.start(env.association, into: env.worktree)
+            Issue.record("expected GraftError.invalidGraftTarget")
+        } catch let error as GraftError {
+            if case .invalidGraftTarget = error {
+                // ok
+            } else {
+                Issue.record("unexpected error: \(error)")
+            }
+        }
+    }
+
     @Test func stopAfterDirtyStartPopsStashAndRemovesBreadcrumb() async throws {
         let env = try makeRepoEnv()
         defer { env.cleanup() }

@@ -12,6 +12,10 @@ enum GraftSessionStatus: Equatable {
 struct GraftSession: Equatable, Identifiable {
     var id: UUID
     var worktreePath: String
+    /// Destination checkout root the worktree mirrors into. The
+    /// parent repo's main checkout by default; with an explicit
+    /// `--into` target it can be another linked worktree of the
+    /// same repository (a hub).
     var parentRepoRoot: String
     var branch: String
     var status: GraftSessionStatus
@@ -70,11 +74,18 @@ enum GraftError: Error, Equatable {
     /// LINKED worktree back to its parent; running it on the parent
     /// itself would be a self-reference with no useful mirroring.
     case notAWorktree(path: String)
+    /// Refuses an explicit `--into` destination that isn't usable:
+    /// not a git checkout, a checkout of a different repository than
+    /// the source worktree, or the source checkout itself.
+    case invalidGraftTarget(path: String, reason: String)
     case unknown(String)
 }
 
 struct GraftService {
-    var start: @Sendable (_ association: RepoAssociation) async throws -> GraftSession
+    /// `intoPath` optionally overrides the destination: any other
+    /// checkout of the same repository (typically a linked worktree
+    /// acting as a hub). `nil` = the parent repo's main checkout.
+    var start: @Sendable (_ association: RepoAssociation, _ intoPath: String?) async throws -> GraftSession
     var stop: @Sendable (_ associationID: UUID) async throws -> Void
     var activeSessions: @Sendable () async -> [GraftSession]
     var updates: @Sendable () -> AsyncStream<GraftSessionEvent>
@@ -135,22 +146,50 @@ final class GraftServiceImpl: Sendable {
 
     // MARK: - Start
 
-    func start(_ association: RepoAssociation) async throws -> GraftSession {
+    func start(_ association: RepoAssociation, into intoPath: String? = nil) async throws -> GraftSession {
         let worktreePath = association.worktreePath
         guard let info = await gitService.resolveRepoRoot(worktreePath) else {
             throw GraftError.missingWorktree(worktreePath: worktreePath)
         }
-        let parentRepoRoot = canonicalize(info.parentRepoRoot)
+        let mainCheckoutRoot = canonicalize(info.parentRepoRoot)
         let worktreeRoot = canonicalize(info.worktreeRoot)
 
-        // Refuse to graft the parent repo onto itself. Graft only
-        // makes sense for a linked worktree mirroring back to its
-        // parent — running it on the parent's main checkout would
-        // mean we'd stash the user's edits, checkout themselves,
-        // sync themselves, and rewind themselves, which is just an
-        // expensive no-op (or worse, a stash conflict).
-        guard worktreeRoot != parentRepoRoot else {
-            throw GraftError.notAWorktree(path: worktreePath)
+        // Resolve the destination checkout. Default: the parent
+        // repo's main checkout (derived from the git common dir).
+        // An explicit `--into` target lets any OTHER checkout of the
+        // SAME repository act as the destination — typically a linked
+        // worktree serving as a hub that runs the dev servers.
+        let parentRepoRoot: String
+        if let intoPath {
+            guard let targetInfo = await gitService.resolveRepoRoot(intoPath) else {
+                throw GraftError.invalidGraftTarget(
+                    path: intoPath, reason: "not a git checkout"
+                )
+            }
+            let targetRoot = canonicalize(targetInfo.worktreeRoot)
+            guard canonicalize(targetInfo.parentRepoRoot) == mainCheckoutRoot else {
+                throw GraftError.invalidGraftTarget(
+                    path: intoPath,
+                    reason: "belongs to a different repository than the source worktree"
+                )
+            }
+            guard targetRoot != worktreeRoot else {
+                throw GraftError.invalidGraftTarget(
+                    path: intoPath, reason: "destination is the source worktree itself"
+                )
+            }
+            parentRepoRoot = targetRoot
+        } else {
+            // Refuse to graft the parent repo onto itself. Graft only
+            // makes sense for a linked worktree mirroring back to its
+            // parent — running it on the parent's main checkout would
+            // mean we'd stash the user's edits, checkout themselves,
+            // sync themselves, and rewind themselves, which is just an
+            // expensive no-op (or worse, a stash conflict).
+            guard worktreeRoot != mainCheckoutRoot else {
+                throw GraftError.notAWorktree(path: worktreePath)
+            }
+            parentRepoRoot = mainCheckoutRoot
         }
 
         // Reject if the parent root is already being grafted into —
@@ -784,10 +823,36 @@ final class GraftServiceImpl: Sendable {
         let worktreePreGraftSha: String?
     }
 
+    /// The destination checkout's git metadata directory. For a main
+    /// checkout `<root>/.git` IS a directory; for a linked worktree
+    /// destination it's a FILE containing `gitdir: <path>` pointing at
+    /// `<common>/.git/worktrees/<name>` — follow the pointer so the
+    /// breadcrumb lands in a writable, per-checkout location either
+    /// way (writing "into" a `.git` file would fail with ENOTDIR).
+    private func gitDirPath(for checkoutRoot: String) -> String {
+        let dotGit = (checkoutRoot as NSString).appendingPathComponent(".git")
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dotGit, isDirectory: &isDir),
+              !isDir.boolValue else {
+            return dotGit
+        }
+        guard let contents = try? String(contentsOfFile: dotGit, encoding: .utf8),
+              let line = contents
+              .split(separator: "\n")
+              .first(where: { $0.hasPrefix("gitdir:") }) else {
+            return dotGit
+        }
+        let raw = line.dropFirst("gitdir:".count)
+            .trimmingCharacters(in: .whitespaces)
+        let resolved = raw.hasPrefix("/")
+            ? raw
+            : (checkoutRoot as NSString).appendingPathComponent(raw)
+        return (resolved as NSString).standardizingPath
+    }
+
     private func breadcrumbPath(at parentRepoRoot: String) -> String {
-        let gitDir = (parentRepoRoot as NSString)
-            .appendingPathComponent(".git")
-        return (gitDir as NSString).appendingPathComponent(Self.breadcrumbName)
+        (gitDirPath(for: parentRepoRoot) as NSString)
+            .appendingPathComponent(Self.breadcrumbName)
     }
 
     private func writeBreadcrumb(at parentRepoRoot: String, breadcrumb: Breadcrumb) throws {
@@ -845,7 +910,7 @@ extension GraftService: DependencyKey {
     ) -> GraftService {
         let impl = GraftServiceImpl(gitService: gitService, watcher: watcher)
         return GraftService(
-            start: { try await impl.start($0) },
+            start: { try await impl.start($0, into: $1) },
             stop: { try await impl.stop($0) },
             activeSessions: { await impl.activeSessions() },
             updates: { impl.updates() },
