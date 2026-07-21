@@ -876,6 +876,7 @@ struct AppReducer {
         workspaceFilter: String?,
         repoFilter: String?,
         paneID: UUID?,
+        into: String?,
         reply: SocketServer.ReplyHandle?
     ) -> Effect<Action> {
         let assocs: [RepoAssociation]
@@ -893,13 +894,26 @@ struct AppReducer {
             return .none
         }
 
+        // An explicit destination is a single-target operation — with
+        // several associations in scope they'd all race to claim the
+        // same destination root and every one but the first would
+        // fail with `alreadyActive`. Make the ambiguity a hard error.
+        if into != nil, assocs.count > 1 {
+            reply?.send([
+                "ok": false,
+                "error": "--into requires a single association in scope; narrow with --repo"
+            ])
+            reply?.close()
+            return .none
+        }
+
         return .run { [graftService] _ in
             var started: [[String: Any]] = []
             var failedAny = false
             var lastError: String?
             for assoc in assocs {
                 do {
-                    let session = try await graftService.start(assoc)
+                    let session = try await graftService.start(assoc, into)
                     started.append([
                         "association_id": session.id.uuidString,
                         "worktree_path": session.worktreePath,
@@ -2179,7 +2193,17 @@ struct AppReducer {
                     }
                 }
 
-                let parentRepoRoots = Array(Set(state.repoRegistry.map(\.path)))
+                // Scan registered repo roots AND every association's
+                // worktree path for orphaned breadcrumbs — a graft
+                // with an explicit `--into <worktree>` destination
+                // leaves its breadcrumb in that worktree's git dir,
+                // not the main checkout's.
+                let parentRepoRoots = Array(Set(
+                    state.repoRegistry.map(\.path)
+                        + state.workspaces.flatMap { ws in
+                            ws.repoAssociations.map(\.worktreePath)
+                        }
+                ))
                 return .merge(
                     [
                         .run { send in

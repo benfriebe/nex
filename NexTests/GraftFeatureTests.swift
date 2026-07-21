@@ -34,7 +34,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in session },
+                start: { _, _ in session },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -71,7 +71,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: Self.assocID, worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: Self.assocID, worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -103,7 +103,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -143,7 +143,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in
+                start: { _, _ in
                     throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
                 },
                 stop: { _ in },
@@ -213,7 +213,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { assoc in
+                start: { assoc, _ in
                     startCalls.increment()
                     ordering.append("start:\(assoc.id.uuidString)")
                     return newSession
@@ -271,7 +271,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -298,7 +298,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -332,7 +332,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in stopCalls.increment() },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -360,7 +360,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
+                start: { _, _ in .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil) },
                 stop: { _ in stopCalls.increment() },
                 activeSessions: { [] },
                 updates: { AsyncStream { _ in } },
@@ -392,7 +392,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { assoc in
+                start: { assoc, _ in
                     ordering.append("start:\(assoc.id.uuidString)")
                     return restarted
                 },
@@ -434,7 +434,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in
+                start: { _, _ in
                     startCalls.increment()
                     return .init(id: UUID(), worktreePath: "", parentRepoRoot: "", branch: "", status: .starting, stashRef: nil, lastSync: nil)
                 },
@@ -485,7 +485,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in
+                start: { _, _ in
                     throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
                 },
                 stop: { _ in },
@@ -526,7 +526,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in
+                start: { _, _ in
                     throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
                 },
                 stop: { _ in },
@@ -561,7 +561,7 @@ struct GraftFeatureTests {
             GraftFeature()
         } withDependencies: {
             $0.graftService = GraftService(
-                start: { _ in
+                start: { _, _ in
                     throw GraftError.alreadyActive(parentRepoRoot: "/tmp/repo")
                 },
                 stop: { _ in },

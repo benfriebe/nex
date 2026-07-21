@@ -561,7 +561,7 @@ struct AppReducerTests {
         )
         let stopRecorder = StopRecorder()
         store.dependencies.graftService = GraftService(
-            start: { _ in
+            start: { _, _ in
                 GraftSession(
                     id: UUID(), worktreePath: "", parentRepoRoot: "",
                     branch: "", status: .starting, stashRef: nil, lastSync: nil

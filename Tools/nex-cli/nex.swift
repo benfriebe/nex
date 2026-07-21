@@ -228,7 +228,7 @@ func printUsage() {
       nex open [--here] <filepath>   # routes by file type: .md→markdown, .html/.pdf/images→web pane
       nex md [--here] <filepath>     # always opens a markdown preview pane
       nex diff [<path>]
-      nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
+      nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>] [--into <path>]
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft status [--json]
       nex web open [--private] <url>
@@ -4456,7 +4456,7 @@ func handleGraft(_ args: inout ArraySlice<String>) {
     case "-h", "--help", "help":
         fputs("""
         Usage:
-          nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
+          nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>] [--into <path>]
           nex graft stop  [--workspace <name-or-uuid>] [--repo <name-or-path>]
           nex graft status [--json]
 
@@ -4464,6 +4464,11 @@ func handleGraft(_ args: inout ArraySlice<String>) {
         (requires NEX_PANE_ID). Use --repo to target a single
         association; use --workspace to scope across every association
         in another workspace.
+
+        --into <path> grafts into that checkout instead of the repo's
+        main checkout — any other worktree of the same repository can
+        be the destination (e.g. a hub worktree running dev servers).
+        Requires a single association in scope.
         \n
         """, stderr)
     default:
@@ -4476,10 +4481,22 @@ func handleGraft(_ args: inout ArraySlice<String>) {
 private func handleGraftCommand(command: String, args: inout ArraySlice<String>) {
     let workspace = parseFlag("--workspace", from: &args)
     let repo = parseFlag("--repo", from: &args)
+    let into = command == "graft-start" ? parseFlag("--into", from: &args) : nil
 
     var payload: [String: Any] = ["command": command]
     if let workspace { payload["workspace"] = workspace }
     if let repo { payload["repo"] = repo }
+    if let into {
+        // Absolutize CLI-side: the app process has a different cwd,
+        // so a relative destination path must be resolved against the
+        // caller's cwd before it rides the wire.
+        let expanded = (into as NSString).expandingTildeInPath
+        let absolute = expanded.hasPrefix("/")
+            ? expanded
+            : (FileManager.default.currentDirectoryPath as NSString)
+            .appendingPathComponent(expanded)
+        payload["into"] = (absolute as NSString).standardizingPath
+    }
     if workspace == nil, repo == nil,
        let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
         payload["pane_id"] = paneID

@@ -32,21 +32,23 @@ struct GraftCLIReplyTests {
         sessions: IdentifiedArrayOf<GraftSession> = [],
         activeSessions: @escaping @Sendable () async -> [GraftSession] = { [] },
         graftStartResult: @escaping @Sendable (RepoAssociation) async throws -> GraftSession,
-        graftStopResult: @escaping @Sendable (UUID) async throws -> Void = { _ in }
+        graftStartInto: LockedString? = nil,
+        graftStopResult: @escaping @Sendable (UUID) async throws -> Void = { _ in },
+        associations: [RepoAssociation]? = nil
     ) -> TestStoreOf<AppReducer> {
         var workspace = WorkspaceFeature.State(id: Self.wsID, name: "alpha")
         let pane = Pane(id: Self.paneID)
         workspace.panes = IdentifiedArrayOf(uniqueElements: [pane])
         workspace.layout = .leaf(Self.paneID)
         workspace.focusedPaneID = Self.paneID
-        workspace.repoAssociations = [
+        workspace.repoAssociations = IdentifiedArrayOf(uniqueElements: associations ?? [
             RepoAssociation(
                 id: Self.assocID,
                 repoID: Self.repoID,
                 worktreePath: "/tmp/wt",
                 branchName: "feature/x"
             )
-        ]
+        ])
 
         var appState = AppReducer.State()
         appState.workspaces = [workspace]
@@ -61,7 +63,10 @@ struct GraftCLIReplyTests {
             $0.surfaceManager = SurfaceManager()
             $0.continuousClock = ImmediateClock()
             $0.graftService = GraftService(
-                start: graftStartResult,
+                start: { assoc, into in
+                    if let into { graftStartInto?.set(into) }
+                    return try await graftStartResult(assoc)
+                },
                 stop: graftStopResult,
                 activeSessions: activeSessions,
                 updates: { AsyncStream { _ in } },
@@ -95,7 +100,7 @@ struct GraftCLIReplyTests {
         )
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .graftStart(workspace: nil, repo: nil, paneID: Self.paneID),
+            .graftStart(workspace: nil, repo: nil, paneID: Self.paneID, into: nil),
             reply: makeCaptureHandle(sink)
         ))
         await store.finish()
@@ -114,7 +119,7 @@ struct GraftCLIReplyTests {
         let store = makeStore(graftStartResult: { _ in session })
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .graftStart(workspace: nil, repo: nil, paneID: nil),
+            .graftStart(workspace: nil, repo: nil, paneID: nil, into: nil),
             reply: makeCaptureHandle(sink)
         ))
 
@@ -133,7 +138,7 @@ struct GraftCLIReplyTests {
 
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .graftStart(workspace: nil, repo: "my-repo", paneID: nil),
+            .graftStart(workspace: nil, repo: "my-repo", paneID: nil, into: nil),
             reply: makeCaptureHandle(sink)
         ))
         await store.finish()
@@ -147,12 +152,68 @@ struct GraftCLIReplyTests {
         let store = makeStore(graftStartResult: { _ in session })
         let sink = CaptureSink()
         await store.send(.socketMessage(
-            .graftStart(workspace: "nope", repo: nil, paneID: nil),
+            .graftStart(workspace: "nope", repo: nil, paneID: nil, into: nil),
             reply: makeCaptureHandle(sink)
         ))
 
         #expect(sink.payloads[0]["ok"] as? Bool == false)
         #expect((sink.payloads[0]["error"] as? String)?.contains("workspace not found") == true)
+    }
+
+    @Test func graftStartForwardsIntoDestinationToService() async {
+        let session = Self.makeSession()
+        let into = LockedString()
+        let store = makeStore(
+            graftStartResult: { _ in session },
+            graftStartInto: into
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .graftStart(workspace: nil, repo: nil, paneID: Self.paneID, into: "/tmp/hub"),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect(into.value == "/tmp/hub")
+    }
+
+    @Test func graftStartIntoWithMultipleAssociationsFails() async {
+        // `--into` names ONE destination; with several associations in
+        // scope they'd all race to claim it. Must be a hard error, and
+        // the service must never be called.
+        let session = Self.makeSession()
+        let startCalls = LockedString()
+        let store = makeStore(
+            graftStartResult: { assoc in
+                startCalls.set(assoc.id.uuidString)
+                return session
+            },
+            associations: [
+                RepoAssociation(
+                    id: Self.assocID,
+                    repoID: Self.repoID,
+                    worktreePath: "/tmp/wt",
+                    branchName: "feature/x"
+                ),
+                RepoAssociation(
+                    id: UUID(),
+                    repoID: Self.repoID,
+                    worktreePath: "/tmp/wt2",
+                    branchName: "feature/y"
+                )
+            ]
+        )
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .graftStart(workspace: nil, repo: "my-repo", paneID: nil, into: "/tmp/hub"),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        #expect((sink.payloads[0]["error"] as? String)?.contains("--into") == true)
+        #expect(startCalls.value.isEmpty)
     }
 
     // MARK: - graft-stop
