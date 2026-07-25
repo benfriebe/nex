@@ -198,6 +198,21 @@ struct NexApp: App {
                         _ = semaphore.wait(timeout: .now() + 2)
                     }
 
+                    QuitGate.shared.flushPersistence = {
+                        // `.liveValue` is the same stored singleton the
+                        // reducer's `@Dependency(\.persistenceService)`
+                        // resolves to, so this drains the actual pending
+                        // debounced write rather than a second, unrelated
+                        // instance (issue #267).
+                        let service = PersistenceService.liveValue
+                        let semaphore = DispatchSemaphore(value: 0)
+                        Task.detached {
+                            await service.flushNow()
+                            semaphore.signal()
+                        }
+                        _ = semaphore.wait(timeout: .now() + 2)
+                    }
+
                     let monitor = PaneShortcutMonitor(store: store)
                     monitor.start()
                     shortcutMonitor = monitor

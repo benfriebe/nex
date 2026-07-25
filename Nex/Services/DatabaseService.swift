@@ -17,10 +17,55 @@ final class DatabaseService: Sendable {
 
         var config = Configuration()
         config.foreignKeysEnabled = true
+        writer = try Self.openAndMigrate(path: dbPath, configuration: config)
+    }
 
-        let pool = try DatabasePool(path: dbPath, configuration: config)
-        writer = pool
-        try migrate()
+    /// File-backed database at an arbitrary path, using the same
+    /// `DatabasePool` writer production uses (unlike `init(inMemory:)`,
+    /// which uses `DatabaseQueue`). Test-only: lets persistence tests
+    /// exercise the real WAL writer path, and lets migration tests seed
+    /// a real on-disk DB at an intermediate schema version before
+    /// migrating it further (issue #267).
+    init(testPath path: String) throws {
+        var config = Configuration()
+        config.foreignKeysEnabled = true
+        writer = try Self.openAndMigrate(path: path, configuration: config)
+    }
+
+    /// Opens (or creates) the DB at `path` and runs it through the full
+    /// migration chain. If either step throws — a corrupt file that
+    /// won't open, or a buggy/interrupted migration — this used to
+    /// `fatalError` and crash-loop the app on every launch, with the
+    /// user's only recovery being to manually delete nex.db and lose
+    /// everything. Instead, quarantine the unreadable file aside (kept
+    /// on disk for manual recovery, not deleted) and retry once against
+    /// a fresh file so the app always launches (issue #267).
+    private static func openAndMigrate(path: String, configuration: Configuration) throws -> any DatabaseWriter {
+        do {
+            let pool = try DatabasePool(path: path, configuration: configuration)
+            try makeMigrator().migrate(pool)
+            return pool
+        } catch {
+            print("DatabaseService: failed to open/migrate \(path) (\(error)) — quarantining and starting fresh")
+            quarantineDatabase(at: path)
+            let pool = try DatabasePool(path: path, configuration: configuration)
+            try makeMigrator().migrate(pool)
+            return pool
+        }
+    }
+
+    /// Moves an unreadable/corrupt database (and its WAL/SHM sidecar
+    /// files, if present) aside to a timestamped `.corrupt-<epoch>`
+    /// backup so a fresh DB can be created in its place without
+    /// destroying the evidence. Best-effort: failures here don't block
+    /// startup — the caller proceeds to create a fresh DB regardless.
+    private static func quarantineDatabase(at dbPath: String) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dbPath) else { return }
+        let suffix = ".corrupt-\(Int(Date().timeIntervalSince1970))"
+        for path in [dbPath, dbPath + "-wal", dbPath + "-shm"] where fm.fileExists(atPath: path) {
+            try? fm.moveItem(atPath: path, toPath: path + suffix)
+        }
     }
 
     /// In-memory database for testing.
@@ -32,6 +77,16 @@ final class DatabaseService: Sendable {
     }
 
     private func migrate() throws {
+        try Self.makeMigrator().migrate(writer)
+    }
+
+    /// Builds the full migration chain. Exposed (rather than folded into
+    /// `migrate()`) so tests can drive `DatabaseMigrator.migrate(_:upTo:)`
+    /// directly — e.g. seeding a DB at the pre-v15 schema with real data,
+    /// then migrating it the rest of the way, to prove the v15
+    /// `claudeSessionID` → `agentSessionID` rename is data-preserving
+    /// rather than only ever exercised against an empty greenfield DB.
+    static func makeMigrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
         migrator.registerMigration("v1_initial") { db in
@@ -265,7 +320,7 @@ final class DatabaseService: Sendable {
             }
         }
 
-        try migrator.migrate(writer)
+        return migrator
     }
 }
 

@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Foundation
 import GRDB
+import UserNotifications
 
 /// Shared coders for the web-tabs JSON column. JSONEncoder/Decoder are
 /// stateless and reusable; instantiating fresh per pane on every
@@ -13,7 +14,26 @@ private let webTabsDecoder = JSONDecoder()
 actor PersistenceService {
     private let db: DatabaseService
     private var pendingTask: Task<Void, Never>?
+    /// The most recently scheduled, not-yet-written snapshot. Kept
+    /// separately from `pendingTask` so `flushNow()` can perform the
+    /// write immediately (skipping the debounce sleep) instead of
+    /// racing/duplicating the timer.
+    private var pendingSnapshot: PersistenceSnapshot?
     private let debounceInterval: Duration = .milliseconds(500)
+
+    /// Set once `load()` has completed without throwing (including a
+    /// legitimate empty-DB first launch). `writeRecords` refuses to run
+    /// its destructive clear-and-reinsert until this is true, so a
+    /// transient/failed load can never be mistaken for first-launch and
+    /// silently overwrite intact data (issue #267).
+    private var hasLoadedSuccessfully = false
+
+    /// Consecutive write failures since the last success. Used to fire a
+    /// single desktop notification once a failing writer looks
+    /// persistent rather than alerting on every transient blip, and to
+    /// avoid re-notifying every debounce cycle while it stays broken.
+    private var consecutiveWriteFailures = 0
+    private static let writeFailureNotificationThreshold = 3
 
     init(db: DatabaseService) {
         self.db = db
@@ -22,19 +42,42 @@ actor PersistenceService {
     // MARK: - Save (debounced)
 
     func save(snapshot: PersistenceSnapshot) {
+        guard hasLoadedSuccessfully else {
+            print("PersistenceService: skipping save — no successful load yet, refusing to risk overwriting real data")
+            return
+        }
+        pendingSnapshot = snapshot
         pendingTask?.cancel()
         pendingTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            await self?.writeRecords(
-                repoRecords: snapshot.repoRecords,
-                wsRecords: snapshot.wsRecords,
-                pnRecords: snapshot.pnRecords,
-                arRecords: snapshot.arRecords,
-                groupRecords: snapshot.groupRecords,
-                stateRecords: snapshot.stateRecords
-            )
+            await self?.flush()
         }
+    }
+
+    /// Perform the pending write (if any) right now, bypassing the
+    /// debounce sleep.
+    private func flush() async {
+        guard let snapshot = pendingSnapshot else { return }
+        pendingSnapshot = nil
+        pendingTask = nil
+        await writeRecords(
+            repoRecords: snapshot.repoRecords,
+            wsRecords: snapshot.wsRecords,
+            pnRecords: snapshot.pnRecords,
+            arRecords: snapshot.arRecords,
+            groupRecords: snapshot.groupRecords,
+            stateRecords: snapshot.stateRecords
+        )
+    }
+
+    /// Cancels any pending debounce timer and performs the write
+    /// immediately. Wired via `QuitGate.flushPersistence` so the last
+    /// ~500ms of changes before quit aren't discarded when the process
+    /// exits before the debounced `Task` fires (issue #267).
+    func flushNow() async {
+        pendingTask?.cancel()
+        await flush()
     }
 
     private func writeRecords(
@@ -72,9 +115,33 @@ actor PersistenceService {
                     try record.save(db)
                 }
             }
+            consecutiveWriteFailures = 0
         } catch {
-            print("PersistenceService: write failed — \(error)")
+            consecutiveWriteFailures += 1
+            print("PersistenceService: write failed (\(consecutiveWriteFailures) in a row) — \(error)")
+            notifyIfPersistentFailure(error: error)
         }
+    }
+
+    /// Fires a single desktop notification once failures cross
+    /// `writeFailureNotificationThreshold`, so a disk-full/read-only-
+    /// volume/corrupt-DB writer that keeps failing doesn't silently
+    /// discard every state change with only an invisible `print` (issue
+    /// #267). Deliberately fires only once per failure streak — it
+    /// resets when a write succeeds again, so a later streak still
+    /// notifies.
+    private func notifyIfPersistentFailure(error _: Error) {
+        guard consecutiveWriteFailures == Self.writeFailureNotificationThreshold else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Nex can't save your changes"
+        content.body = "Repeated errors writing to disk — check available disk space and permissions. Recent changes may not survive a restart."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "nex-persistence-write-failure",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Load
@@ -87,199 +154,223 @@ actor PersistenceService {
         var repoRegistry: IdentifiedArrayOf<Repo>
     }
 
-    func load() -> LoadResult {
+    /// `load()`'s result. A failed read is kept distinct from a
+    /// successful-but-empty read (genuine first launch) — conflating the
+    /// two used to make a transient/recoverable load error (a locked DB,
+    /// a corrupt row, an I/O hiccup) look exactly like first launch, and
+    /// the app would then create a Default workspace and overwrite the
+    /// still-present real data on its very next save (issue #267).
+    enum LoadOutcome: @unchecked Sendable {
+        case success(LoadResult)
+        case failed(Error)
+    }
+
+    func load() -> LoadOutcome {
         do {
-            return try db.writer.read { db in
-                // Load repos
-                let repoRecords = try RepoRecord.fetchAll(db)
-                var repoRegistry = IdentifiedArrayOf<Repo>()
-                for rr in repoRecords {
-                    guard let repoID = UUID(uuidString: rr.id) else { continue }
-                    let repo = Repo(
-                        id: repoID,
-                        path: rr.path,
-                        name: rr.name,
-                        remoteURL: rr.remoteURL,
-                        lastAccessedAt: Date(timeIntervalSince1970: rr.lastAccessedAt),
-                        isAutoDiscovered: rr.isAutoDiscovered
-                    )
-                    repoRegistry.append(repo)
-                }
-
-                // Load workspaces
-                let workspaceRecords = try WorkspaceRecord
-                    .order(Column("sortOrder"))
-                    .fetchAll(db)
-
-                var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
-
-                for record in workspaceRecords {
-                    guard let wsID = UUID(uuidString: record.id) else { continue }
-
-                    let paneRecords = try PaneRecord
-                        .filter(Column("workspaceID") == record.id)
-                        .fetchAll(db)
-
-                    var panes = IdentifiedArrayOf<Pane>()
-                    var webPanes: [UUID: WebPaneState] = [:]
-                    for pr in paneRecords {
-                        guard let paneID = UUID(uuidString: pr.id) else { continue }
-                        let paneType = PaneType(rawValue: pr.type) ?? .shell
-                        let pane = Pane(
-                            id: paneID,
-                            label: pr.label,
-                            type: paneType,
-                            workingDirectory: pr.workingDirectory,
-                            filePath: pr.filePath,
-                            isEditing: paneType == .scratchpad,
-                            scratchpadContent: pr.content,
-                            status: PaneStatus(rawValue: pr.status) ?? .idle,
-                            agentSessionID: pr.agentSessionID,
-                            agentKind: pr.agentKind.flatMap(AgentKind.init(rawValue:)),
-                            createdAt: Date(timeIntervalSince1970: pr.createdAt),
-                            lastActivityAt: Date(timeIntervalSince1970: pr.lastActivityAt)
-                        )
-                        panes.append(pane)
-                        if paneType == .web {
-                            // Prefer the full tabs JSON; fall back to
-                            // the legacy single-tab `webURL` for rows
-                            // written before the v13 migration.
-                            // Empty/nil = blank pane (private pane on
-                            // restore).
-                            var tabs: [WebTab] = []
-                            if let json = pr.webTabsJSON,
-                               !json.isEmpty,
-                               let data = json.data(using: .utf8),
-                               let decoded = try? webTabsDecoder.decode([WebTab].self, from: data) {
-                                tabs = decoded
-                            } else if let url = pr.webURL, !url.isEmpty {
-                                tabs = [WebTab(url: url)]
-                            }
-                            let activeID = pr.webActiveTabID
-                                .flatMap { UUID(uuidString: $0) }
-                                ?? tabs.first?.id
-                            webPanes[paneID] = WebPaneState(
-                                tabs: tabs,
-                                activeTabID: activeID,
-                                isPrivate: pr.webIsPrivate ?? false
-                            )
-                        }
-                    }
-
-                    // Load repo associations for this workspace
-                    let assocRecords = try RepoAssociationRecord
-                        .filter(Column("workspaceID") == record.id)
-                        .fetchAll(db)
-
-                    var repoAssociations = IdentifiedArrayOf<RepoAssociation>()
-                    for ar in assocRecords {
-                        guard let assocID = UUID(uuidString: ar.id),
-                              let repoID = UUID(uuidString: ar.repoID) else { continue }
-                        let assoc = RepoAssociation(
-                            id: assocID,
-                            repoID: repoID,
-                            worktreePath: ar.worktreePath,
-                            branchName: ar.branchName,
-                            isAutoDetected: ar.isAutoDetected
-                        )
-                        repoAssociations.append(assoc)
-                    }
-
-                    let layout: PaneLayout = if let data = record.layoutJSON.data(using: .utf8) {
-                        (try? JSONDecoder().decode(PaneLayout.self, from: data)) ?? .empty
-                    } else {
-                        .empty
-                    }
-
-                    let color = WorkspaceColor(rawValue: record.color) ?? .blue
-                    let focusedID = record.focusedPaneID.flatMap(UUID.init)
-
-                    // Generate slug for legacy workspaces that don't have one
-                    let slug = record.slug.isEmpty
-                        ? WorkspaceFeature.State.makeSlug(from: record.name, id: wsID)
-                        : record.slug
-
-                    let labels: [String] = (record.labelsJSON.data(using: .utf8))
-                        .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
-                        ?? []
-
-                    let icon = record.icon.flatMap { GroupIcon(storageString: $0) }
-
-                    let workspace = WorkspaceFeature.State(
-                        id: wsID,
-                        name: record.name,
-                        slug: slug,
-                        color: color,
-                        panes: panes,
-                        layout: layout,
-                        focusedPaneID: focusedID,
-                        repoAssociations: repoAssociations,
-                        createdAt: Date(timeIntervalSince1970: record.createdAt),
-                        lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
-                        labels: labels,
-                        icon: icon,
-                        webPanes: webPanes,
-                        profileName: record.profileName
-                    )
-                    workspaces.append(workspace)
-                }
-
-                let activeIDStr = try AppStateRecord
-                    .filter(Column("key") == "activeWorkspaceID")
-                    .fetchOne(db)?
-                    .value
-                let activeID = activeIDStr.flatMap(UUID.init)
-
-                // Load workspace groups
-                let groupRecords = try WorkspaceGroupRecord
-                    .order(Column("sortOrder"))
-                    .fetchAll(db)
-                var groups = IdentifiedArrayOf<WorkspaceGroup>()
-                for gr in groupRecords {
-                    guard let groupID = UUID(uuidString: gr.id) else { continue }
-                    let childOrder: [UUID] = (gr.childOrderJSON.data(using: .utf8))
-                        .flatMap { try? JSONDecoder().decode([UUID].self, from: $0) }
-                        ?? []
-                    let color = gr.color.flatMap { WorkspaceColor(rawValue: $0) }
-                    let icon = gr.icon.flatMap { GroupIcon(storageString: $0) }
-                    let group = WorkspaceGroup(
-                        id: groupID,
-                        name: gr.name,
-                        color: color,
-                        isCollapsed: gr.isCollapsed,
-                        childOrder: childOrder,
-                        createdAt: Date(timeIntervalSince1970: gr.createdAt),
-                        icon: icon
-                    )
-                    groups.append(group)
-                }
-
-                // Load topLevelOrder; empty array signals legacy DB (caller backfills)
-                let topLevelOrderJSON = try AppStateRecord
-                    .filter(Column("key") == "topLevelOrder")
-                    .fetchOne(db)?
-                    .value
-                let topLevelOrder: [SidebarID] = topLevelOrderJSON
-                    .flatMap { $0.data(using: .utf8) }
-                    .flatMap { try? JSONDecoder().decode([SidebarID].self, from: $0) }
-                    ?? []
-
-                return LoadResult(
-                    workspaces: workspaces,
-                    groups: groups,
-                    topLevelOrder: topLevelOrder,
-                    activeWorkspaceID: activeID,
-                    repoRegistry: repoRegistry
-                )
-            }
+            let result = try loadResult()
+            hasLoadedSuccessfully = true
+            return .success(result)
         } catch {
             print("PersistenceService: load failed — \(error)")
+            return .failed(error)
+        }
+    }
+
+    private func loadResult() throws -> LoadResult {
+        try db.writer.read { db in
+            // Load repos
+            let repoRecords = try RepoRecord.fetchAll(db)
+            var repoRegistry = IdentifiedArrayOf<Repo>()
+            for rr in repoRecords {
+                guard let repoID = UUID(uuidString: rr.id) else { continue }
+                let repo = Repo(
+                    id: repoID,
+                    path: rr.path,
+                    name: rr.name,
+                    remoteURL: rr.remoteURL,
+                    lastAccessedAt: Date(timeIntervalSince1970: rr.lastAccessedAt),
+                    isAutoDiscovered: rr.isAutoDiscovered
+                )
+                repoRegistry.append(repo)
+            }
+
+            // Load workspaces
+            let workspaceRecords = try WorkspaceRecord
+                .order(Column("sortOrder"))
+                .fetchAll(db)
+
+            var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+
+            for record in workspaceRecords {
+                guard let wsID = UUID(uuidString: record.id) else { continue }
+
+                let paneRecords = try PaneRecord
+                    .filter(Column("workspaceID") == record.id)
+                    .fetchAll(db)
+
+                var panes = IdentifiedArrayOf<Pane>()
+                var webPanes: [UUID: WebPaneState] = [:]
+                for pr in paneRecords {
+                    guard let paneID = UUID(uuidString: pr.id) else { continue }
+                    let paneType = PaneType(rawValue: pr.type) ?? .shell
+                    let pane = Pane(
+                        id: paneID,
+                        label: pr.label,
+                        type: paneType,
+                        workingDirectory: pr.workingDirectory,
+                        filePath: pr.filePath,
+                        isEditing: paneType == .scratchpad,
+                        scratchpadContent: pr.content,
+                        status: PaneStatus(rawValue: pr.status) ?? .idle,
+                        agentSessionID: pr.agentSessionID,
+                        agentKind: pr.agentKind.flatMap(AgentKind.init(rawValue:)),
+                        createdAt: Date(timeIntervalSince1970: pr.createdAt),
+                        lastActivityAt: Date(timeIntervalSince1970: pr.lastActivityAt)
+                    )
+                    panes.append(pane)
+                    if paneType == .web {
+                        // Prefer the full tabs JSON; fall back to
+                        // the legacy single-tab `webURL` for rows
+                        // written before the v13 migration.
+                        // Empty/nil = blank pane (private pane on
+                        // restore).
+                        var tabs: [WebTab] = []
+                        if let json = pr.webTabsJSON,
+                           !json.isEmpty,
+                           let data = json.data(using: .utf8),
+                           let decoded = try? webTabsDecoder.decode([WebTab].self, from: data) {
+                            tabs = decoded
+                        } else if let url = pr.webURL, !url.isEmpty {
+                            tabs = [WebTab(url: url)]
+                        }
+                        let activeID = pr.webActiveTabID
+                            .flatMap { UUID(uuidString: $0) }
+                            ?? tabs.first?.id
+                        webPanes[paneID] = WebPaneState(
+                            tabs: tabs,
+                            activeTabID: activeID,
+                            isPrivate: pr.webIsPrivate ?? false
+                        )
+                    }
+                }
+
+                // Load repo associations for this workspace
+                let assocRecords = try RepoAssociationRecord
+                    .filter(Column("workspaceID") == record.id)
+                    .fetchAll(db)
+
+                var repoAssociations = IdentifiedArrayOf<RepoAssociation>()
+                for ar in assocRecords {
+                    guard let assocID = UUID(uuidString: ar.id),
+                          let repoID = UUID(uuidString: ar.repoID) else { continue }
+                    let assoc = RepoAssociation(
+                        id: assocID,
+                        repoID: repoID,
+                        worktreePath: ar.worktreePath,
+                        branchName: ar.branchName,
+                        isAutoDetected: ar.isAutoDetected
+                    )
+                    repoAssociations.append(assoc)
+                }
+
+                var layout: PaneLayout = if let data = record.layoutJSON.data(using: .utf8) {
+                    (try? JSONDecoder().decode(PaneLayout.self, from: data)) ?? .empty
+                } else {
+                    .empty
+                }
+
+                // A corrupt/truncated layoutJSON blob decodes to
+                // `.empty` while the pane rows still load fine —
+                // without this, the workspace's panes become
+                // invisible (PTYs keep running off-screen) and the
+                // next debounced save persists the empty tree over
+                // them, destroying the arrangement for good. Rebuild
+                // a default layout from the panes we actually have
+                // whenever the decoded tree doesn't match them
+                // (issue #267).
+                if Set(layout.allPaneIDs) != Set(panes.map(\.id)) {
+                    layout = PredefinedLayout.tiled.buildLayout(for: panes.map(\.id))
+                }
+
+                let color = WorkspaceColor(rawValue: record.color) ?? .blue
+                let focusedID = record.focusedPaneID.flatMap(UUID.init)
+
+                // Generate slug for legacy workspaces that don't have one
+                let slug = record.slug.isEmpty
+                    ? WorkspaceFeature.State.makeSlug(from: record.name, id: wsID)
+                    : record.slug
+
+                let labels: [String] = (record.labelsJSON.data(using: .utf8))
+                    .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
+                    ?? []
+
+                let icon = record.icon.flatMap { GroupIcon(storageString: $0) }
+
+                let workspace = WorkspaceFeature.State(
+                    id: wsID,
+                    name: record.name,
+                    slug: slug,
+                    color: color,
+                    panes: panes,
+                    layout: layout,
+                    focusedPaneID: focusedID,
+                    repoAssociations: repoAssociations,
+                    createdAt: Date(timeIntervalSince1970: record.createdAt),
+                    lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt),
+                    labels: labels,
+                    icon: icon,
+                    webPanes: webPanes,
+                    profileName: record.profileName
+                )
+                workspaces.append(workspace)
+            }
+
+            let activeIDStr = try AppStateRecord
+                .filter(Column("key") == "activeWorkspaceID")
+                .fetchOne(db)?
+                .value
+            let activeID = activeIDStr.flatMap(UUID.init)
+
+            // Load workspace groups
+            let groupRecords = try WorkspaceGroupRecord
+                .order(Column("sortOrder"))
+                .fetchAll(db)
+            var groups = IdentifiedArrayOf<WorkspaceGroup>()
+            for gr in groupRecords {
+                guard let groupID = UUID(uuidString: gr.id) else { continue }
+                let childOrder: [UUID] = (gr.childOrderJSON.data(using: .utf8))
+                    .flatMap { try? JSONDecoder().decode([UUID].self, from: $0) }
+                    ?? []
+                let color = gr.color.flatMap { WorkspaceColor(rawValue: $0) }
+                let icon = gr.icon.flatMap { GroupIcon(storageString: $0) }
+                let group = WorkspaceGroup(
+                    id: groupID,
+                    name: gr.name,
+                    color: color,
+                    isCollapsed: gr.isCollapsed,
+                    childOrder: childOrder,
+                    createdAt: Date(timeIntervalSince1970: gr.createdAt),
+                    icon: icon
+                )
+                groups.append(group)
+            }
+
+            // Load topLevelOrder; empty array signals legacy DB (caller backfills)
+            let topLevelOrderJSON = try AppStateRecord
+                .filter(Column("key") == "topLevelOrder")
+                .fetchOne(db)?
+                .value
+            let topLevelOrder: [SidebarID] = topLevelOrderJSON
+                .flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONDecoder().decode([SidebarID].self, from: $0) }
+                ?? []
+
             return LoadResult(
-                workspaces: [],
-                groups: [],
-                topLevelOrder: [],
-                activeWorkspaceID: nil,
-                repoRegistry: []
+                workspaces: workspaces,
+                groups: groups,
+                topLevelOrder: topLevelOrder,
+                activeWorkspaceID: activeID,
+                repoRegistry: repoRegistry
             )
         }
     }
@@ -425,14 +516,24 @@ struct PersistenceSnapshot {
 // MARK: - TCA Dependency
 
 extension PersistenceService: DependencyKey {
-    static var liveValue: PersistenceService {
+    /// A stored `let`, not a computed property — `DatabaseService()` opens
+    /// a real GRDB `DatabasePool` against `nex.db`, so re-running this on
+    /// every access would spin up a second, independent connection with
+    /// its own actor state (in particular its own debounced-save queue,
+    /// breaking `QuitGate.flushPersistence`'s ability to flush the
+    /// instance the reducer actually writes through). `DatabaseService`'s
+    /// init already quarantines an unreadable/corrupt DB and retries once
+    /// with a fresh file, so reaching `catch` here means even that
+    /// recovery failed (e.g. an unwritable Application Support
+    /// directory) — genuinely unrecoverable.
+    static let liveValue: PersistenceService = {
         do {
             let db = try DatabaseService()
             return PersistenceService(db: db)
         } catch {
             fatalError("Failed to initialize database: \(error)")
         }
-    }
+    }()
 
     static var testValue: PersistenceService {
         do {

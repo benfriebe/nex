@@ -21,6 +21,9 @@ final class NexAppDelegate: NSObject, NSApplicationDelegate {
         // orphan-recovery banner would fire on every launch even when
         // the user shut down cleanly.
         QuitGate.shared.flushGraftSessions()
+        // Drain the debounced workspace/pane/group save so the last
+        // ~500ms of changes before quit reach disk (issue #267).
+        QuitGate.shared.flushPersistence()
 
         // Skip the dialog during XCTest runs and when the user has
         // disabled it via Settings or the suppression checkbox.
