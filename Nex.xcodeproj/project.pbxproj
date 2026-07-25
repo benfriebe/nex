@@ -166,6 +166,7 @@
 		CCBCDD690DA8A082B0C3D1EF /* StatusBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110D5179A9834B4AB19B705B /* StatusBarPopoverView.swift */; };
 		CF6DEC598C1A3508555E8EB3 /* LabelPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D6C6671997547A9F95AD39 /* LabelPresetTests.swift */; };
 		D0B97CB294CE96D259C08960 /* GraftCLIReplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DD93535314E9897122ED638 /* GraftCLIReplyTests.swift */; };
+		D0C0A55ACDF813C32940441D /* DatabaseLoadFailureGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80CA225AF731D22770182E3 /* DatabaseLoadFailureGate.swift */; };
 		D0FC27B3AE1084183B497907 /* WorkspaceCreateWorktreeSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E886A119C62ECBA4CA64464 /* WorkspaceCreateWorktreeSocketTests.swift */; };
 		D46A8198421B464BC6CE04AC /* BuiltInChromeThemes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8AC09DCB2726BE14209A6AD /* BuiltInChromeThemes.swift */; };
 		D5E5F5395113992874C7D4D7 /* RootChromeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6762B22A5CA7CC5867025DA2 /* RootChromeView.swift */; };
@@ -360,6 +361,7 @@
 		A1E2306FC006196957D7AF72 /* WebPaneFindScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPaneFindScript.swift; sourceTree = "<group>"; };
 		A2554566AF4F790EB30637E3 /* AgentLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLifecycleTests.swift; sourceTree = "<group>"; };
 		A47FF7FB9A9C29221EAD089E /* GhosttyConfigClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfigClient.swift; sourceTree = "<group>"; };
+		A80CA225AF731D22770182E3 /* DatabaseLoadFailureGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseLoadFailureGate.swift; sourceTree = "<group>"; };
 		AC03B83D15C0B9F7298F2E6A /* PresetsFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetsFeature.swift; sourceTree = "<group>"; };
 		AC84F1EBC8A83D60127093E9 /* SocketParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketParsingTests.swift; sourceTree = "<group>"; };
 		ADBC4A3F4B30336A12D32DF4 /* AutoDetectRepoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDetectRepoTests.swift; sourceTree = "<group>"; };
@@ -642,6 +644,7 @@
 				3CD3CE17DD33C9C3AD6A596E /* AppReducer+WebPane.swift */,
 				B6CC74E2D5AA179FFCE3B825 /* Assets.xcassets */,
 				1A198A2F5EA992907A3031ED /* ContentView.swift */,
+				A80CA225AF731D22770182E3 /* DatabaseLoadFailureGate.swift */,
 				C1D4A4CD52161113DEA569D8 /* FileOpenGate.swift */,
 				BECB2222837AC350E94222BB /* Info.plist */,
 				F1A8D5B3446F6056F443CDB8 /* Nex.entitlements */,
@@ -1099,6 +1102,7 @@
 				206AB34D6D02F324FD4CADE6 /* ConfigHotkeyFeature.swift in Sources */,
 				2D8754E0B3E9AD185D7EB6B0 /* ConfigParser.swift in Sources */,
 				2061570DEABB0E43847DBB5D /* ContentView.swift in Sources */,
+				D0C0A55ACDF813C32940441D /* DatabaseLoadFailureGate.swift in Sources */,
 				5109ADD55C00BC02B15EDE81 /* DatabaseService.swift in Sources */,
 				77FB1142F26F5C33539E3F23 /* DiffHTMLRenderer.swift in Sources */,
 				7B54AB73465C0926D5259580 /* DiffPaneView.swift in Sources */,

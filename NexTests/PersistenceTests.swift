@@ -3,10 +3,23 @@ import Foundation
 @testable import Nex
 import Testing
 
+extension PersistenceService.LoadOutcome {
+    /// Test-only unwrap — `try #require(...)` fails the test with a
+    /// useful message instead of crashing when a test expects `load()`
+    /// to succeed but it didn't (issue #267).
+    var successResult: PersistenceService.LoadResult? {
+        if case .success(let result) = self {
+            return result
+        }
+        return nil
+    }
+}
+
 struct PersistenceTests {
     @Test func roundTripSaveAndLoad() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         // Create test state
         let paneID = UUID()
@@ -42,7 +55,7 @@ struct PersistenceTests {
         try await Task.sleep(for: .seconds(1))
 
         // Load
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
 
         #expect(result.workspaces.count == 1)
         #expect(result.activeWorkspaceID == wsID)
@@ -60,6 +73,7 @@ struct PersistenceTests {
     @Test func profileNameRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let paneID1 = UUID()
         let paneID2 = UUID()
@@ -96,7 +110,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.count == 2)
         #expect(result.workspaces.first(where: { $0.id == wsWithProfileID })?.profileName == "work")
         #expect(result.workspaces.first(where: { $0.id == wsWithoutProfileID })?.profileName == nil)
@@ -105,6 +119,7 @@ struct PersistenceTests {
     @Test func agentSessionIDRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let paneID = UUID()
         let pane = Pane(
@@ -137,7 +152,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loadedPane = result.workspaces.first!.panes.first!
         #expect(loadedPane.agentSessionID == "75a91227-c977-4c75-8921-ba01e070dd21")
         #expect(loadedPane.status == .running)
@@ -146,6 +161,7 @@ struct PersistenceTests {
     @Test func agentKindRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let codexPaneID = UUID()
         let codexPane = Pane(
@@ -181,7 +197,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loaded = result.workspaces.first!.panes
         #expect(loaded[id: codexPaneID]?.agentKind == .codex)
         #expect(loaded[id: plainPaneID]?.agentKind == nil)
@@ -190,6 +206,7 @@ struct PersistenceTests {
     @Test func scratchpadContentRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let paneID = UUID()
         let pane = Pane(
@@ -222,7 +239,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loadedPane = result.workspaces.first!.panes.first!
         #expect(loadedPane.type == .scratchpad)
         #expect(loadedPane.scratchpadContent == "my notes here")
@@ -233,7 +250,7 @@ struct PersistenceTests {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.isEmpty)
         #expect(result.activeWorkspaceID == nil)
         #expect(result.repoRegistry.isEmpty)
@@ -242,6 +259,7 @@ struct PersistenceTests {
     @Test func multipleWorkspacesPersistOrder() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let ws1 = WorkspaceFeature.State(name: "First", color: .red)
         let ws2 = WorkspaceFeature.State(name: "Second", color: .blue)
@@ -256,7 +274,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.count == 3)
         #expect(result.workspaces[0].name == "First")
         #expect(result.workspaces[1].name == "Second")
@@ -267,6 +285,7 @@ struct PersistenceTests {
     @Test func repoRegistryRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let repoID = UUID()
         let repo = Repo(
@@ -288,7 +307,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.repoRegistry.count == 1)
         #expect(result.repoRegistry.first?.id == repoID)
         #expect(result.repoRegistry.first?.path == "/Users/test/code/my-repo")
@@ -299,6 +318,7 @@ struct PersistenceTests {
     @Test func webPanePublicRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let paneID = UUID()
         let pane = Pane(
@@ -335,7 +355,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loadedWS = result.workspaces.first!
         let loadedWeb = loadedWS.webPanes[paneID]
         #expect(loadedWeb != nil)
@@ -348,6 +368,7 @@ struct PersistenceTests {
     @Test func webPanePrivateBlanksOnReload() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let paneID = UUID()
         let pane = Pane(
@@ -388,7 +409,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loadedWS = result.workspaces.first!
         let loadedPane = loadedWS.panes.first!
         let loadedWeb = loadedWS.webPanes[paneID]
@@ -402,6 +423,7 @@ struct PersistenceTests {
     @Test func repoAssociationRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let repoID = UUID()
         let repo = Repo(
@@ -444,7 +466,7 @@ struct PersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.count == 1)
         let loadedWS = result.workspaces.first!
         #expect(loadedWS.repoAssociations.count == 1)
@@ -452,5 +474,134 @@ struct PersistenceTests {
         #expect(loadedWS.repoAssociations.first?.repoID == repoID)
         #expect(loadedWS.repoAssociations.first?.worktreePath == "/Users/test/code/my-repo/.worktrees/dev")
         #expect(loadedWS.repoAssociations.first?.branchName == "feature/dev")
+    }
+
+    /// Every other test in this file runs against `DatabaseService
+    /// (inMemory:)`, whose writer is a `DatabaseQueue` — production
+    /// always uses a `DatabasePool` (`DatabaseService.init()`), so the
+    /// real WAL writer path was never actually under test (issue #267).
+    /// Repeat the basic round trip against a real file-backed
+    /// `DatabasePool` to close that gap.
+    @Test func roundTripSaveAndLoadAgainstRealDatabasePool() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-writer-fidelity-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let db = try DatabaseService(testPath: tmp.path)
+        let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
+
+        let paneID = UUID()
+        let pane = Pane(id: paneID, type: .shell, workingDirectory: "/tmp")
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(
+            id: wsID,
+            name: "Pool Test",
+            slug: "pool-test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .orange,
+            panes: [pane],
+            layout: .leaf(paneID),
+            focusedPaneID: paneID,
+            createdAt: Date(timeIntervalSince1970: 1000),
+            lastAccessedAt: Date(timeIntervalSince1970: 2000)
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(workspace)
+        let state = AppReducer.State(workspaces: workspaces, activeWorkspaceID: wsID)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = try #require(await persistence.load().successResult)
+        #expect(result.workspaces.count == 1)
+        #expect(result.workspaces.first?.name == "Pool Test")
+        #expect(result.workspaces.first?.panes.first?.id == paneID)
+    }
+
+    /// The critical fix (issue #267): a failed/never-attempted load must
+    /// never be mistaken for first launch and let the destructive
+    /// clear-and-reinsert write run. `save()` should be a no-op until
+    /// `load()` has completed at least once — proven here directly
+    /// against the actor, independent of the `AppReducer` layer's own
+    /// `dbLoadFailed` guard.
+    @Test func saveIsNoOpUntilLoadSucceedsOnce() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+        // Deliberately skip the initial load().
+
+        let ws = WorkspaceFeature.State(name: "Should Not Persist Yet", color: .red)
+        let state = AppReducer.State(workspaces: [ws], activeWorkspaceID: ws.id)
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let countBeforeLoad = try await db.writer.read { db in try WorkspaceRecord.fetchCount(db) }
+        #expect(countBeforeLoad == 0)
+
+        // Loading (trivially successful — the DB really is empty) lifts
+        // the guard; subsequent saves work normally.
+        _ = await persistence.load()
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let countAfterLoad = try await db.writer.read { db in try WorkspaceRecord.fetchCount(db) }
+        #expect(countAfterLoad == 1)
+    }
+
+    /// A corrupt/truncated `layoutJSON` blob used to decode to `.empty`
+    /// while the workspace's panes still loaded fine, orphaning them
+    /// (invisible in the UI, PTYs still running) and then permanently
+    /// destroying the arrangement on the next save. `load()` should
+    /// notice the mismatch and rebuild a default layout from the panes
+    /// that actually exist (issue #267).
+    @Test func corruptLayoutJSONReconcilesFromPanes() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
+
+        let wsID = UUID()
+        let paneID1 = UUID()
+        let paneID2 = UUID()
+
+        try await db.writer.write { db in
+            let ws = WorkspaceRecord(
+                id: wsID.uuidString,
+                name: "Corrupt Layout",
+                slug: "corrupt-layout",
+                color: "blue",
+                layoutJSON: "{not valid json at all",
+                focusedPaneID: nil,
+                createdAt: 1000,
+                lastAccessedAt: 1000,
+                sortOrder: 0,
+                labelsJSON: "[]"
+            )
+            try ws.insert(db)
+
+            for paneID in [paneID1, paneID2] {
+                let pane = PaneRecord(
+                    id: paneID.uuidString,
+                    workspaceID: wsID.uuidString,
+                    label: nil,
+                    type: "shell",
+                    workingDirectory: "/tmp",
+                    filePath: nil,
+                    content: nil,
+                    agentSessionID: nil,
+                    status: "idle",
+                    createdAt: 1000,
+                    lastActivityAt: 1000,
+                    webURL: nil,
+                    webTabsJSON: nil,
+                    webActiveTabID: nil,
+                    webIsPrivate: nil
+                )
+                try pane.insert(db)
+            }
+        }
+
+        let result = try #require(await persistence.load().successResult)
+        let loadedWS = try #require(result.workspaces[id: wsID])
+        #expect(loadedWS.panes.count == 2)
+        #expect(!loadedWS.layout.isEmpty)
+        #expect(Set(loadedWS.layout.allPaneIDs) == Set([paneID1, paneID2]))
     }
 }

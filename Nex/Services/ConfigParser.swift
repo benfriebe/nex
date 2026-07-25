@@ -191,7 +191,13 @@ enum ConfigParser {
     /// empty name and variables with an empty key are skipped (the line
     /// format cannot represent them), so a profile needs at least one
     /// valid variable to survive a round-trip.
-    static func writeProfiles(_ profiles: [Profile], toFile path: String) {
+    ///
+    /// Throws if the directory can't be created or the file can't be
+    /// written (permissions, read-only volume, disk full) — previously
+    /// swallowed with `try?`, so a failed write looked identical to a
+    /// successful one: the in-memory profile still "worked" for the rest
+    /// of the session but silently reverted on next launch (issue #267).
+    static func writeProfiles(_ profiles: [Profile], toFile path: String) throws {
         var lines: [String] = []
         if let existing = try? String(contentsOfFile: path, encoding: .utf8) {
             for line in existing.components(separatedBy: .newlines) {
@@ -226,8 +232,8 @@ enum ConfigParser {
         }
 
         let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     /// Parse keybind entries from a config file's contents.
@@ -289,7 +295,11 @@ enum ConfigParser {
 
     /// Write keybinding overrides to the config file, preserving non-keybind lines.
     /// Only writes entries that differ from defaults.
-    static func writeKeybindings(_ map: KeyBindingMap, toFile path: String) {
+    ///
+    /// Throws if the file can't be removed (the "back to all-defaults"
+    /// path), the directory can't be created, or the file can't be
+    /// written — see `writeProfiles` for why this matters (issue #267).
+    static func writeKeybindings(_ map: KeyBindingMap, toFile path: String) throws {
         let defaults = KeyBindingMap.defaults
 
         // Read existing file to preserve non-keybind lines
@@ -357,7 +367,9 @@ enum ConfigParser {
 
         // If no overrides, delete the file (or write empty)
         if keybindLines.isEmpty, nonKeybindLines.isEmpty {
-            try? FileManager.default.removeItem(atPath: path)
+            if FileManager.default.fileExists(atPath: path) {
+                try FileManager.default.removeItem(atPath: path)
+            }
             return
         }
 
@@ -369,7 +381,7 @@ enum ConfigParser {
         output.append("") // trailing newline
 
         let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? output.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try output.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
     }
 }

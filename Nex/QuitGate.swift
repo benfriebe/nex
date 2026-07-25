@@ -46,6 +46,14 @@ final class QuitGate {
     /// (recovery banner on next launch).
     var flushGraftSessions: () -> Void = {}
 
+    /// Synchronously flush `PersistenceService`'s debounced workspace/
+    /// pane/group save. Wired by `NexApp.onAppear`. The save is
+    /// debounced 500ms behind every `.persistState`; without this, a
+    /// pane rename/split/layout change in the last ~500ms before Cmd+Q
+    /// (or a Sparkle auto-update relaunch) is silently discarded when
+    /// the process exits before the debounce `Task` fires (issue #267).
+    var flushPersistence: () -> Void = {}
+
     private init() {}
 
     /// Whether the dialog should fire at all. `true` by default; the

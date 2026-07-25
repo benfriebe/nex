@@ -35,6 +35,12 @@ struct ProfilesSettingsView: View {
     @State private var selectedID: UUID?
     /// Guards write-through until the initial load has populated state.
     @State private var loaded = false
+    /// Set when the last `ConfigParser.writeProfiles` call threw
+    /// (unwritable config directory, disk full, etc). The in-memory
+    /// edit still applies for this session, but reverts on next launch
+    /// unless the underlying problem is fixed — surfacing this is the
+    /// only way the user learns that (issue #267).
+    @State private var writeError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +58,11 @@ struct ProfilesSettingsView: View {
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
+                    if let writeError {
+                        Label("Couldn't save to disk: \(writeError)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     Text("Config: ~/.config/nex/config")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -329,7 +340,12 @@ struct ProfilesSettingsView: View {
             env["NEX_PROFILE"] = profile.name.trimmingCharacters(in: .whitespaces)
             return ConfigParser.Profile(name: profile.name, env: env)
         }
-        ConfigParser.writeProfiles(toWrite, toFile: KeybindingService.configPath)
+        do {
+            try ConfigParser.writeProfiles(toWrite, toFile: KeybindingService.configPath)
+            writeError = nil
+        } catch {
+            writeError = error.localizedDescription
+        }
     }
 
     private func addProfile() {

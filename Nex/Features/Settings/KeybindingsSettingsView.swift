@@ -60,13 +60,20 @@ struct KeybindingsSettingsView: View {
 
                 Divider()
 
-                HStack {
-                    Text("Config: ~/.config/nex/config")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Reset All to Defaults") {
-                        store.send(.configHotkey(.resetKeybindings))
+                VStack(alignment: .leading, spacing: 4) {
+                    if let reason = store.configHotkey.keybindingsWriteError {
+                        Label("Couldn't save to disk: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    HStack {
+                        Text("Config: ~/.config/nex/config")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset All to Defaults") {
+                            store.send(.configHotkey(.resetKeybindings))
+                        }
                     }
                 }
                 .padding(12)

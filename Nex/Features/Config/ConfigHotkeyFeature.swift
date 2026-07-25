@@ -25,6 +25,13 @@ struct ConfigHotkeyFeature {
         var globalHotkeyHideOnRepress: Bool = true
         var globalHotkeyRegistrationError: String?
 
+        /// Set when the last `ConfigParser.writeKeybindings` call threw
+        /// (unwritable config directory, disk full, etc). The in-memory
+        /// `keybindings` still reflects the edit — only the on-disk
+        /// write failed — so surfacing this is the only way the user
+        /// learns their rebind won't survive a restart (issue #267).
+        var keybindingsWriteError: String?
+
         /// Collision between the current global hotkey and an in-app
         /// keybinding. Computed so it always reflects the latest state --
         /// `keybindings` and `globalHotkey` can land in state in either
@@ -47,6 +54,11 @@ struct ConfigHotkeyFeature {
         case removeKeybinding(KeyTrigger)
         case resetBindingsForAction(NexAction)
         case resetKeybindings
+        /// Result of the fire-and-forget `ConfigParser.writeKeybindings`
+        /// write. `nil` on success (clears any previously surfaced
+        /// error); a message on failure, surfaced via
+        /// `keybindingsWriteError` for Settings to display.
+        case keybindingsWriteFinished(String?)
 
         /// General config
         /// Forwarded from `AppReducer.configLoaded` once the config file
@@ -76,6 +88,19 @@ struct ConfigHotkeyFeature {
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.socketServer) var socketServer
 
+    /// Shared by every keybinding mutation site: writes to disk and
+    /// reports the outcome so a write failure (unwritable config
+    /// directory, disk full) surfaces instead of vanishing behind a
+    /// swallowed `try?` (issue #267).
+    private static func writeKeybindingsToDisk(_ keybindings: KeyBindingMap, send: Send<Action>) async {
+        do {
+            try ConfigParser.writeKeybindings(keybindings, toFile: KeybindingService.configPath)
+            await send(.keybindingsWriteFinished(nil))
+        } catch {
+            await send(.keybindingsWriteFinished(error.localizedDescription))
+        }
+    }
+
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
@@ -87,16 +112,14 @@ struct ConfigHotkeyFeature {
 
             case .setKeybinding(let trigger, let action):
                 state.keybindings.setBinding(trigger: trigger, action: action)
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                return .run { [keybindings = state.keybindings] send in
+                    await Self.writeKeybindingsToDisk(keybindings, send: send)
                 }
 
             case .removeKeybinding(let trigger):
                 state.keybindings.removeBinding(trigger: trigger)
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                return .run { [keybindings = state.keybindings] send in
+                    await Self.writeKeybindingsToDisk(keybindings, send: send)
                 }
 
             case .resetBindingsForAction(let action):
@@ -104,17 +127,19 @@ struct ConfigHotkeyFeature {
                 for trigger in KeyBindingMap.defaults.triggers(for: action) {
                     state.keybindings.setBinding(trigger: trigger, action: action)
                 }
-                return .run { [keybindings = state.keybindings] _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(keybindings, toFile: path)
+                return .run { [keybindings = state.keybindings] send in
+                    await Self.writeKeybindingsToDisk(keybindings, send: send)
                 }
 
             case .resetKeybindings:
                 state.keybindings = .defaults
-                return .run { _ in
-                    let path = KeybindingService.configPath
-                    ConfigParser.writeKeybindings(.defaults, toFile: path)
+                return .run { send in
+                    await Self.writeKeybindingsToDisk(.defaults, send: send)
                 }
+
+            case .keybindingsWriteFinished(let errorMessage):
+                state.keybindingsWriteError = errorMessage
+                return .none
 
             // MARK: - General Config
 

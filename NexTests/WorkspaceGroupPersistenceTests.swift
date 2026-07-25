@@ -7,6 +7,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func groupRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let ws1 = WorkspaceFeature.State(name: "Alpha", color: .blue)
         let ws2 = WorkspaceFeature.State(name: "Beta", color: .green)
@@ -30,7 +31,7 @@ struct WorkspaceGroupPersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.count == 2)
         #expect(result.groups.count == 1)
         let loadedGroup = result.groups[id: groupID]
@@ -44,6 +45,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func workspaceLabelsRoundTrip() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         var ws1 = WorkspaceFeature.State(name: "Tagged", color: .blue)
         ws1.labels = ["backend", "priority", "blocked"]
@@ -59,7 +61,7 @@ struct WorkspaceGroupPersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loaded1 = result.workspaces[id: ws1.id]
         let loaded2 = result.workspaces[id: ws2.id]
         #expect(loaded1?.labels == ["backend", "priority", "blocked"])
@@ -83,6 +85,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func malformedLabelsJSONDegradesToEmptyArray() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
         let wsID = UUID().uuidString
 
         try await db.writer.write { db in
@@ -101,7 +104,7 @@ struct WorkspaceGroupPersistenceTests {
             try ws.insert(db)
         }
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         let loaded = result.workspaces[id: UUID(uuidString: wsID)!]
         #expect(loaded != nil)
         #expect(loaded?.labels == [])
@@ -110,6 +113,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func legacyDatabaseHasEmptyTopLevelOrder() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         // Simulate a legacy DB: write workspaces directly without populating
         // topLevelOrder, then load. Caller (AppReducer) is responsible for
@@ -132,7 +136,7 @@ struct WorkspaceGroupPersistenceTests {
             }
         }
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.workspaces.count == 3)
         #expect(result.topLevelOrder.isEmpty)
         #expect(result.groups.isEmpty)
@@ -141,6 +145,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func iconRoundTripsBothVariants() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let ws1 = WorkspaceFeature.State(name: "Ws1", color: .blue)
         let groupSystemID = UUID()
@@ -180,7 +185,7 @@ struct WorkspaceGroupPersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: state))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.groups[id: groupSystemID]?.icon == .systemName("star.fill"))
         #expect(result.groups[id: groupEmojiID]?.icon == .emoji("🔥"))
         #expect(result.groups[id: groupFolderID]?.icon == nil)
@@ -189,6 +194,7 @@ struct WorkspaceGroupPersistenceTests {
     @Test func savingClearsRemovedGroups() async throws {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
+        _ = await persistence.load() // mark loaded so save() is not a no-op (issue #267)
 
         let ws = WorkspaceFeature.State(name: "Solo", color: .red)
         let groupID = UUID()
@@ -213,7 +219,7 @@ struct WorkspaceGroupPersistenceTests {
         await persistence.save(snapshot: PersistenceSnapshot(state: secondState))
         try await Task.sleep(for: .seconds(1))
 
-        let result = await persistence.load()
+        let result = try #require(await persistence.load().successResult)
         #expect(result.groups.isEmpty)
         #expect(result.topLevelOrder == [.workspace(ws.id)])
     }

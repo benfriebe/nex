@@ -332,7 +332,7 @@ struct ConfigParserTests {
         keybind = super+d=split_right
         """.write(to: tmp, atomically: true, encoding: .utf8)
 
-        ConfigParser.writeProfiles(
+        try ConfigParser.writeProfiles(
             [.init(name: "work", env: ["B": "2", "A": "1"])],
             toFile: tmp.path
         )
@@ -355,12 +355,12 @@ struct ConfigParserTests {
         #expect(reparsed == [ConfigParser.Profile(name: "work", env: ["A": "1", "B": "2"])])
     }
 
-    @Test func writeProfilesSkipsEmptyNamesAndKeys() {
+    @Test func writeProfilesSkipsEmptyNamesAndKeys() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("nex-writeprofiles-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        ConfigParser.writeProfiles(
+        try ConfigParser.writeProfiles(
             [
                 .init(name: "  ", env: ["A": "1"]),
                 .init(name: "ok", env: ["": "x", "GOOD": "y"])
@@ -382,7 +382,7 @@ struct ConfigParserTests {
         profile = personal:B=2
         """.write(to: tmp, atomically: true, encoding: .utf8)
 
-        ConfigParser.writeProfiles([], toFile: tmp.path)
+        try ConfigParser.writeProfiles([], toFile: tmp.path)
 
         let contents = try String(contentsOfFile: tmp.path, encoding: .utf8)
         #expect(contents.contains("theme = nord"))
@@ -390,13 +390,13 @@ struct ConfigParserTests {
         #expect(ConfigParser.parseProfiles(fromFile: tmp.path).isEmpty)
     }
 
-    @Test func writeProfilesCreatesFileWhenMissing() {
+    @Test func writeProfilesCreatesFileWhenMissing() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("nex-writeprofiles-dir-\(UUID().uuidString)")
         let tmp = dir.appendingPathComponent("config")
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        ConfigParser.writeProfiles(
+        try ConfigParser.writeProfiles(
             [.init(name: "work", env: ["A": "1"])],
             toFile: tmp.path
         )

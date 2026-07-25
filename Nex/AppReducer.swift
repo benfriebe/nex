@@ -100,6 +100,15 @@ struct AppReducer {
         /// `PersistenceSnapshot`.
         var pendingFileOpens: [String] = []
 
+        /// Set when the on-disk state failed to load (`.stateLoadFailed`)
+        /// and cleared once a load succeeds. While true, `.persistState`
+        /// is a deliberate no-op — a failed load must never be treated as
+        /// first launch and overwrite the still-present real data with an
+        /// empty/Default workspace (issue #267). `PersistenceService`
+        /// enforces the same rule independently at the actor level, so
+        /// this is defense in depth, not the only guard.
+        var dbLoadFailed = false
+
         // Command Palette
         var isCommandPaletteVisible: Bool = false
         var commandPaletteQuery: String = ""
@@ -422,6 +431,15 @@ struct AppReducer {
             activeWorkspaceID: UUID?,
             repoRegistry: IdentifiedArrayOf<Repo>
         )
+        /// The on-disk state failed to load. Deliberately distinct from
+        /// `.stateLoaded` with empty arrays (genuine first launch) so a
+        /// transient/recoverable error can't be mistaken for a fresh
+        /// install and trigger the destructive first-launch path (issue
+        /// #267). Presents a recovery alert; the user can retry or quit.
+        case stateLoadFailed(String)
+        /// Re-runs the persistence load, used by the retry button on the
+        /// load-failure alert and by `.appLaunched`'s initial load.
+        case retryLoadPersistedState
 
         // Workspace groups
         case toggleGroupCollapse(UUID)
@@ -1078,16 +1096,7 @@ struct AppReducer {
             switch action {
             case .appLaunched:
                 return .merge(
-                    .run { send in
-                        let result = await persistenceService.load()
-                        await send(.stateLoaded(
-                            result.workspaces,
-                            groups: result.groups,
-                            topLevelOrder: result.topLevelOrder,
-                            activeWorkspaceID: result.activeWorkspaceID,
-                            repoRegistry: result.repoRegistry
-                        ))
-                    },
+                    .send(.retryLoadPersistedState),
                     .send(.settings(.loadSettings)),
                     .run { send in
                         let bindings = KeybindingService.loadFromDisk()
@@ -2080,12 +2089,48 @@ struct AppReducer {
                 )
 
             case .persistState:
+                // A failed load must never be followed by a write — see
+                // `dbLoadFailed`'s doc comment. `PersistenceService`
+                // enforces this independently too; this is the
+                // reducer-level half of the same guard.
+                guard !state.dbLoadFailed else { return .none }
                 let snapshot = PersistenceSnapshot(state: state)
                 return .run { _ in
                     await persistenceService.save(snapshot: snapshot)
                 }
 
+            case .retryLoadPersistedState:
+                return .run { send in
+                    switch await persistenceService.load() {
+                    case .success(let result):
+                        await send(.stateLoaded(
+                            result.workspaces,
+                            groups: result.groups,
+                            topLevelOrder: result.topLevelOrder,
+                            activeWorkspaceID: result.activeWorkspaceID,
+                            repoRegistry: result.repoRegistry
+                        ))
+                    case .failed(let error):
+                        await send(.stateLoadFailed(error.localizedDescription))
+                    }
+                }
+
+            case .stateLoadFailed(let message):
+                state.dbLoadFailed = true
+                return .run { send in
+                    let choice = await MainActor.run {
+                        DatabaseLoadFailureGate.present(errorDescription: message)
+                    }
+                    switch choice {
+                    case .retry:
+                        await send(.retryLoadPersistedState)
+                    case .quit:
+                        await MainActor.run { NSApp.terminate(nil) }
+                    }
+                }
+
             case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry):
+                state.dbLoadFailed = false
                 if workspaces.isEmpty {
                     // First launch — create a default workspace and
                     // still hand off to GraftFeature so its updates

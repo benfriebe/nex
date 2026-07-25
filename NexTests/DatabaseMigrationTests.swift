@@ -269,4 +269,79 @@ struct DatabaseMigrationTests {
         }
         #expect(assocCount == 0)
     }
+
+    /// Every other migration test here runs against a *fresh* DB, so
+    /// every migration only ever executes against an empty schema — the
+    /// v15 `claudeSessionID` → `agentSessionID` rename was never
+    /// actually exercised against a populated pre-v15 database (issue
+    /// #267). Seed a real on-disk DB at exactly the v14 schema (the
+    /// last version before the rename), insert a row the way a genuine
+    /// pre-v15 install would have it, then run the remaining migrations
+    /// and confirm the value survived under its new column name.
+    @Test func v15RenameIsDataPreservingOnPopulatedOldSchema() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-v15-migration-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        var config = Configuration()
+        config.foreignKeysEnabled = true
+        let pool = try DatabasePool(path: tmp.path, configuration: config)
+
+        // Stop at v14 — the schema every real pre-v15 install had.
+        try DatabaseService.makeMigrator().migrate(pool, upTo: "v14_web_pane_private")
+
+        let wsID = "ws-legacy"
+        let paneID = "pane-legacy"
+        try pool.write { db in
+            try db.execute(sql: """
+            INSERT INTO workspace
+                (id, name, slug, color, layoutJSON, focusedPaneID, createdAt, lastAccessedAt, sortOrder, labelsJSON)
+            VALUES (?, 'Legacy', 'legacy', 'blue', '{}', NULL, 1000, 1000, 0, '[]')
+            """, arguments: [wsID])
+            try db.execute(sql: """
+            INSERT INTO pane
+                (id, workspaceID, label, type, workingDirectory, createdAt, lastActivityAt, claudeSessionID, status)
+            VALUES (?, ?, NULL, 'shell', '/tmp', 1000, 1000, 'legacy-session-abc', 'running')
+            """, arguments: [paneID, wsID])
+        }
+
+        // Run the rest of the chain (v15 onward) against the populated DB.
+        try DatabaseService.makeMigrator().migrate(pool)
+
+        try pool.read { db in
+            let columns = try Set(db.columns(in: "pane").map(\.name))
+            #expect(columns.contains("agentSessionID"))
+            #expect(!columns.contains("claudeSessionID"))
+        }
+
+        let paneRecord = try pool.read { db in
+            try PaneRecord.filter(Column("id") == paneID).fetchOne(db)
+        }
+        #expect(paneRecord?.agentSessionID == "legacy-session-abc")
+        #expect(paneRecord?.status == "running")
+    }
+
+    /// A DB that can't open (corrupt file) used to `fatalError` on every
+    /// launch with no recovery (issue #267). `DatabaseService.init`
+    /// should instead quarantine the unreadable file and start fresh so
+    /// the app always launches, leaving the original on disk for manual
+    /// recovery rather than silently deleting it.
+    @Test func corruptDatabaseFileIsQuarantinedAndRecreated() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nex-corrupt-db-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let dbPath = dir.appendingPathComponent("nex.db")
+
+        // Not a valid SQLite file.
+        try Data("not a sqlite database".utf8).write(to: dbPath)
+
+        let db = try DatabaseService(testPath: dbPath.path)
+        let count = try db.writer.read { db in try WorkspaceRecord.fetchCount(db) }
+        #expect(count == 0)
+
+        // The corrupt original was moved aside, not silently discarded.
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        #expect(siblings.contains { $0.hasPrefix("nex.db.corrupt-") })
+    }
 }

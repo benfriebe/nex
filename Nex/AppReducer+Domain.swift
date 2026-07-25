@@ -165,6 +165,8 @@ extension AppReducer {
              .cancelBulkDelete,
              .persistState,
              .stateLoaded,
+             .stateLoadFailed,
+             .retryLoadPersistedState,
              .toggleGroupCollapse,
              .createGroup,
              .renameGroup,
