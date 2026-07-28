@@ -225,6 +225,7 @@ struct AppReducer {
                     case .scratchpad: "note.text"
                     case .diff: "plusminus"
                     case .web: "globe"
+                    case .pipeline: "point.3.connected.trianglepath.dotted"
                     }
                     items.append(CommandPaletteItem(
                         id: "pane:\(paneID)",
@@ -2180,8 +2181,20 @@ struct AppReducer {
                 }
 
                 let parentRepoRoots = Array(Set(state.repoRegistry.map(\.path)))
+                // Pipeline panes persist only their definition name — the
+                // document itself is re-loaded from YAML on restart
+                // rather than surviving in the DB.
+                let pipelineReloadEffects: [Effect<Action>] = workspaces.flatMap { ws in
+                    ws.pipelinePanes.compactMap { paneID, pipelineState -> Effect<Action>? in
+                        guard let name = pipelineState.pipelineName else { return nil }
+                        return .send(.workspaces(.element(
+                            id: ws.id,
+                            action: .pipelineOpenDefinition(paneID: paneID, name: name)
+                        )))
+                    }
+                }
                 return .merge(
-                    [
+                    pipelineReloadEffects + [
                         .run { send in
                             // Resolve each workspace profile once, not per
                             // pane — resolveEnv re-reads the config file.

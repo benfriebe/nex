@@ -232,7 +232,56 @@ struct ContentView: View {
                                     action: .webPaneNavigate(paneID: paneID, url: url)
                                 )))
                             },
-                            profileName: workspace.profileName
+                            profileName: workspace.profileName,
+                            pipelinePanes: workspace.pipelinePanes,
+                            onPipelineOpenDefinition: { paneID, name in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineOpenDefinition(paneID: paneID, name: name)
+                                )))
+                            },
+                            onPipelineCreateDefinition: { paneID in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineCreateDefinition(paneID: paneID)
+                                )))
+                            },
+                            onPipelineDeleteDefinition: { paneID, name in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineDeleteDefinition(paneID: paneID, name: name)
+                                )))
+                            },
+                            onPipelineCloseDocument: { paneID in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineCloseDocument(paneID: paneID)
+                                )))
+                            },
+                            onPipelineEdit: { paneID, edit in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineEdit(paneID: paneID, edit: edit)
+                                )))
+                            },
+                            onPipelineUndo: { paneID in
+                                store.send(.workspaces(.element(id: activeID, action: .pipelineUndo(paneID: paneID))))
+                            },
+                            onPipelineRedo: { paneID in
+                                store.send(.workspaces(.element(id: activeID, action: .pipelineRedo(paneID: paneID))))
+                            },
+                            onPipelineSelect: { paneID, selection in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineSelect(paneID: paneID, selection: selection)
+                                )))
+                            },
+                            onPipelineViewportChange: { paneID, zoom, pan in
+                                store.send(.workspaces(.element(
+                                    id: activeID,
+                                    action: .pipelineSetViewport(paneID: paneID, zoom: zoom, pan: pan)
+                                )))
+                            }
                         )
                     } else {
                         VStack(spacing: 8) {

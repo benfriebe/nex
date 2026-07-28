@@ -265,6 +265,20 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Which pipeline definition a `.pipeline` pane has open. Only
+        // the name is persisted — the document itself reloads from
+        // `~/.config/nex/pipelines/<name>.yaml` (config-file-as-
+        // source-of-truth, same idiom as workspace profiles); canvas
+        // undo/redo and zoom/pan are deliberately not persisted.
+        migrator.registerMigration("v19_pipeline_pane") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("pipelineName") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "pipelineName", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -326,6 +340,10 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     /// URL or tabs, so reopen restores a blank pane that still
     /// remembers it is private.
     var webIsPrivate: Bool?
+    /// Which pipeline definition a `.pipeline` pane has open (nil = the
+    /// library view). The document itself is not persisted here — it
+    /// reloads from YAML.
+    var pipelineName: String?
 }
 
 struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {

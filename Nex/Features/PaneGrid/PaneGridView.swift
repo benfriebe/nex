@@ -79,6 +79,17 @@ struct PaneGridView: View {
     /// Workspace-profile name, threaded to `SurfaceContainerView` so its
     /// lazy-create fallback injects the same env as the reducer effect.
     var profileName: String?
+    /// Sidecar state for `.pipeline` panes in this workspace. Keyed by pane id.
+    var pipelinePanes: [UUID: PipelinePaneState] = [:]
+    var onPipelineOpenDefinition: ((UUID, String) -> Void)?
+    var onPipelineCreateDefinition: ((UUID) -> Void)?
+    var onPipelineDeleteDefinition: ((UUID, String) -> Void)?
+    var onPipelineCloseDocument: ((UUID) -> Void)?
+    var onPipelineEdit: ((UUID, PipelineEdit) -> Void)?
+    var onPipelineUndo: ((UUID) -> Void)?
+    var onPipelineRedo: ((UUID) -> Void)?
+    var onPipelineSelect: ((UUID, PipelineCanvasSelection) -> Void)?
+    var onPipelineViewportChange: ((UUID, CGFloat, CGPoint) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.chromeTheme) private var chromeTheme
@@ -337,6 +348,19 @@ struct PaneGridView: View {
                         onOpenFavourite?(pane.id, url)
                     }
                 )
+            case .pipeline:
+                PipelinePaneView(
+                    pipelineState: pipelinePanes[pane.id],
+                    onOpenDefinition: { name in onPipelineOpenDefinition?(pane.id, name) },
+                    onCreateDefinition: { onPipelineCreateDefinition?(pane.id) },
+                    onDeleteDefinition: { name in onPipelineDeleteDefinition?(pane.id, name) },
+                    onCloseDocument: { onPipelineCloseDocument?(pane.id) },
+                    onEdit: { edit in onPipelineEdit?(pane.id, edit) },
+                    onUndo: { onPipelineUndo?(pane.id) },
+                    onRedo: { onPipelineRedo?(pane.id) },
+                    onSelect: { selection in onPipelineSelect?(pane.id, selection) },
+                    onViewportChange: { zoom, pan in onPipelineViewportChange?(pane.id, zoom, pan) }
+                )
             }
         }
         // Clamp the VStack to the computed pane rect and clip overflow.
@@ -371,7 +395,8 @@ struct PaneGridView: View {
         .background {
             // Non-terminal pane bodies share the terminal panes' Ghostty
             // background so content panes blend with the terminal theme.
-            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web {
+            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web
+                || pane.type == .pipeline {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }

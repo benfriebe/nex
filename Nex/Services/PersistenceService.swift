@@ -122,6 +122,7 @@ actor PersistenceService {
 
                     var panes = IdentifiedArrayOf<Pane>()
                     var webPanes: [UUID: WebPaneState] = [:]
+                    var pipelinePanes: [UUID: PipelinePaneState] = [:]
                     for pr in paneRecords {
                         guard let paneID = UUID(uuidString: pr.id) else { continue }
                         let paneType = PaneType(rawValue: pr.type) ?? .shell
@@ -163,6 +164,13 @@ actor PersistenceService {
                                 activeTabID: activeID,
                                 isPrivate: pr.webIsPrivate ?? false
                             )
+                        }
+                        if paneType == .pipeline {
+                            // The document itself is not persisted —
+                            // just the name. `AppReducer`'s `.stateLoaded`
+                            // handler re-loads it from YAML so the pane
+                            // doesn't come back empty after a restart.
+                            pipelinePanes[paneID] = PipelinePaneState(pipelineName: pr.pipelineName)
                         }
                     }
 
@@ -219,6 +227,7 @@ actor PersistenceService {
                         labels: labels,
                         icon: icon,
                         webPanes: webPanes,
+                        pipelinePanes: pipelinePanes,
                         profileName: record.profileName
                     )
                     workspaces.append(workspace)
@@ -358,6 +367,9 @@ struct PersistenceSnapshot {
                         webActiveTabID = webState.activeTabID?.uuidString
                     }
                 }
+                let pipelineName: String? = pane.type == .pipeline
+                    ? workspace.pipelinePanes[pane.id]?.pipelineName
+                    : nil
                 return PaneRecord(
                     id: pane.id.uuidString,
                     workspaceID: workspace.id.uuidString,
@@ -374,7 +386,8 @@ struct PersistenceSnapshot {
                     webURL: webURL,
                     webTabsJSON: webTabsJSON,
                     webActiveTabID: webActiveTabID,
-                    webIsPrivate: webIsPrivate
+                    webIsPrivate: webIsPrivate,
+                    pipelineName: pipelineName
                 )
             }
         }

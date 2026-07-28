@@ -70,6 +70,11 @@ struct PaneHeaderView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .frame(width: 10, height: 10)
+            } else if pane.type == .pipeline {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
             } else {
                 Circle()
                     .fill(statusDotColor)
