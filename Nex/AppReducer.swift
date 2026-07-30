@@ -83,6 +83,22 @@ struct AppReducer {
         /// live CLI connections to resume anyway.
         var webConsoleSubscribers: [UUID: [UInt64: SocketServer.ReplyHandle]] = [:]
 
+        /// `nex pipeline watch <run-id>` subscribers, keyed by run then by
+        /// `SocketServer.ReplyHandle.id` — the exact `webConsoleSubscribers`
+        /// shape. Torn down on client disconnect
+        /// (`socketSubscriberDisconnected`) AND when the run reaches a
+        /// terminal state (issue section 4). Not persisted.
+        var pipelineWatchSubscribers: [UUID: [UInt64: SocketServer.ReplyHandle]] = [:]
+
+        /// A file-pointer message queued for a `PipelineNodeRun` once its
+        /// SessionStart readiness gate confirms claude is up — interactive
+        /// fresh spawns and bounce-back resumes both land here; headless
+        /// fresh spawns (prompt piped via stdin at launch) never populate
+        /// this. Consumed and removed by the `sessionStarted` forwarding
+        /// hook in `AppReducer+PipelineEngine.swift`. Not persisted — a
+        /// restart's recovery path re-derives readiness from scratch.
+        var pipelinePendingPointerMessages: [UUID: String] = [:]
+
         /// Web favourites + workspace label presets. See `PresetsFeature`.
         var presets = PresetsFeature.State()
 
@@ -501,6 +517,23 @@ struct AppReducer {
         /// cold launch, once a workspace is live (issue #197).
         case flushPendingFileOpens
         case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
+        /// GUI entry points for the pipeline monitor UI (issue #282 phase
+        /// 7) — the header play button, `PipelineRunHUD`'s
+        /// cancel/approve/deny/resume/back-to-edit, and double-click
+        /// jump-to-node. All resolve the pane's workspace + (for the HUD
+        /// actions) its `PipelinePaneState.mode`'s monitor `runID`
+        /// themselves, so the view layer only ever needs a `paneID`.
+        case pipelineRunFromPane(paneID: UUID, inputs: [String: String])
+        case pipelineCancelRunFromPane(paneID: UUID)
+        case pipelineApproveRunFromPane(paneID: UUID)
+        case pipelineDenyRunFromPane(paneID: UUID)
+        case pipelineResumeRunFromPane(paneID: UUID)
+        case pipelineBackToEditFromPane(paneID: UUID)
+        case pipelineJumpToNode(paneID: UUID, nodeID: String)
+        /// StatusBar popover "Pipelines" row click — focuses the run's
+        /// current node's pane, or just its workspace if nothing has
+        /// spawned yet.
+        case pipelineFocusRun(runID: UUID)
         /// Open a web pane in the active workspace. `fromPaneID` is the
         /// pane to split off (header button / context menu, issue #206);
         /// nil splits the focused pane. `direction` picks right vs down.
@@ -1344,6 +1377,12 @@ struct AppReducer {
                 // no-op for associations without one.
                 let graftStopEffects = assocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 let mgr = surfaceManager
+                // A deleted workspace's active pipeline runs are cancelled
+                // — their history (run dir, artifacts, DB rows) survives
+                // the workspace regardless (issue section 3: "workspace
+                // deleted → cancelled"). `PipelineRun.workspaceID` carries
+                // no FK for exactly this reason.
+                let pipelineCancelEffect = cancelPipelineRuns(&state, workspaceID: id, reason: "workspace deleted")
                 return .merge(
                     [
                         .run { _ in
@@ -1355,7 +1394,8 @@ struct AppReducer {
                             // doesn't leak the entry indefinitely.
                             mgr.setSyncGroup(workspaceID: id, paneIDs: [])
                         },
-                        .send(.persistState)
+                        .send(.persistState),
+                        pipelineCancelEffect
                     ] + stopEffects + graftStopEffects
                 )
 
@@ -2340,9 +2380,11 @@ struct AppReducer {
                 if let subscribers = state.webConsoleSubscribers.removeValue(forKey: paneID) {
                     for (_, handle) in subscribers { handle.close() }
                 }
+                let pipelineCloseEffect = pipelineHandlePaneClosed(&state, paneID: paneID)
                 return .merge(
                     .send(.persistState),
-                    scheduleAutoUnlink(workspaceID: wsID, in: state)
+                    scheduleAutoUnlink(workspaceID: wsID, in: state),
+                    pipelineCloseEffect
                 )
 
             case .workspaces(.element(id: let wsID, action: .webConsoleLineAppended(let paneID))):
@@ -2393,9 +2435,41 @@ struct AppReducer {
                 // Handled by the GraftFeature Scope below.
                 return .none
 
+            // This specific case MUST sit above the catch-all `case
+            // .pipelines:` below — the async re-entry points for the
+            // execution engine (issue #282 phases 6-7). See
+            // `AppReducer+PipelineEngine.swift`.
+            case .pipelines(.delegate(let delegateAction)):
+                return handlePipelineDelegate(&state, delegateAction)
+
             case .pipelines:
                 // Handled by the PipelinesFeature Scope below.
                 return .none
+
+            case .pipelineRunFromPane(let paneID, let inputs):
+                return handlePipelineRunFromPane(&state, paneID: paneID, inputs: inputs)
+
+            case .pipelineCancelRunFromPane(let paneID):
+                return handlePipelineCancelRunFromPane(&state, paneID: paneID)
+
+            case .pipelineApproveRunFromPane(let paneID):
+                return handlePipelineApproveRunFromPane(&state, paneID: paneID)
+
+            case .pipelineDenyRunFromPane(let paneID):
+                return handlePipelineDenyRunFromPane(&state, paneID: paneID)
+
+            case .pipelineResumeRunFromPane(let paneID):
+                return handlePipelineResumeRunFromPane(&state, paneID: paneID)
+
+            case .pipelineBackToEditFromPane(let paneID):
+                handlePipelineBackToEditFromPane(&state, paneID: paneID)
+                return .none
+
+            case .pipelineJumpToNode(let paneID, let nodeID):
+                return handlePipelineJumpToNode(&state, paneID: paneID, nodeID: nodeID)
+
+            case .pipelineFocusRun(let runID):
+                return handlePipelineFocusRun(&state, runID: runID)
 
             // MARK: - Presets child reducer (web favourites + label presets)
 
@@ -2565,6 +2639,19 @@ struct AppReducer {
                     }
                 }
 
+                let pipelineItems: [StatusBarPipelineItem] = state.pipelines.runs
+                    .filter { !$0.status.isTerminal }
+                    .sorted { $0.createdAt < $1.createdAt }
+                    .map { run in
+                        StatusBarPipelineItem(
+                            runID: run.id,
+                            name: run.definitionSnapshot.name,
+                            status: run.status,
+                            currentNodeID: run.currentNodeRunID.flatMap { run.nodeRuns[id: $0]?.nodeID },
+                            createdAt: run.createdAt
+                        )
+                    }
+
                 let controller = statusBarController
                 let finalWaiting = totalWaiting
                 let finalRunning = totalRunning
@@ -2587,6 +2674,7 @@ struct AppReducer {
                             waitingCount: finalWaiting,
                             runningCount: finalRunning,
                             items: finalItems,
+                            pipelineItems: pipelineItems,
                             waitingColor: theme.statusWaiting,
                             runningColor: theme.statusRunning
                         )

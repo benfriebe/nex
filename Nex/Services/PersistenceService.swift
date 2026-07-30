@@ -339,7 +339,13 @@ actor PersistenceService {
                     var statusDetail = rr.statusDetail
                     if wasInterrupted, !status.isTerminal {
                         status = .paused
-                        statusDetail = "interrupted by app restart — run `nex pipeline resume` to re-engage"
+                        // Must carry the `PipelineRunPauseReason` prefix
+                        // convention — `nex pipeline resume` parses it to
+                        // pick the right re-engagement message (issue
+                        // #282 phase 7).
+                        statusDetail = PipelineRunPauseReason.detail(
+                            .appRestart, "interrupted by app restart — run `nex pipeline resume` to re-engage"
+                        )
                     }
 
                     pipelineRuns.append(PipelineRun(

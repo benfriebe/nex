@@ -281,6 +281,28 @@ struct ContentView: View {
                                     id: activeID,
                                     action: .pipelineSetViewport(paneID: paneID, zoom: zoom, pan: pan)
                                 )))
+                            },
+                            pipelineRuns: store.pipelines.runs,
+                            onPipelineRun: { paneID, inputs in
+                                store.send(.pipelineRunFromPane(paneID: paneID, inputs: inputs))
+                            },
+                            onPipelineCancelRun: { paneID in
+                                store.send(.pipelineCancelRunFromPane(paneID: paneID))
+                            },
+                            onPipelineApproveRun: { paneID in
+                                store.send(.pipelineApproveRunFromPane(paneID: paneID))
+                            },
+                            onPipelineDenyRun: { paneID in
+                                store.send(.pipelineDenyRunFromPane(paneID: paneID))
+                            },
+                            onPipelineResumeRun: { paneID in
+                                store.send(.pipelineResumeRunFromPane(paneID: paneID))
+                            },
+                            onPipelineBackToEdit: { paneID in
+                                store.send(.pipelineBackToEditFromPane(paneID: paneID))
+                            },
+                            onPipelineJumpToNode: { paneID, nodeID in
+                                store.send(.pipelineJumpToNode(paneID: paneID, nodeID: nodeID))
                             }
                         )
                     } else {

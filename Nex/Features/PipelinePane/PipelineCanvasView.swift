@@ -14,6 +14,13 @@ struct PipelineCanvasView: View {
     let onSelect: (PipelineCanvasSelection) -> Void
     let onMoveNode: (String, CGPoint) -> Void
     let onAddNode: (CGPoint) -> Void
+    /// Monitor mode (issue #282 phase 7): structural edits (add node,
+    /// select edges for editing) are guarded off — position drags stay
+    /// live. Double-click on a node jumps to its pane instead of
+    /// selecting it for the inspector.
+    var isMonitorMode: Bool = false
+    var nodeStatuses: [String: PipelineNodeRunDisplay] = [:]
+    var onJumpToNode: (String) -> Void = { _ in }
 
     @Environment(\.chromeTheme) private var chromeTheme
     @State private var dragOrigin: [String: CGPoint] = [:]
@@ -43,6 +50,7 @@ struct PipelineCanvasView: View {
             // zoom/pan correction needed for a location from this space.
             let doubleTap = SpatialTapGesture(count: 2, coordinateSpace: .local)
                 .onEnded { value in
+                    guard !isMonitorMode else { return }
                     onAddNode(PipelineCanvasGeometry.snapped(value.location))
                 }
             let singleTap = SpatialTapGesture(count: 1, coordinateSpace: .local)
@@ -74,12 +82,16 @@ struct PipelineCanvasView: View {
                     PipelineNodeView(
                         node: node,
                         isEntry: node.id == document.entry,
-                        isSelected: selection == .node(node.id)
+                        isSelected: selection == .node(node.id),
+                        isMonitorMode: isMonitorMode,
+                        run: nodeStatuses[node.id]
                     )
+                    .equatable()
                     .position(
                         x: position.x + PipelineCanvasGeometry.nodeSize.width / 2,
                         y: position.y + PipelineCanvasGeometry.nodeSize.height / 2
                     )
+                    .onTapGesture(count: 2) { onJumpToNode(node.id) }
                     .onTapGesture { onSelect(.node(node.id)) }
                     .gesture(
                         DragGesture(minimumDistance: 2)

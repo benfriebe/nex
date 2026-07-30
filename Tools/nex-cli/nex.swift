@@ -4577,6 +4577,18 @@ func handlePipeline(_ args: inout ArraySlice<String>) {
         handlePipelineList(&args)
     case "validate":
         handlePipelineValidate(&args)
+    case "cancel":
+        handlePipelineControlVerb(&args, wire: "pipeline-cancel", label: "cancel")
+    case "retry":
+        handlePipelineControlVerb(&args, wire: "pipeline-retry", label: "retry")
+    case "approve":
+        handlePipelineControlVerb(&args, wire: "pipeline-approve", label: "approve")
+    case "deny":
+        handlePipelineControlVerb(&args, wire: "pipeline-deny", label: "deny")
+    case "resume":
+        handlePipelineControlVerb(&args, wire: "pipeline-resume", label: "resume")
+    case "watch":
+        handlePipelineWatch(&args)
     case "-h", "--help", "help":
         fputs(pipelineUsage, stderr)
     default:
@@ -4594,11 +4606,14 @@ Usage:
   nex pipeline status [<run-id>] [--json]
   nex pipeline list [--json]
   nex pipeline validate <name> [--json]
+  nex pipeline cancel|retry|approve|deny|resume <run-id> [--json]
+  nex pipeline watch <run-id> [--json]
 
 With no --run/--node/--force, done/fail/partial resolve to the calling
-pane's active pipeline node (requires NEX_PANE_ID). `run` only supports
-pipelines with `location: current` — dedicated workspace/worktree runs
-land in a follow-up.
+pane's active pipeline node (requires NEX_PANE_ID). `run` supports
+`location: current` (spawns in the caller's/active workspace),
+`workspace` (a dedicated workspace), and `worktree` (a fresh git
+worktree + workspace, mirroring `workspace create --worktree`).
 \n
 """
 
@@ -4785,6 +4800,81 @@ private func handlePipelineValidate(_ args: inout ArraySlice<String>) {
         }
     }
     exit(valid ? 0 : 1)
+}
+
+/// Shared implementation for the five single-run manual-control verbs
+/// (`cancel`/`retry`/`approve`/`deny`/`resume`) — same shape (one
+/// positional run-id, `--json`), same wire reply shape
+/// (`{ok, run_id, status}`).
+private func handlePipelineControlVerb(_ args: inout ArraySlice<String>, wire: String, label: String) {
+    let asJSON = popSwitch("--json", from: &args)
+    guard let runID = args.popFirst() else {
+        fputs("Usage: nex pipeline \(label) <run-id> [--json]\n", stderr)
+        exit(1)
+    }
+    rejectLeftoverArgs(args, command: "nex pipeline \(label)")
+
+    let json = decodeReply(["command": wire, "run_id": runID], command: "nex pipeline \(label)")
+    if asJSON {
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    let runIDOut = (json["run_id"] as? String) ?? runID
+    let status = (json["status"] as? String) ?? "?"
+    print("\(label): run \(runIDOut) is now \(status)")
+}
+
+/// `nex pipeline watch <run-id>` — streaming via `sendJSONAndStream`, the
+/// same shape as `nex web console --follow`: first line is the run's
+/// current snapshot, every line after is a fresh snapshot pushed on each
+/// transition, until the run reaches a terminal state (server closes) or
+/// Ctrl-C.
+private func handlePipelineWatch(_ args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    guard let runID = args.popFirst() else {
+        fputs("Usage: nex pipeline watch <run-id> [--json]\n", stderr)
+        exit(1)
+    }
+    rejectLeftoverArgs(args, command: "nex pipeline watch")
+
+    installStreamSIGINTHandler()
+    var sawFirstLine = false
+    let connected = sendJSONAndStream(["command": "pipeline-watch", "run_id": runID]) { lineData in
+        guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { return }
+        sawFirstLine = true
+        if let ok = json["ok"] as? Bool, ok == false {
+            let msg = (json["error"] as? String) ?? "unknown error"
+            fputs("nex pipeline watch: \(msg)\n", stderr)
+            exit(1)
+        }
+        if asJSON {
+            printJSONLine(json)
+            return
+        }
+        guard let run = json["run"] as? [String: Any] else { return }
+        let status = (run["status"] as? String) ?? "?"
+        let detail = (run["status_detail"] as? String) ?? ""
+        print("[\(ISO8601DateFormatter().string(from: Date()))] \(status)\(detail.isEmpty ? "" : " — \(detail)")")
+        for nr in (run["node_runs"] as? [[String: Any]]) ?? [] {
+            let nodeID = (nr["node_id"] as? String) ?? "?"
+            let nrStatus = (nr["status"] as? String) ?? "?"
+            let attempt = (nr["attempt"] as? Int) ?? 1
+            print("  \(nodeID) (attempt \(attempt)): \(nrStatus)")
+        }
+    }
+    if !connected {
+        printTransportFailure(command: "nex pipeline watch")
+        exit(1)
+    }
+    if !sawFirstLine {
+        fputs("nex pipeline watch: connection closed with no data\n", stderr)
+        exit(1)
+    }
 }
 
 // MARK: - Doctor

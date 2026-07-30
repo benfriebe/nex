@@ -55,6 +55,7 @@ struct PipelinesFeatureTests {
             PipelinesFeature()
         } withDependencies: {
             $0.pipelineEngine.evaluateTransition = evaluateTransition
+            $0.uuid = .incrementing
         }
         // `applyHandoff` stamps wall-clock `Date()` timestamps (matching
         // this codebase's existing convention of not injecting a `.date`
@@ -106,11 +107,19 @@ struct PipelinesFeatureTests {
         )) {
             $0.runs[id: Self.runID]?.nodeRuns[id: Self.nodeRunID]?.status = .done
             $0.runs[id: Self.runID]?.nodeRuns[id: Self.nodeRunID]?.summary = "done"
-            $0.runs[id: Self.runID]?.status = .paused
-            $0.runs[id: Self.runID]?.statusDetail =
-                "would route to node \"implementer\" — execution engine lands in a follow-up PR (phases 6-7)"
+            $0.runs[id: Self.runID]?.status = .launching
+            $0.runs[id: Self.runID]?.statusDetail = nil
             $0.runs[id: Self.runID]?.edgeTraversals["planner|done"] = 1
         }
+        // A non-approval route immediately appends the next node's
+        // `PipelineNodeRun` (`.spawning`, attempt 1) and points
+        // `currentNodeRunID` at it — checked outside the exhaustivity-off
+        // closure since it carries a fresh wall-clock `Date()`.
+        let updated = store.state.runs[id: Self.runID]
+        #expect(updated?.nodeRuns.last?.nodeID == "implementer")
+        #expect(updated?.nodeRuns.last?.status == .spawning)
+        #expect(updated?.nodeRuns.last?.attempt == 1)
+        #expect(updated?.currentNodeRunID == updated?.nodeRuns.last?.id)
     }
 
     @Test func approvalGateEdgeSetsAwaitingApproval() async {
@@ -123,7 +132,8 @@ struct PipelinesFeatureTests {
         )) {
             $0.runs[id: Self.runID]?.nodeRuns[id: Self.nodeRunID]?.status = .done
             $0.runs[id: Self.runID]?.status = .awaitingApproval
-            $0.runs[id: Self.runID]?.statusDetail = "edge planner|done → \"implementer\" awaiting approval"
+            $0.runs[id: Self.runID]?.statusDetail =
+                "[approval to=implementer edge=planner|done] edge planner|done → \"implementer\" awaiting approval"
             $0.runs[id: Self.runID]?.edgeTraversals["planner|done"] = 1
         }
     }

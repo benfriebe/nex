@@ -1,36 +1,36 @@
 import ComposableArchitecture
 import Foundation
 
-/// Socket handlers for the `pipeline-*` wire commands (issue #282 phase
-/// 5). Mirrors the `handleGraft*` family in `AppReducer+Socket.swift`:
+/// Socket handlers for the `pipeline-*` wire commands (issue #282 phases
+/// 5-7). Mirrors the `handleGraft*` family in `AppReducer+Socket.swift`:
 /// synchronous `inout State` mutation so the reply reflects the
 /// post-mutation state, `reply?.sendAndClose(...)` for the response, and
 /// tolerance for `reply == nil` (the legacy fire-and-forget path — not
 /// actually reachable for these commands since they're all in
 /// `replyCommandAllowlist`, but every other handler in this codebase
-/// guards the same way).
-///
-/// **Phase-6 boundary**: node spawning doesn't exist yet. `pipeline run`
-/// still does the full validate-before-reply + run creation +
-/// persistence — it just can't hand the run to anything, so it lands
-/// `.paused` with a detail explaining why, never a silent no-op.
+/// guards the same way). The actual execution engine (spawn/handoff
+/// routing/liveness) lives in `AppReducer+PipelineEngine.swift`; this
+/// file stays the validation + wire-shape boundary.
 extension AppReducer {
     // MARK: - pipeline run
 
-    func handlePipelineRun(
+    /// Outcome of `createPipelineRun` — the shared validate → create →
+    /// launch core used by both the socket handler (below) and the GUI
+    /// play-button entry point (`AppReducer+PipelineEngine.swift`'s
+    /// `handlePipelineRunFromPane`).
+    enum CreatePipelineRunResult {
+        case failure(message: String, issues: [PipelineValidationIssue])
+        case created(runID: UUID, effect: Effect<Action>)
+    }
+
+    func createPipelineRun(
         _ state: inout State,
         paneID: UUID?,
         name: String,
-        inputs: [String: String],
-        reply: SocketServer.ReplyHandle?
-    ) -> Effect<Action> {
-        func fail(_ message: String, issues: [PipelineValidationIssue] = []) -> Effect<Action> {
-            var payload: [String: Any] = ["ok": false, "error": message]
-            if !issues.isEmpty {
-                payload["issues"] = issues.map(Self.issueJSON)
-            }
-            reply?.sendAndClose(payload)
-            return .none
+        inputs: [String: String]
+    ) -> CreatePipelineRunResult {
+        func fail(_ message: String, issues: [PipelineValidationIssue] = []) -> CreatePipelineRunResult {
+            .failure(message: message, issues: issues)
         }
 
         let definition: PipelineDefinition
@@ -45,13 +45,6 @@ extension AppReducer {
             return fail("pipeline \"\(name)\" failed validation", issues: issues)
         }
 
-        guard definition.location == .current else {
-            return fail(
-                "pipeline \"\(name)\" has location \"\(definition.location.rawValue)\" — only " +
-                    "'current' is supported until the workspace/worktree run engine lands (phases 6-7)"
-            )
-        }
-
         let missingInputs = definition.inputs
             .filter(\.value.required)
             .keys
@@ -61,13 +54,20 @@ extension AppReducer {
             return fail("pipeline \"\(name)\" is missing required input(s): \(missingInputs.joined(separator: ", "))")
         }
 
-        let resolvedWorkspaceID: UUID
-        if let paneID, let workspace = state.workspaceContainingPane(paneID) {
-            resolvedWorkspaceID = workspace.id
-        } else if let activeID = state.activeWorkspaceID, state.workspaces[id: activeID] != nil {
-            resolvedWorkspaceID = activeID
-        } else {
-            return fail("pipeline run requires NEX_PANE_ID (run from inside a pane) or an active workspace")
+        // `location: current` resolves a workspace synchronously so the
+        // caller can validate it up front; `workspace`/`worktree` mint
+        // their own workspace asynchronously post-reply (only genuinely
+        // async failures — worktree add, spawn — surface post-reply via
+        // `pipeline status`/`watch`, per issue section 4).
+        var resolvedWorkspaceID: UUID?
+        if definition.location == .current {
+            if let paneID, let workspace = state.workspaceContainingPane(paneID) {
+                resolvedWorkspaceID = workspace.id
+            } else if let activeID = state.activeWorkspaceID, state.workspaces[id: activeID] != nil {
+                resolvedWorkspaceID = activeID
+            } else {
+                return fail("pipeline run requires NEX_PANE_ID (run from inside a pane) or an active workspace")
+            }
         }
 
         let runID = uuid()
@@ -76,9 +76,7 @@ extension AppReducer {
             id: runID,
             definitionID: definition.id,
             definitionSnapshot: definition,
-            status: .paused,
-            statusDetail:
-            "created; execution engine lands in a follow-up PR (phases 6-7) — no pipeline nodes have been spawned",
+            status: .launching,
             location: definition.location,
             workspaceID: resolvedWorkspaceID,
             runDir: PipelineRun.runDirectory(for: runID),
@@ -88,13 +86,33 @@ extension AppReducer {
         )
         PipelinesFeature.insert(run: run, into: &state.pipelines)
 
-        reply?.sendAndClose([
-            "ok": true,
-            "run_id": run.id.uuidString,
-            "status": run.status.rawValue,
-            "status_detail": run.statusDetail ?? ""
-        ])
-        return .send(.persistState)
+        let effect = Effect<Action>.merge(.send(.persistState), pipelineLaunchRun(&state, runID: runID))
+        return .created(runID: runID, effect: effect)
+    }
+
+    func handlePipelineRun(
+        _ state: inout State,
+        paneID: UUID?,
+        name: String,
+        inputs: [String: String],
+        reply: SocketServer.ReplyHandle?
+    ) -> Effect<Action> {
+        switch createPipelineRun(&state, paneID: paneID, name: name, inputs: inputs) {
+        case .failure(let message, let issues):
+            var payload: [String: Any] = ["ok": false, "error": message]
+            if !issues.isEmpty {
+                payload["issues"] = issues.map(Self.issueJSON)
+            }
+            reply?.sendAndClose(payload)
+            return .none
+        case .created(let runID, let effect):
+            reply?.sendAndClose([
+                "ok": true,
+                "run_id": runID.uuidString,
+                "status": state.pipelines.runs[id: runID]?.status.rawValue ?? ""
+            ])
+            return effect
+        }
     }
 
     // MARK: - pipeline handoff
@@ -125,7 +143,15 @@ extension AppReducer {
                   let run = state.pipelines.runs[id: runUUID] else {
                 return .notFound("no such pipeline run '\(runID ?? "")'")
             }
-            guard let nodeID, let nodeRun = run.nodeRuns.first(where: { $0.nodeID == nodeID }) else {
+            // The LATEST attempt, not the first — a node past attempt 1
+            // (e.g. a bounce-back retry) must still be force-resolvable;
+            // matching the first NodeRun would keep hitting an
+            // already-terminal attempt 1 forever (found live, issue
+            // #282 validation).
+            guard let nodeID, let nodeRun = run.nodeRuns
+                .filter({ $0.nodeID == nodeID })
+                .max(by: { $0.attempt < $1.attempt })
+            else {
                 return .notFound("no node run for node '\(nodeID ?? "")' in run \(run.id.uuidString)")
             }
             return .found(runID: run.id, nodeRunID: nodeRun.id)
@@ -174,12 +200,13 @@ extension AppReducer {
                 summary: summary,
                 outputPath: output,
                 engine: pipelineEngine,
+                newNodeRunID: uuid(),
                 state: &state.pipelines
             )
             switch result {
             case .runNotFound, .nodeRunNotFound:
                 return fail("internal error resolving pipeline node run")
-            case .applied(let run), .recorded(let run), .idempotent(let run):
+            case .applied(let run, _), .recorded(let run), .idempotent(let run):
                 let nodeRun = run.nodeRuns[id: targetNodeRunID]
                 reply?.sendAndClose([
                     "ok": true,
@@ -189,9 +216,105 @@ extension AppReducer {
                     "node_status": nodeRun?.status.rawValue ?? "",
                     "run_status": run.status.rawValue
                 ])
-                return .send(.persistState)
+                // Cancel this node's readiness/stop-grace timers before
+                // following up — a handoff always supersedes them,
+                // whether it clears a stall, completes the run, or hands
+                // off to the next spawn.
+                return .merge(pipelineCancelTimers(nodeRunID: targetNodeRunID), pipelineFollowUpOnHandoff(&state, result: result))
             }
         }
+    }
+
+    // MARK: - pipeline cancel / retry / approve / deny / resume
+
+    /// Shared resolution + dispatch for the five single-run manual
+    /// control verbs — each just differs in which `AppReducer` orchestrator
+    /// to call and what an already-terminal/mismatched-status run should
+    /// reply as an error.
+    private func handlePipelineControl(
+        _ state: inout State,
+        runIDString: String,
+        reply: SocketServer.ReplyHandle?,
+        precondition: (PipelineRun) -> String?,
+        orchestrate: (inout State, UUID) -> Effect<Action>
+    ) -> Effect<Action> {
+        guard let runUUID = UUID(uuidString: runIDString), let run = state.pipelines.runs[id: runUUID] else {
+            reply?.sendAndClose(["ok": false, "error": "no such pipeline run '\(runIDString)'"])
+            return .none
+        }
+        if let error = precondition(run) {
+            reply?.sendAndClose(["ok": false, "error": error])
+            return .none
+        }
+        let effect = orchestrate(&state, runUUID)
+        reply?.sendAndClose(["ok": true, "run_id": runUUID.uuidString, "status": state.pipelines.runs[id: runUUID]?.status.rawValue ?? ""])
+        return effect
+    }
+
+    func handlePipelineCancel(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        handlePipelineControl(
+            &state, runIDString: runID, reply: reply,
+            precondition: { $0.status.isTerminal ? "run is already \($0.status.rawValue)" : nil },
+            orchestrate: { s, id in self.pipelineCancel(&s, runID: id) }
+        )
+    }
+
+    func handlePipelineRetry(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        handlePipelineControl(
+            &state, runIDString: runID, reply: reply,
+            precondition: { $0.currentNodeRunID == nil ? "run has no current node to retry" : nil },
+            orchestrate: { s, id in self.pipelineRetry(&s, runID: id) }
+        )
+    }
+
+    func handlePipelineApprove(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        handlePipelineControl(
+            &state, runIDString: runID, reply: reply,
+            precondition: { $0.status == .awaitingApproval ? nil : "run is not awaiting approval (status: \($0.status.rawValue))" },
+            orchestrate: { s, id in self.pipelineApprove(&s, runID: id) }
+        )
+    }
+
+    func handlePipelineDeny(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        handlePipelineControl(
+            &state, runIDString: runID, reply: reply,
+            precondition: { $0.status == .awaitingApproval ? nil : "run is not awaiting approval (status: \($0.status.rawValue))" },
+            orchestrate: { s, id in self.pipelineDeny(&s, runID: id) }
+        )
+    }
+
+    func handlePipelineResume(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+        handlePipelineControl(
+            &state, runIDString: runID, reply: reply,
+            precondition: {
+                guard $0.status == .paused else { return "run is not paused (status: \($0.status.rawValue))" }
+                return nil
+            },
+            orchestrate: { s, id in self.pipelineResume(&s, runID: id) }
+        )
+    }
+
+    // MARK: - pipeline watch
+
+    /// `nex pipeline watch <run-id>` — streaming via a held `ReplyHandle`
+    /// (`AppReducer.State.pipelineWatchSubscribers`), the exact
+    /// `webConsoleSubscribers` shape. Sends the run's current snapshot
+    /// immediately (so a `watch` against an already-terminal run still
+    /// gets one line before closing), then leaves the handle open for
+    /// `pipelineFanOutWatch` to push further transitions.
+    func handlePipelineWatch(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) {
+        guard let runUUID = UUID(uuidString: runID), let run = state.pipelines.runs[id: runUUID] else {
+            reply?.send(["ok": false, "error": "no such pipeline run '\(runID)'"])
+            reply?.close()
+            return
+        }
+        guard let reply else { return }
+        reply.send(["ok": true, "run": Self.runJSON(run)])
+        if run.status.isTerminal {
+            reply.close()
+            return
+        }
+        state.pipelineWatchSubscribers[runUUID, default: [:]][reply.id] = reply
     }
 
     // MARK: - pipeline status
@@ -259,7 +382,7 @@ extension AppReducer {
         return dict
     }
 
-    private static func runJSON(_ run: PipelineRun) -> [String: Any] {
+    static func runJSON(_ run: PipelineRun) -> [String: Any] {
         var dict: [String: Any] = [
             "id": run.id.uuidString,
             "definition_id": run.definitionID,

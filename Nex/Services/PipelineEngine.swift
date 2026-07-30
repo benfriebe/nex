@@ -216,9 +216,15 @@ enum PipelineEngineLogic {
     /// match `[A-Za-z0-9._-]+`, and `env` values are single-quoted with
     /// embedded-quote escaping and rejected outright if they contain
     /// newlines or other control characters. The handoff allowlist
-    /// (`Bash(nex pipeline:*)`, `Write(<runDir>/**)`) is always injected
+    /// (`Bash(nex pipeline:*)`, `Edit(<runDir>/**)`) is always injected
     /// — without it a headless node could never write its deliverable
-    /// or call `nex pipeline done`.
+    /// or call `nex pipeline done`. `Edit(...)`, not `Write(...)`: live
+    /// validation against the real `claude` CLI (issue #282 phases 6-7)
+    /// found `--allowed-tools`'s file-permission matching only
+    /// recognises `Edit(path)` rules — `Write(path)` is accepted as a
+    /// tool name but never matched, so file-editing tools were silently
+    /// denied. `Edit(...)` covers every file-editing tool, including
+    /// the deliverable write.
     static func composeLaunchCommand(
         node: PipelineNode,
         runID: String,
@@ -251,10 +257,47 @@ enum PipelineEngineLogic {
         if let model = node.model, !model.isEmpty {
             command += " --model \(model)"
         }
-        command += " --allowedTools \"Bash(nex pipeline:*)\" \"Write(\(runDir)/**)\""
+        command += " --allowedTools \"Bash(nex pipeline:*)\" \"Edit(\(runDir)/**)\""
         if node.mode == .headless {
             command += " < \(shellQuote(promptPath))"
         }
+        return .success(command)
+    }
+
+    /// Composes the bounce-back resume command: reuse a node's existing
+    /// pane by typing `claude --resume <id>` rather than a fresh launch
+    /// line. Used when a node is revisited (attempt > 1) and its prior
+    /// session has exited but its `agentSessionID` is known (issue
+    /// section 3 — "exited + known session id"). The same env-prefix
+    /// convention as `composeLaunchCommand` carries the new attempt
+    /// number so a node's mission can branch on `$NEX_PIPELINE_ATTEMPT`
+    /// even on a resumed session. Always interactive (no `-p`, no stdin
+    /// redirect) — resuming re-enters the TUI regardless of the node's
+    /// declared `mode`, so the caller sends a file-pointer message after
+    /// the SessionStart readiness gate confirms it's up, exactly like a
+    /// fresh interactive spawn.
+    static func composeResumeCommand(
+        node: PipelineNode,
+        runID: String,
+        attempt: Int,
+        sessionID: String
+    ) -> Result<String, PipelineLaunchError> {
+        guard AgentKind.isSafeSessionID(sessionID) else {
+            return .failure(.unsafeEnvValue(key: "sessionID"))
+        }
+        var assignments = [
+            "NEX_PIPELINE_RUN=\(shellQuote(runID))",
+            "NEX_PIPELINE_NODE=\(shellQuote(node.id))",
+            "NEX_PIPELINE_ATTEMPT=\(attempt)"
+        ]
+        for key in node.env.keys.sorted() {
+            let value = node.env[key] ?? ""
+            guard !containsControlCharacters(value) else {
+                return .failure(.unsafeEnvValue(key: key))
+            }
+            assignments.append("\(key)=\(shellQuote(value))")
+        }
+        let command = assignments.joined(separator: " ") + " claude --resume \(sessionID)"
         return .success(command)
     }
 
@@ -274,12 +317,21 @@ enum PipelineEngineLogic {
 
     // MARK: - File work
 
-    static func prepareAttemptDir(runDir: String, nodeID: String, attempt: Int) throws -> String {
-        let dir = URL(fileURLWithPath: runDir)
+    /// Pure path computation (no I/O) shared by `prepareAttemptDir` (which
+    /// also creates the directory) and callers that only need to
+    /// reference an attempt's default `output.md` path, e.g. to fill
+    /// `{{nodes.<id>.output}}` for a node run that reported no explicit
+    /// `--output`.
+    static func attemptDirPath(runDir: String, nodeID: String, attempt: Int) -> String {
+        URL(fileURLWithPath: runDir)
             .appendingPathComponent("nodes")
             .appendingPathComponent(nodeID)
             .appendingPathComponent("attempt-\(attempt)")
             .path
+    }
+
+    static func prepareAttemptDir(runDir: String, nodeID: String, attempt: Int) throws -> String {
+        let dir = attemptDirPath(runDir: runDir, nodeID: nodeID, attempt: attempt)
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -292,6 +344,17 @@ enum PipelineEngineLogic {
         let path = (attemptDir as NSString).appendingPathComponent("result.json")
         try data.write(to: URL(fileURLWithPath: path))
     }
+
+    /// Writes the rendered prompt to `<attemptDir>/prompt.md` — the file
+    /// a headless node's launch command pipes in via stdin, and the file
+    /// an interactive/resumed node's pointer message references. Prompts
+    /// travel via files exclusively (issue section 7, pitfall 3): nothing
+    /// agent-generated is ever typed directly into a PTY.
+    static func writePrompt(attemptDir: String, text: String) throws -> String {
+        let path = (attemptDir as NSString).appendingPathComponent("prompt.md")
+        try text.write(to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
+        return path
+    }
 }
 
 // MARK: - TCA Dependency
@@ -303,6 +366,7 @@ enum PipelineEngineLogic {
 struct PipelineEngine: Sendable {
     var prepareAttemptDir: @Sendable (_ runDir: String, _ nodeID: String, _ attempt: Int) throws -> String
     var writeResultJSON: @Sendable (_ attemptDir: String, _ result: PipelineNodeResult) throws -> Void
+    var writePrompt: @Sendable (_ attemptDir: String, _ text: String) throws -> String
     var evaluateTransition: @Sendable (
         _ definition: PipelineDefinition,
         _ from: String,
@@ -317,16 +381,26 @@ struct PipelineEngine: Sendable {
         _ runDir: String,
         _ promptPath: String
     ) -> Result<String, PipelineLaunchError>
+    var composeResumeCommand: @Sendable (
+        _ node: PipelineNode,
+        _ runID: String,
+        _ attempt: Int,
+        _ sessionID: String
+    ) -> Result<String, PipelineLaunchError>
 }
 
 extension PipelineEngine: DependencyKey {
     static let liveValue = PipelineEngine(
         prepareAttemptDir: { try PipelineEngineLogic.prepareAttemptDir(runDir: $0, nodeID: $1, attempt: $2) },
         writeResultJSON: { try PipelineEngineLogic.writeResultJSON(attemptDir: $0, result: $1) },
+        writePrompt: { try PipelineEngineLogic.writePrompt(attemptDir: $0, text: $1) },
         evaluateTransition: { PipelineEngineLogic.evaluateTransition(definition: $0, from: $1, outcome: $2, traversals: $3) },
         renderPrompt: { PipelineEngineLogic.renderPrompt(node: $0, context: $1) },
         composeLaunchCommand: {
             PipelineEngineLogic.composeLaunchCommand(node: $0, runID: $1, attempt: $2, runDir: $3, promptPath: $4)
+        },
+        composeResumeCommand: {
+            PipelineEngineLogic.composeResumeCommand(node: $0, runID: $1, attempt: $2, sessionID: $3)
         }
     )
 

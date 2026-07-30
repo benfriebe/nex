@@ -101,6 +101,26 @@ struct PipelineNodeRun: Codable, Equatable, Identifiable {
     }
 }
 
+/// Machine-readable reason a run sits `.paused`, encoded as a `[tag]`
+/// prefix on `PipelineRun.statusDetail` (e.g. `"[stalled_node] node
+/// \"implementer\" stalled — no handoff 120s after Stop"`) so the free-text
+/// column stays human-readable while still letting `resume` branch on why
+/// the run paused (issue section 5).
+enum PipelineRunPauseReason: String, Equatable {
+    case stalledNode = "stalled_node"
+    case appRestart = "app_restart"
+    case paneClosed = "pane_closed"
+
+    static func detail(_ reason: Self, _ message: String) -> String {
+        "[\(reason.rawValue)] \(message)"
+    }
+
+    static func parse(_ detail: String?) -> Self? {
+        guard let detail, detail.hasPrefix("["), let end = detail.firstIndex(of: "]") else { return nil }
+        return Self(rawValue: String(detail[detail.index(after: detail.startIndex) ..< end]))
+    }
+}
+
 /// A single execution of a `PipelineDefinition`. `definitionSnapshot` is
 /// frozen at launch time so a mid-run YAML edit can't corrupt routing —
 /// the run always evaluates edges against the graph it started with.

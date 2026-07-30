@@ -90,6 +90,17 @@ struct PaneGridView: View {
     var onPipelineRedo: ((UUID) -> Void)?
     var onPipelineSelect: ((UUID, PipelineCanvasSelection) -> Void)?
     var onPipelineViewportChange: ((UUID, CGFloat, CGPoint) -> Void)?
+    /// Live runs, looked up per pane via its `PipelinePaneState.mode`'s
+    /// `.monitor(runID)` to feed `PipelineRunHUD` + the canvas status
+    /// overlay (issue #282 phase 7).
+    var pipelineRuns: IdentifiedArrayOf<PipelineRun> = []
+    var onPipelineRun: ((UUID, [String: String]) -> Void)?
+    var onPipelineCancelRun: ((UUID) -> Void)?
+    var onPipelineApproveRun: ((UUID) -> Void)?
+    var onPipelineDenyRun: ((UUID) -> Void)?
+    var onPipelineResumeRun: ((UUID) -> Void)?
+    var onPipelineBackToEdit: ((UUID) -> Void)?
+    var onPipelineJumpToNode: ((UUID, String) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.chromeTheme) private var chromeTheme
@@ -351,6 +362,10 @@ struct PaneGridView: View {
             case .pipeline:
                 PipelinePaneView(
                     pipelineState: pipelinePanes[pane.id],
+                    activeRun: {
+                        guard case let .monitor(runID) = pipelinePanes[pane.id]?.mode else { return nil }
+                        return pipelineRuns[id: runID]
+                    }(),
                     onOpenDefinition: { name in onPipelineOpenDefinition?(pane.id, name) },
                     onCreateDefinition: { onPipelineCreateDefinition?(pane.id) },
                     onDeleteDefinition: { name in onPipelineDeleteDefinition?(pane.id, name) },
@@ -359,7 +374,14 @@ struct PaneGridView: View {
                     onUndo: { onPipelineUndo?(pane.id) },
                     onRedo: { onPipelineRedo?(pane.id) },
                     onSelect: { selection in onPipelineSelect?(pane.id, selection) },
-                    onViewportChange: { zoom, pan in onPipelineViewportChange?(pane.id, zoom, pan) }
+                    onViewportChange: { zoom, pan in onPipelineViewportChange?(pane.id, zoom, pan) },
+                    onRun: { inputs in onPipelineRun?(pane.id, inputs) },
+                    onCancelRun: { onPipelineCancelRun?(pane.id) },
+                    onApproveRun: { onPipelineApproveRun?(pane.id) },
+                    onDenyRun: { onPipelineDenyRun?(pane.id) },
+                    onResumeRun: { onPipelineResumeRun?(pane.id) },
+                    onBackToEdit: { onPipelineBackToEdit?(pane.id) },
+                    onJumpToNode: { nodeID in onPipelineJumpToNode?(pane.id, nodeID) }
                 )
             }
         }

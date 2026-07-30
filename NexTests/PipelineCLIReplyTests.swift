@@ -77,7 +77,7 @@ struct PipelineCLIReplyTests {
 
     // MARK: - pipeline-run
 
-    @Test func pipelineRunValidatesAndCreatesPausedRunUsingCallerWorkspace() async {
+    @Test func pipelineRunValidatesAndCreatesLaunchingRunUsingCallerWorkspace() async {
         let store = makeStore(definitions: ["loop": validDefinition()])
         let sink = CaptureSink()
         await store.send(.socketMessage(
@@ -86,12 +86,16 @@ struct PipelineCLIReplyTests {
         ))
         await store.finish()
 
+        // The reply is sent synchronously before the execution engine's
+        // async spawn chain runs at all, so it always reflects the
+        // just-created run's initial status regardless of how spawning
+        // later resolves (in this test environment, with no real
+        // `SurfaceManager` surfaces, the entry node's spawn eventually
+        // times out and the run lands `.failed` — asserted separately).
         #expect(sink.payloads.count == 1)
         #expect(sink.closed == 1)
         #expect(sink.payloads[0]["ok"] as? Bool == true)
-        #expect(sink.payloads[0]["status"] as? String == "paused")
-        let detail = sink.payloads[0]["status_detail"] as? String ?? ""
-        #expect(detail.contains("phases 6-7"))
+        #expect(sink.payloads[0]["status"] as? String == "launching")
         #expect((sink.payloads[0]["run_id"] as? String)?.isEmpty == false)
     }
 
@@ -148,7 +152,7 @@ struct PipelineCLIReplyTests {
         #expect(!issues.isEmpty)
     }
 
-    @Test func pipelineRunRejectsNonCurrentLocation() async {
+    @Test func pipelineRunWithWorkspaceLocationProvisionsADedicatedWorkspace() async {
         var definition = validDefinition()
         definition.location = .workspace
         let store = makeStore(definitions: ["loop": definition])
@@ -157,10 +161,28 @@ struct PipelineCLIReplyTests {
             .pipelineRun(paneID: Self.paneID, name: "loop", inputs: ["task": "x"]),
             reply: makeCaptureHandle(sink)
         ))
+        // Non-exhaustive mode still requires draining queued
+        // actions via `skipReceivedActions()` before `store.state`
+        // reflects mutations from actions dispatched by an effect
+        // (`.createWorkspace`, the delegate re-entry chain) rather
+        // than sent directly by the test — `store.finish()` alone
+        // only awaits in-flight effect *work*, not action delivery.
+        await store.skipReceivedActions()
         await store.finish()
 
-        #expect(sink.payloads[0]["ok"] as? Bool == false)
-        #expect((sink.payloads[0]["error"] as? String)?.contains("phases 6-7") == true)
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect(sink.payloads[0]["status"] as? String == "launching")
+        // `location: workspace` mints its own workspace asynchronously —
+        // the caller's original workspace is untouched, and a second one
+        // now exists for the run.
+        #expect(store.state.workspaces.count == 2)
+        let runID = (sink.payloads[0]["run_id"] as? String).flatMap(UUID.init)
+        #expect(runID != nil)
+        if let runID {
+            let run = store.state.pipelines.runs[id: runID]
+            #expect(run?.workspaceID != nil)
+            #expect(run?.workspaceID != Self.wsID)
+        }
     }
 
     // MARK: - pipeline-handoff
@@ -227,6 +249,55 @@ struct PipelineCLIReplyTests {
 
         #expect(sink.payloads[0]["ok"] as? Bool == false)
         #expect((sink.payloads[0]["error"] as? String)?.contains("no such pipeline run") == true)
+    }
+
+    /// A node past its first attempt (bounce-back retry) must still be
+    /// force-resolvable — matching the FIRST NodeRun for that node id
+    /// would keep hitting an already-terminal attempt 1 forever, making
+    /// `--force` useless for exactly the case it exists to unstick
+    /// (found live during issue #282 phase 6-7 validation).
+    @Test func pipelineHandoffForceTargetsLatestAttemptNotFirst() async {
+        let runID = UUID()
+        let firstAttemptID = UUID()
+        let secondAttemptID = UUID()
+        let now = Date()
+        var run = PipelineRun(
+            id: runID,
+            definitionID: "loop",
+            definitionSnapshot: PipelineDefinition(id: "loop", name: "Loop", entry: "worker"),
+            status: .launching,
+            location: .current,
+            runDir: "/runs/\(runID.uuidString)",
+            createdAt: now,
+            updatedAt: now
+        )
+        run.nodeRuns = [
+            PipelineNodeRun(
+                id: firstAttemptID, nodeID: "worker", attempt: 1, status: .done,
+                startedAt: now, updatedAt: now, completedAt: now
+            ),
+            PipelineNodeRun(
+                id: secondAttemptID, nodeID: "worker", attempt: 2, status: .running,
+                startedAt: now, updatedAt: now
+            )
+        ]
+        run.currentNodeRunID = secondAttemptID
+        var pipelines = PipelinesFeature.State()
+        pipelines.runs = [run]
+
+        let store = makeStore(pipelines: pipelines)
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .pipelineHandoff(
+                paneID: nil, outcome: .done, summary: "attempt 2 done", output: nil,
+                runID: runID.uuidString, nodeID: "worker", force: true
+            ),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+        #expect(sink.payloads[0]["node_run_id"] as? String == secondAttemptID.uuidString)
     }
 
     // MARK: - pipeline-status / list / validate

@@ -165,7 +165,7 @@ struct PipelineEngineTests {
         #expect(command.contains("--permission-mode acceptEdits"))
         #expect(command.contains("--model opus"))
         #expect(command.contains(#"Bash(nex pipeline:*)"#))
-        #expect(command.contains("Write(/runs/run-1/**)"))
+        #expect(command.contains("Edit(/runs/run-1/**)"))
         #expect(command.contains("NEX_PIPELINE_RUN='run-1'"))
         #expect(command.contains("NEX_PIPELINE_NODE='planner'"))
         #expect(command.contains("< '/runs/run-1/nodes/planner/attempt-1/prompt.md'"))

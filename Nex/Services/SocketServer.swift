@@ -202,6 +202,25 @@ enum SocketMessage: Equatable {
     /// `nex pipeline validate <name>` — load + validate a definition
     /// without creating a run. Request/response.
     case pipelineValidate(name: String)
+    /// `nex pipeline cancel <run-id>` — cancel a non-terminal run.
+    /// Request/response.
+    case pipelineCancel(runID: String)
+    /// `nex pipeline retry <run-id>` — force the run back to `.running`
+    /// and start a fresh attempt of its current node. Request/response.
+    case pipelineRetry(runID: String)
+    /// `nex pipeline approve <run-id>` — approve the pending
+    /// `requiresApproval` edge, spawning/resuming the target node.
+    /// Request/response.
+    case pipelineApprove(runID: String)
+    /// `nex pipeline deny <run-id>` — deny the pending approval; the run
+    /// becomes `.cancelled`. Request/response.
+    case pipelineDeny(runID: String)
+    /// `nex pipeline resume <run-id>` — re-engage a run paused
+    /// `.appRestart`/`.stalledNode`/`.paneClosed`. Request/response.
+    case pipelineResume(runID: String)
+    /// `nex pipeline watch <run-id>` — streaming via a held
+    /// `ReplyHandle`, the `web console --follow` shape.
+    case pipelineWatch(runID: String)
 
     /// `nex ping` — IPC health check. Request/response. Replies with
     /// `{"ok":true,"version":"<short>","build":"<build>","pid":<n>}`
@@ -428,6 +447,7 @@ private let replyCommandAllowlist: Set<String> = [
     "group-reorder", "group-sort",
     "graft-start", "graft-stop", "graft-status",
     "pipeline-run", "pipeline-handoff", "pipeline-status", "pipeline-list", "pipeline-validate",
+    "pipeline-cancel", "pipeline-retry", "pipeline-approve", "pipeline-deny", "pipeline-resume", "pipeline-watch",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
@@ -1736,6 +1756,36 @@ final class SocketServer: Sendable {
         if wire.command == "pipeline-validate" {
             guard let name = wire.name, !name.isEmpty else { return nil }
             return (.pipelineValidate(name: name), wire)
+        }
+
+        if wire.command == "pipeline-cancel" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineCancel(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-retry" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineRetry(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-approve" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineApprove(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-deny" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineDeny(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-resume" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineResume(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-watch" {
+            guard let runID = wire.runID, !runID.isEmpty else { return nil }
+            return (.pipelineWatch(runID: runID), wire)
         }
 
         guard let paneIDString = wire.paneID,

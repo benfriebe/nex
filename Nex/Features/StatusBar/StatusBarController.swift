@@ -13,6 +13,18 @@ struct StatusBarItem: Equatable, Identifiable {
     var id: UUID { paneID }
 }
 
+/// One active (non-terminal) pipeline run, surfaced in the "Pipelines"
+/// popover section (issue #282 phase 7).
+struct StatusBarPipelineItem: Equatable, Identifiable {
+    let runID: UUID
+    let name: String
+    let status: PipelineRunStatus
+    let currentNodeID: String?
+    let createdAt: Date
+
+    var id: UUID { runID }
+}
+
 final class StatusBarController: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var statusItem: NSStatusItem?
     private nonisolated(unsafe) var popover: NSPopover?
@@ -21,6 +33,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var waitingCount: Int = 0
     private nonisolated(unsafe) var runningCount: Int = 0
     private nonisolated(unsafe) var items: [StatusBarItem] = []
+    private nonisolated(unsafe) var pipelineItems: [StatusBarPipelineItem] = []
     // Configurable agent-status colours, resolved from the chrome theme. The
     // menu-bar dot and the popover use these instead of system blue/green so
     // they match the in-app status colours.
@@ -28,6 +41,9 @@ final class StatusBarController: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var runningColor: Color = .green
 
     nonisolated(unsafe) var onSelectPane: ((UUID, UUID) -> Void)?
+    /// Click a "Pipelines" section row — focuses the run's current node
+    /// pane (or just its workspace, if nothing has spawned yet).
+    nonisolated(unsafe) var onSelectPipeline: ((UUID) -> Void)?
 
     @MainActor
     func setup() {
@@ -43,12 +59,14 @@ final class StatusBarController: NSObject, @unchecked Sendable {
         waitingCount: Int,
         runningCount: Int,
         items: [StatusBarItem],
+        pipelineItems: [StatusBarPipelineItem] = [],
         waitingColor: Color = .blue,
         runningColor: Color = .green
     ) {
         self.waitingCount = waitingCount
         self.runningCount = runningCount
         self.items = items
+        self.pipelineItems = pipelineItems
         self.waitingColor = waitingColor
         self.runningColor = runningColor
         updateIcon()
@@ -148,18 +166,29 @@ final class StatusBarController: NSObject, @unchecked Sendable {
     private func updatePopoverContent(popover: NSPopover? = nil) {
         let target = popover ?? self.popover
         let currentItems = items
+        let currentPipelineItems = pipelineItems
         let callback = onSelectPane
+        let pipelineCallback = onSelectPipeline
         let hostingView = NSHostingView(
             rootView: StatusBarPopoverView(
                 items: currentItems,
+                pipelineItems: currentPipelineItems,
                 waitingColor: waitingColor,
-                runningColor: runningColor
-            ) { paneID, workspaceID in
-                callback?(paneID, workspaceID)
-                target?.performClose(nil)
-            }
+                runningColor: runningColor,
+                onSelectPane: { paneID, workspaceID in
+                    callback?(paneID, workspaceID)
+                    target?.performClose(nil)
+                },
+                onSelectPipeline: { runID in
+                    pipelineCallback?(runID)
+                    target?.performClose(nil)
+                }
+            )
         )
-        hostingView.frame = NSRect(x: 0, y: 0, width: 280, height: max(60, min(400, CGFloat(currentItems.count) * 48 + 44)))
+        hostingView.frame = NSRect(
+            x: 0, y: 0, width: 280,
+            height: max(60, min(500, CGFloat(currentItems.count) * 48 + CGFloat(currentPipelineItems.count) * 40 + 64))
+        )
         let viewController = NSViewController()
         viewController.view = hostingView
         target?.contentViewController = viewController
