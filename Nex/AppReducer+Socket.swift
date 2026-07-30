@@ -601,6 +601,29 @@ extension AppReducer {
                 case .graftStatus:
                     return handleGraftStatus(state: state, reply: reply)
 
+                case .pipelineRun(let paneID, let name, let inputs):
+                    return handlePipelineRun(
+                        &state, paneID: paneID, name: name, inputs: inputs, reply: reply
+                    )
+
+                case .pipelineHandoff(let paneID, let outcome, let summary, let output, let runID, let nodeID, let force):
+                    return handlePipelineHandoff(
+                        &state, paneID: paneID, outcome: outcome, summary: summary,
+                        output: output, runID: runID, nodeID: nodeID, force: force, reply: reply
+                    )
+
+                case .pipelineStatus(let runID):
+                    handlePipelineStatus(state: state, runID: runID, reply: reply)
+                    return .none
+
+                case .pipelineList:
+                    handlePipelineList(reply: reply)
+                    return .none
+
+                case .pipelineValidate(let name):
+                    handlePipelineValidate(name: name, reply: reply)
+                    return .none
+
                 case .ping:
                     return handlePing(reply: reply)
 

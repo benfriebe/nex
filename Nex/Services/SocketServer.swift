@@ -173,6 +173,36 @@ enum SocketMessage: Equatable {
     /// `nex graft status` — list active sessions across all workspaces.
     case graftStatus
 
+    /// `nex pipeline run <name> [--input k=v]...` — creates + validates a
+    /// `PipelineRun` scoped to the current workspace (resolved via
+    /// `paneID`'s workspace, else the active workspace). Validates
+    /// synchronously before replying; the run lands `.paused` — the
+    /// execution engine (spawning nodes) is a follow-up (phases 6-7).
+    /// Request/response.
+    case pipelineRun(paneID: UUID?, name: String, inputs: [String: String])
+    /// `nex pipeline done|fail|partial` — records a handoff outcome,
+    /// resolved by `paneID` (from `NEX_PANE_ID`) to the active NodeRun
+    /// bound to that pane, or by an explicit `runID`/`nodeID` (with
+    /// `force`) from outside any pane. Request/response.
+    case pipelineHandoff(
+        paneID: UUID?,
+        outcome: PipelineNodeOutcome,
+        summary: String?,
+        output: String?,
+        runID: String?,
+        nodeID: String?,
+        force: Bool
+    )
+    /// `nex pipeline status [<run-id>]` — a single run's detail, or a
+    /// summary of every run when `runID` is nil. Request/response.
+    case pipelineStatus(runID: String?)
+    /// `nex pipeline list` — every pipeline definition on disk.
+    /// Request/response.
+    case pipelineList
+    /// `nex pipeline validate <name>` — load + validate a definition
+    /// without creating a run. Request/response.
+    case pipelineValidate(name: String)
+
     /// `nex ping` — IPC health check. Request/response. Replies with
     /// `{"ok":true,"version":"<short>","build":"<build>","pid":<n>}`
     /// where `version` is `CFBundleShortVersionString` and `build` is
@@ -397,6 +427,7 @@ private let replyCommandAllowlist: Set<String> = [
     "workspace-create", "workspace-delete", "workspace-label",
     "group-reorder", "group-sort",
     "graft-start", "graft-stop", "graft-status",
+    "pipeline-run", "pipeline-handoff", "pipeline-status", "pipeline-list", "pipeline-validate",
     "ping",
     "web-open", "web-navigate", "web-url", "web-back",
     "web-forward", "web-reload", "web-capture",
@@ -972,6 +1003,22 @@ final class SocketServer: Sendable {
         var by: String?
         /// `group-sort --desc` — reverse the sort direction.
         var descending: Bool?
+        /// `pipeline-run --input k=v` (repeatable). Input name -> value.
+        var inputs: [String: String]?
+        /// `pipeline-handoff` — one of "done" / "fail" / "partial".
+        var outcome: String?
+        /// `pipeline-handoff --summary`.
+        var summary: String?
+        /// `pipeline-handoff --output` — path to the deliverable,
+        /// relative to the attempt directory.
+        var output: String?
+        /// `pipeline-handoff --run` / `pipeline-status <run-id>` — a run
+        /// id, either as a lookup target or (paired with `nodeID` and
+        /// `force`) a manual-override handoff target.
+        var runID: String?
+        /// `pipeline-handoff --node` — node slug, paired with `runID`
+        /// under `--force`.
+        var nodeID: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -1017,6 +1064,9 @@ final class SocketServer: Sendable {
             case labelOp = "label_op"
             case labelValues = "label_values"
             case order, by, descending
+            case inputs, outcome, summary, output
+            case runID = "run_id"
+            case nodeID = "node_id"
         }
     }
 
@@ -1648,6 +1698,44 @@ final class SocketServer: Sendable {
                 paneID: paneID, target: target, anchor: anchor,
                 zone: zone, workspace: workspace
             ), wire)
+        }
+
+        // `pipeline-*` verbs are all callable from outside a Nex pane
+        // (parsed here, before the mandatory-paneID guard below) —
+        // `paneID` only scopes `pipeline-run` to a workspace and
+        // `pipeline-handoff` to the calling pane's active node; none of
+        // them require it.
+        if wire.command == "pipeline-run" {
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            return (.pipelineRun(paneID: paneID, name: name, inputs: wire.inputs ?? [:]), wire)
+        }
+
+        if wire.command == "pipeline-handoff" {
+            guard let outcomeRaw = wire.outcome,
+                  let outcome = PipelineNodeOutcome(rawValue: outcomeRaw) else { return nil }
+            let paneID = wire.paneID.flatMap { UUID(uuidString: $0) }
+            let runID = (wire.runID?.isEmpty == true) ? nil : wire.runID
+            let nodeID = (wire.nodeID?.isEmpty == true) ? nil : wire.nodeID
+            return (.pipelineHandoff(
+                paneID: paneID, outcome: outcome,
+                summary: wire.summary, output: wire.output,
+                runID: runID, nodeID: nodeID, force: wire.force ?? false
+            ), wire)
+        }
+
+        if wire.command == "pipeline-status" {
+            let runID = (wire.runID?.isEmpty == true) ? nil : wire.runID
+            return (.pipelineStatus(runID: runID), wire)
+        }
+
+        if wire.command == "pipeline-list" {
+            return (.pipelineList, wire)
+        }
+
+        if wire.command == "pipeline-validate" {
+            guard let name = wire.name, !name.isEmpty else { return nil }
+            return (.pipelineValidate(name: name), wire)
         }
 
         guard let paneIDString = wire.paneID,

@@ -190,6 +190,7 @@ extension AppReducer {
              .workspaces,
              .settings,
              .graft,
+             .pipelines,
              .openDiffPath,
              .presets,
              .migrateLabelsToPresets,

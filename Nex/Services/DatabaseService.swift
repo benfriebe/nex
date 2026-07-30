@@ -279,6 +279,51 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Run tracking for the pipelines engine spine (issue #282 phase
+        // 4). `pipelineRun.workspaceID` deliberately has NO foreign key —
+        // a run's history must survive the owning workspace being
+        // deleted. `pipelineNodeRun` cascades on its parent run.
+        migrator.registerMigration("v20_pipelines") { db in
+            if try !db.tableExists("pipelineRun") {
+                try db.create(table: "pipelineRun") { t in
+                    t.primaryKey("id", .text)
+                    t.column("definitionID", .text).notNull()
+                    t.column("definitionYAML", .text).notNull()
+                    t.column("status", .text).notNull()
+                    t.column("statusDetail", .text)
+                    t.column("location", .text).notNull()
+                    t.column("workspaceID", .text)
+                    t.column("worktreePath", .text)
+                    t.column("runDir", .text).notNull()
+                    t.column("inputsJSON", .text).notNull().defaults(to: "{}")
+                    t.column("edgeTraversalsJSON", .text).notNull().defaults(to: "{}")
+                    t.column("currentNodeRunID", .text)
+                    t.column("createdAt", .double).notNull()
+                    t.column("updatedAt", .double).notNull()
+                    t.column("completedAt", .double)
+                }
+            }
+            if try !db.tableExists("pipelineNodeRun") {
+                try db.create(table: "pipelineNodeRun") { t in
+                    t.primaryKey("id", .text)
+                    t.column("runID", .text)
+                        .notNull()
+                        .references("pipelineRun", onDelete: .cascade)
+                    t.column("nodeID", .text).notNull()
+                    t.column("attempt", .integer).notNull().defaults(to: 1)
+                    t.column("paneID", .text)
+                    t.column("agentSessionID", .text)
+                    t.column("status", .text).notNull()
+                    t.column("summary", .text)
+                    t.column("outputPath", .text)
+                    t.column("warningsJSON", .text).notNull().defaults(to: "[]")
+                    t.column("startedAt", .double).notNull()
+                    t.column("updatedAt", .double).notNull()
+                    t.column("completedAt", .double)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -386,4 +431,45 @@ struct WorkspaceGroupRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Double
     var sortOrder: Int
     var icon: String?
+}
+
+struct PipelineRunRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "pipelineRun"
+
+    var id: String
+    var definitionID: String
+    /// Frozen YAML snapshot of the definition at launch time — routing
+    /// always evaluates against the graph the run started with, even if
+    /// the source file is edited mid-run.
+    var definitionYAML: String
+    var status: String
+    var statusDetail: String?
+    var location: String
+    var workspaceID: String?
+    var worktreePath: String?
+    var runDir: String
+    var inputsJSON: String
+    var edgeTraversalsJSON: String
+    var currentNodeRunID: String?
+    var createdAt: Double
+    var updatedAt: Double
+    var completedAt: Double?
+}
+
+struct PipelineNodeRunRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "pipelineNodeRun"
+
+    var id: String
+    var runID: String
+    var nodeID: String
+    var attempt: Int
+    var paneID: String?
+    var agentSessionID: String?
+    var status: String
+    var summary: String?
+    var outputPath: String?
+    var warningsJSON: String
+    var startedAt: Double
+    var updatedAt: Double
+    var completedAt: Double?
 }

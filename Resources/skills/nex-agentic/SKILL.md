@@ -21,6 +21,26 @@ Orchestrate multi-agent development workflows using the Nex terminal
 multiplexer. Spawn named child panes, start Claude agents in them, distribute
 work, and collect results.
 
+## Structured pipelines (`nex pipeline`) — not a substitute yet
+
+Nex is growing a first-class **pipeline** feature (issue #282): a graph of
+agent nodes with outcome-conditional edges (`done`/`fail`/`partial`),
+defined as YAML in `~/.config/nex/pipelines/*.yaml` and editable in a
+native canvas pane (`nex pane list` shows pane type `pipeline`). This is
+meant to eventually codify the manual workflow this skill teaches below.
+
+As of this writing, `nex pipeline list|validate|run|status` and
+`nex pipeline done|fail|partial` (the handoff verbs) exist and are wired
+end-to-end, but the **execution engine — spawning node panes and driving
+handoff/routing — is not implemented yet**. `nex pipeline run` validates
+a definition and creates a bookkeeping run, but that run always lands
+`.paused` with a status detail explaining the engine isn't live; nothing
+gets spawned. Don't reach for `nex pipeline run` as a way to fan out
+work — keep using the manual spawn/split/send workflow documented below
+until the execution engine lands. `nex pipeline validate <name>` is
+useful today if you're hand-authoring a definition file and want to
+check it for schema errors ahead of that.
+
 ## Prerequisites
 
 You must be running inside a Nex pane. Verify with:

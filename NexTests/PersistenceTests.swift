@@ -453,4 +453,103 @@ struct PersistenceTests {
         #expect(loadedWS.repoAssociations.first?.worktreePath == "/Users/test/code/my-repo/.worktrees/dev")
         #expect(loadedWS.repoAssociations.first?.branchName == "feature/dev")
     }
+
+    @Test func pipelineRunRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(id: wsID, name: "alpha")
+
+        var definition = PipelineDefinition(id: "loop", name: "Loop", entry: "planner")
+        var planner = PipelineNode(id: "planner")
+        planner.prompt = "Plan it"
+        definition.nodes = [planner]
+
+        let runID = UUID()
+        let nodeRunID = UUID()
+        // Terminal node status — a non-terminal one would trip the
+        // restart-recovery path exercised separately below
+        // (`pipelineRunInterruptedNodeForcesRunPausedOnReload`), forcing
+        // the run to `.paused` and defeating this test's "clean round
+        // trip" premise.
+        let nodeRun = PipelineNodeRun(
+            id: nodeRunID,
+            nodeID: "planner",
+            status: .done,
+            summary: "in progress",
+            startedAt: Date(timeIntervalSince1970: 1000),
+            updatedAt: Date(timeIntervalSince1970: 1000)
+        )
+        let run = PipelineRun(
+            id: runID,
+            definitionID: "loop",
+            definitionSnapshot: definition,
+            status: .running,
+            statusDetail: "on it",
+            location: .current,
+            workspaceID: wsID,
+            runDir: "/runs/\(runID.uuidString)",
+            inputs: ["task": "add a flag"],
+            nodeRuns: [nodeRun],
+            edgeTraversals: ["planner|done": 1],
+            createdAt: Date(timeIntervalSince1970: 1000),
+            updatedAt: Date(timeIntervalSince1970: 1500)
+        )
+
+        var state = AppReducer.State(workspaces: [workspace], activeWorkspaceID: wsID)
+        state.pipelines.runs = [run]
+
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        #expect(result.pipelineRuns.count == 1)
+        let loaded = result.pipelineRuns.first!
+        #expect(loaded.id == runID)
+        #expect(loaded.definitionID == "loop")
+        #expect(loaded.definitionSnapshot.nodes.first?.id == "planner")
+        #expect(loaded.status == .running)
+        #expect(loaded.statusDetail == "on it")
+        #expect(loaded.workspaceID == wsID)
+        #expect(loaded.inputs["task"] == "add a flag")
+        #expect(loaded.edgeTraversals["planner|done"] == 1)
+        #expect(loaded.nodeRuns.count == 1)
+        #expect(loaded.nodeRuns.first?.id == nodeRunID)
+        #expect(loaded.nodeRuns.first?.summary == "in progress")
+        #expect(loaded.nodeRuns.first?.status == .done)
+    }
+
+    /// A non-terminal node run persisted mid-flight loads back
+    /// `.interrupted`, and its run is forced to `.paused` (issue
+    /// section 5's restart-recovery contract).
+    @Test func pipelineRunInterruptedNodeForcesRunPausedOnReload() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let wsID = UUID()
+        let workspace = WorkspaceFeature.State(id: wsID, name: "alpha")
+        let definition = PipelineDefinition(id: "loop", name: "Loop", entry: "planner")
+        let runID = UUID()
+        let nodeRun = PipelineNodeRun(
+            id: UUID(), nodeID: "planner", status: .running,
+            startedAt: Date(timeIntervalSince1970: 1000), updatedAt: Date(timeIntervalSince1970: 1000)
+        )
+        let run = PipelineRun(
+            id: runID, definitionID: "loop", definitionSnapshot: definition,
+            status: .running, location: .current, workspaceID: wsID,
+            runDir: "/runs/\(runID.uuidString)", nodeRuns: [nodeRun],
+            createdAt: Date(timeIntervalSince1970: 1000), updatedAt: Date(timeIntervalSince1970: 1000)
+        )
+
+        var state = AppReducer.State(workspaces: [workspace], activeWorkspaceID: wsID)
+        state.pipelines.runs = [run]
+        await persistence.save(snapshot: PersistenceSnapshot(state: state))
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        let loaded = result.pipelineRuns.first!
+        #expect(loaded.status == .paused)
+        #expect(loaded.nodeRuns.first?.status == .interrupted)
+    }
 }

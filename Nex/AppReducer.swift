@@ -50,6 +50,7 @@ struct AppReducer {
         var bulkDeleteConfirmationIDs: [UUID]?
         var settings = SettingsFeature.State()
         var graft = GraftFeature.State()
+        var pipelines = PipelinesFeature.State()
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
@@ -421,7 +422,8 @@ struct AppReducer {
             groups: IdentifiedArrayOf<WorkspaceGroup>,
             topLevelOrder: [SidebarID],
             activeWorkspaceID: UUID?,
-            repoRegistry: IdentifiedArrayOf<Repo>
+            repoRegistry: IdentifiedArrayOf<Repo>,
+            pipelineRuns: [PipelineRun] = []
         )
 
         // Workspace groups
@@ -450,6 +452,7 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
         case graft(GraftFeature.Action)
+        case pipelines(PipelinesFeature.Action)
 
         /// Socket messages (agent lifecycle + pane/workspace commands).
         /// `reply` is non-nil only for request-style commands (currently
@@ -640,6 +643,8 @@ struct AppReducer {
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.graftService) var graftService
     @Dependency(\.webPaneStore) var webPaneStore
+    @Dependency(\.pipelineDefinitionStore) var pipelineDefinitionStore
+    @Dependency(\.pipelineEngine) var pipelineEngine
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
     @Dependency(\.userDefaults) var userDefaults
@@ -1086,7 +1091,8 @@ struct AppReducer {
                             groups: result.groups,
                             topLevelOrder: result.topLevelOrder,
                             activeWorkspaceID: result.activeWorkspaceID,
-                            repoRegistry: result.repoRegistry
+                            repoRegistry: result.repoRegistry,
+                            pipelineRuns: result.pipelineRuns
                         ))
                     },
                     .send(.settings(.loadSettings)),
@@ -2086,7 +2092,7 @@ struct AppReducer {
                     await persistenceService.save(snapshot: snapshot)
                 }
 
-            case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry):
+            case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry, let pipelineRuns):
                 if workspaces.isEmpty {
                     // First launch — create a default workspace and
                     // still hand off to GraftFeature so its updates
@@ -2111,6 +2117,7 @@ struct AppReducer {
                 }
                 state.workspaces = workspaces
                 state.groups = groups
+                state.pipelines.runs = IdentifiedArrayOf(uniqueElements: pipelineRuns)
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
                 state.repoRegistry = repoRegistry
                 state.didRestoreWorkspaces = true
@@ -2130,10 +2137,20 @@ struct AppReducer {
                 // `codex resume`, issue #101) and is deliberately NOT
                 // cleared below: it's a last-known display value, and the
                 // resumable tuples must capture it before any clearing.
+                // Panes bound to an active pipeline NodeRun are excluded —
+                // the engine (not the blind restart-resume path) owns
+                // their lifecycle. Otherwise a restored node pane could
+                // get `claude --resume` typed into it while its run sits
+                // `.paused`, and a later `pipeline resume` deciding
+                // "session exited → resume" would type a shell command
+                // into a live claude TUI as chat text (issue section 5).
+                let pipelineOwnedPaneIDs = Set(pipelineRuns.flatMap { run in
+                    run.nodeRuns.compactMap(\.paneID)
+                })
                 var resumablePanes: [(paneID: UUID, sessionID: String, kind: AgentKind)] = []
                 for workspace in workspaces {
                     for pane in workspace.panes {
-                        if let sessionID = pane.agentSessionID {
+                        if let sessionID = pane.agentSessionID, !pipelineOwnedPaneIDs.contains(pane.id) {
                             resumablePanes.append((
                                 paneID: pane.id,
                                 sessionID: sessionID,
@@ -2376,6 +2393,10 @@ struct AppReducer {
                 // Handled by the GraftFeature Scope below.
                 return .none
 
+            case .pipelines:
+                // Handled by the PipelinesFeature Scope below.
+                return .none
+
             // MARK: - Presets child reducer (web favourites + label presets)
 
             // Field mutations + persistence live in `PresetsFeature` (wired
@@ -2604,6 +2625,10 @@ struct AppReducer {
 
         Scope(state: \.graft, action: \.graft) {
             GraftFeature()
+        }
+
+        Scope(state: \.pipelines, action: \.pipelines) {
+            PipelinesFeature()
         }
 
         Scope(state: \.configHotkey, action: \.configHotkey) {

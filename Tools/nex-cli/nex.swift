@@ -231,6 +231,11 @@ func printUsage() {
       nex graft start [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft stop [--workspace <name-or-uuid>] [--repo <name-or-path>]
       nex graft status [--json]
+      nex pipeline run <name> [--input k=v]... [--json]
+      nex pipeline done|fail|partial [--summary <text>] [--output <path>] [--run <id> --node <slug> --force] [--json]
+      nex pipeline status [<run-id>] [--json]
+      nex pipeline list [--json]
+      nex pipeline validate <name> [--json]
       nex web open [--private] <url>
       nex web navigate <url> [--target <name-or-uuid>] [--workspace <name-or-uuid>]
       nex web url|back|forward|reload [--target <name-or-uuid>] [--workspace <name-or-uuid>] [--hard]
@@ -4548,6 +4553,240 @@ private func handleGraftStatus(args: inout ArraySlice<String>) {
     }
 }
 
+// MARK: - Pipeline
+
+/// `nex pipeline` — agent orchestration pipelines (issue #282). Phase 5
+/// wires the socket verbs for defining, running, and handing off
+/// pipeline runs; the execution engine itself (spawning node panes) is
+/// a follow-up (phases 6-7) — `run` still validates and creates a run,
+/// it just lands `.paused` since nothing can drive it yet.
+func handlePipeline(_ args: inout ArraySlice<String>) {
+    guard let action = args.popFirst() else {
+        fputs(pipelineUsage, stderr)
+        exit(1)
+    }
+
+    switch action {
+    case "run":
+        handlePipelineRun(&args)
+    case "done", "fail", "partial":
+        handlePipelineHandoff(outcome: action, args: &args)
+    case "status":
+        handlePipelineStatus(&args)
+    case "list":
+        handlePipelineList(&args)
+    case "validate":
+        handlePipelineValidate(&args)
+    case "-h", "--help", "help":
+        fputs(pipelineUsage, stderr)
+    default:
+        fputs("Unknown pipeline action: \(action)\n", stderr)
+        fputs(pipelineUsage, stderr)
+        exit(1)
+    }
+}
+
+private let pipelineUsage = """
+Usage:
+  nex pipeline run <name> [--input k=v]... [--json]
+  nex pipeline done|fail|partial [--summary <text>] [--output <path>]
+                                  [--run <run-id> --node <slug> --force] [--json]
+  nex pipeline status [<run-id>] [--json]
+  nex pipeline list [--json]
+  nex pipeline validate <name> [--json]
+
+With no --run/--node/--force, done/fail/partial resolve to the calling
+pane's active pipeline node (requires NEX_PANE_ID). `run` only supports
+pipelines with `location: current` — dedicated workspace/worktree runs
+land in a follow-up.
+\n
+"""
+
+private func handlePipelineRun(_ args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    var inputs: [String: String] = [:]
+    while let kv = parseFlag("--input", from: &args) {
+        guard let eq = kv.firstIndex(of: "=") else {
+            fputs("nex pipeline run: --input must be key=value (got '\(kv)')\n", stderr)
+            exit(1)
+        }
+        inputs[String(kv[kv.startIndex..<eq])] = String(kv[kv.index(after: eq)...])
+    }
+    guard let name = args.popFirst() else {
+        fputs("Usage: nex pipeline run <name> [--input k=v]... [--json]\n", stderr)
+        exit(1)
+    }
+    rejectLeftoverArgs(args, command: "nex pipeline run")
+
+    var payload: [String: Any] = ["command": "pipeline-run", "name": name]
+    if !inputs.isEmpty { payload["inputs"] = inputs }
+    if let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
+        payload["pane_id"] = paneID
+    }
+
+    let json = decodeReply(payload, command: "nex pipeline run")
+    if asJSON {
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    let runID = (json["run_id"] as? String) ?? "?"
+    let status = (json["status"] as? String) ?? "?"
+    print("run \(runID) [\(status)]")
+    if let detail = json["status_detail"] as? String, !detail.isEmpty {
+        print(detail)
+    }
+}
+
+private func handlePipelineHandoff(outcome: String, args: inout ArraySlice<String>) {
+    let summary = parseFlag("--summary", from: &args)
+    let output = parseFlag("--output", from: &args)
+    let runID = parseFlag("--run", from: &args)
+    let nodeID = parseFlag("--node", from: &args)
+    let force = popSwitch("--force", from: &args)
+    let asJSON = popSwitch("--json", from: &args)
+    rejectLeftoverArgs(args, command: "nex pipeline \(outcome)")
+
+    var payload: [String: Any] = ["command": "pipeline-handoff", "outcome": outcome]
+    if let summary { payload["summary"] = summary }
+    if let output { payload["output"] = output }
+    if let runID { payload["run_id"] = runID }
+    if let nodeID { payload["node_id"] = nodeID }
+    if force { payload["force"] = true }
+    if let paneID = ProcessInfo.processInfo.environment["NEX_PANE_ID"] {
+        payload["pane_id"] = paneID
+    }
+
+    let json = decodeReply(payload, command: "nex pipeline \(outcome)")
+    if asJSON {
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    let runIDOut = (json["run_id"] as? String) ?? "?"
+    let nodeIDOut = (json["node_id"] as? String) ?? "?"
+    let runStatus = (json["run_status"] as? String) ?? "?"
+    print("\(outcome): node \(nodeIDOut) in run \(runIDOut) — run is now \(runStatus)")
+}
+
+private func handlePipelineStatus(_ args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    let runID = args.popFirst()
+    rejectLeftoverArgs(args, command: "nex pipeline status")
+
+    var payload: [String: Any] = ["command": "pipeline-status"]
+    if let runID { payload["run_id"] = runID }
+    let json = decodeReply(payload, command: "nex pipeline status")
+
+    if asJSON {
+        let value: Any = json["run"] ?? json["runs"] ?? [Any]()
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+
+    func printRun(_ run: [String: Any]) {
+        let id = (run["id"] as? String) ?? "?"
+        let status = (run["status"] as? String) ?? "?"
+        let detail = (run["status_detail"] as? String) ?? ""
+        print("\(id) [\(status)]\(detail.isEmpty ? "" : " — \(detail)")")
+        for nr in (run["node_runs"] as? [[String: Any]]) ?? [] {
+            let nodeID = (nr["node_id"] as? String) ?? "?"
+            let nrStatus = (nr["status"] as? String) ?? "?"
+            print("  \(nodeID): \(nrStatus)")
+        }
+    }
+
+    if let run = json["run"] as? [String: Any] {
+        printRun(run)
+    } else {
+        let runs = (json["runs"] as? [[String: Any]]) ?? []
+        if runs.isEmpty {
+            print("No pipeline runs.")
+        } else {
+            for run in runs { printRun(run) }
+        }
+    }
+}
+
+private func handlePipelineList(_ args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    rejectLeftoverArgs(args, command: "nex pipeline list")
+    let json = decodeReply(["command": "pipeline-list"], command: "nex pipeline list")
+    let pipelines = (json["pipelines"] as? [[String: Any]]) ?? []
+
+    if asJSON {
+        if let data = try? JSONSerialization.data(withJSONObject: pipelines, options: [.sortedKeys]),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        return
+    }
+    if pipelines.isEmpty {
+        print("No pipelines in ~/.config/nex/pipelines.")
+        return
+    }
+    for p in pipelines {
+        let id = (p["id"] as? String) ?? "?"
+        let name = (p["name"] as? String) ?? id
+        let nodes = (p["node_count"] as? Int) ?? 0
+        let edges = (p["edge_count"] as? Int) ?? 0
+        let errors = (p["error_count"] as? Int) ?? 0
+        let warnings = (p["warning_count"] as? Int) ?? 0
+        var line = "\(id) — \(name) (\(nodes) nodes, \(edges) edges)"
+        if errors > 0 {
+            line += " [\(errors) error(s)]"
+        } else if warnings > 0 {
+            line += " [\(warnings) warning(s)]"
+        }
+        print(line)
+    }
+}
+
+private func handlePipelineValidate(_ args: inout ArraySlice<String>) {
+    let asJSON = popSwitch("--json", from: &args)
+    guard let name = args.popFirst() else {
+        fputs("Usage: nex pipeline validate <name> [--json]\n", stderr)
+        exit(1)
+    }
+    rejectLeftoverArgs(args, command: "nex pipeline validate")
+
+    let json = decodeReply(["command": "pipeline-validate", "name": name], command: "nex pipeline validate")
+    let issues = (json["issues"] as? [[String: Any]]) ?? []
+    let valid = (json["valid"] as? Bool) ?? false
+
+    if asJSON {
+        var clean = json
+        clean.removeValue(forKey: "ok")
+        if let data = try? JSONSerialization.data(withJSONObject: clean, options: .sortedKeys),
+           let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+        exit(valid ? 0 : 1)
+    }
+
+    if issues.isEmpty {
+        print("\(name): valid")
+    } else {
+        for issue in issues {
+            let severity = (issue["severity"] as? String) ?? "?"
+            let message = (issue["message"] as? String) ?? ""
+            print("\(severity): \(message)")
+        }
+    }
+    exit(valid ? 0 : 1)
+}
+
 // MARK: - Doctor
 
 /// `nex doctor` — run a sequence of IPC health checks (plus a local
@@ -5293,6 +5532,8 @@ case "diff":
     handleDiff(&args)
 case "graft":
     handleGraft(&args)
+case "pipeline":
+    handlePipeline(&args)
 case "web":
     handleWeb(&args)
 case "doctor":
