@@ -2,9 +2,11 @@ import SwiftUI
 
 struct StatusBarPopoverView: View {
     let items: [StatusBarItem]
+    var pipelineItems: [StatusBarPipelineItem] = []
     var waitingColor: Color = .blue
     var runningColor: Color = .green
     let onSelectPane: (UUID, UUID) -> Void
+    var onSelectPipeline: (UUID) -> Void = { _ in }
 
     private var groupedItems: [(workspaceName: String, workspaceColor: WorkspaceColor, panes: [StatusBarItem])] {
         let grouped = Dictionary(grouping: items) { $0.workspaceID }
@@ -18,11 +20,14 @@ struct StatusBarPopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if items.isEmpty {
+            if items.isEmpty, pipelineItems.isEmpty {
                 allClearView
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
+                        if !pipelineItems.isEmpty {
+                            pipelinesSection
+                        }
                         ForEach(groupedItems, id: \.workspaceName) { group in
                             workspaceSection(
                                 name: group.workspaceName,
@@ -36,6 +41,54 @@ struct StatusBarPopoverView: View {
             }
         }
         .frame(width: 280)
+    }
+
+    private var pipelinesSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.caption2)
+                Text("Pipelines")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+
+            ForEach(pipelineItems) { item in
+                pipelineRow(item)
+            }
+            Divider().padding(.vertical, 4)
+        }
+    }
+
+    private func pipelineRow(_ item: StatusBarPipelineItem) -> some View {
+        Button {
+            onSelectPipeline(item.runID)
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.name)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(item.activeNodeIDs.isEmpty ? item.status.rawValue : "\(item.activeNodeIDs.joined(separator: ", ")) · \(item.status.rawValue)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if item.status == .running || item.status == .launching {
+                    Circle().fill(runningColor).frame(width: 8, height: 8)
+                } else if item.status == .awaitingApproval || item.status == .paused {
+                    Circle().fill(waitingColor).frame(width: 8, height: 8)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func workspaceSection(name: String, color: WorkspaceColor, panes: [StatusBarItem]) -> some View {

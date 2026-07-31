@@ -32,7 +32,9 @@ actor PersistenceService {
                 pnRecords: snapshot.pnRecords,
                 arRecords: snapshot.arRecords,
                 groupRecords: snapshot.groupRecords,
-                stateRecords: snapshot.stateRecords
+                stateRecords: snapshot.stateRecords,
+                pipelineRunRecords: snapshot.pipelineRunRecords,
+                pipelineNodeRunRecords: snapshot.pipelineNodeRunRecords
             )
         }
     }
@@ -43,7 +45,9 @@ actor PersistenceService {
         pnRecords: [PaneRecord],
         arRecords: [RepoAssociationRecord],
         groupRecords: [WorkspaceGroupRecord],
-        stateRecords: [AppStateRecord]
+        stateRecords: [AppStateRecord],
+        pipelineRunRecords: [PipelineRunRecord],
+        pipelineNodeRunRecords: [PipelineNodeRunRecord]
     ) async {
         do {
             try await db.writer.write { db in
@@ -52,6 +56,8 @@ actor PersistenceService {
                 try WorkspaceRecord.deleteAll(db)
                 try RepoRecord.deleteAll(db)
                 try WorkspaceGroupRecord.deleteAll(db)
+                try PipelineNodeRunRecord.deleteAll(db)
+                try PipelineRunRecord.deleteAll(db)
 
                 for record in repoRecords {
                     try record.insert(db)
@@ -71,6 +77,12 @@ actor PersistenceService {
                 for record in stateRecords {
                     try record.save(db)
                 }
+                for record in pipelineRunRecords {
+                    try record.insert(db)
+                }
+                for record in pipelineNodeRunRecords {
+                    try record.insert(db)
+                }
             }
         } catch {
             print("PersistenceService: write failed — \(error)")
@@ -85,6 +97,7 @@ actor PersistenceService {
         var topLevelOrder: [SidebarID]
         var activeWorkspaceID: UUID?
         var repoRegistry: IdentifiedArrayOf<Repo>
+        var pipelineRuns: [PipelineRun]
     }
 
     func load() -> LoadResult {
@@ -122,6 +135,7 @@ actor PersistenceService {
 
                     var panes = IdentifiedArrayOf<Pane>()
                     var webPanes: [UUID: WebPaneState] = [:]
+                    var pipelinePanes: [UUID: PipelinePaneState] = [:]
                     for pr in paneRecords {
                         guard let paneID = UUID(uuidString: pr.id) else { continue }
                         let paneType = PaneType(rawValue: pr.type) ?? .shell
@@ -163,6 +177,13 @@ actor PersistenceService {
                                 activeTabID: activeID,
                                 isPrivate: pr.webIsPrivate ?? false
                             )
+                        }
+                        if paneType == .pipeline {
+                            // The document itself is not persisted —
+                            // just the name. `AppReducer`'s `.stateLoaded`
+                            // handler re-loads it from YAML so the pane
+                            // doesn't come back empty after a restart.
+                            pipelinePanes[paneID] = PipelinePaneState(pipelineName: pr.pipelineName)
                         }
                     }
 
@@ -219,6 +240,7 @@ actor PersistenceService {
                         labels: labels,
                         icon: icon,
                         webPanes: webPanes,
+                        pipelinePanes: pipelinePanes,
                         profileName: record.profileName
                     )
                     workspaces.append(workspace)
@@ -264,12 +286,95 @@ actor PersistenceService {
                     .flatMap { try? JSONDecoder().decode([SidebarID].self, from: $0) }
                     ?? []
 
+                // Load pipeline runs. A node run left non-terminal by an
+                // unclean shutdown comes back `.interrupted`, and its run
+                // is forced to `.paused` — `nex pipeline resume` (a
+                // follow-up phase) is the only way an interrupted run
+                // re-engages (issue section 5).
+                let pipelineRunRecords = try PipelineRunRecord.fetchAll(db)
+                let pipelineNodeRunRecords = try PipelineNodeRunRecord.fetchAll(db)
+                var nodeRunsByRunID: [String: [PipelineNodeRun]] = [:]
+                for nr in pipelineNodeRunRecords {
+                    guard let nrID = UUID(uuidString: nr.id) else { continue }
+                    let warnings: [String] = (nr.warningsJSON.data(using: .utf8))
+                        .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+                    let nodeRun = PipelineNodeRun(
+                        id: nrID,
+                        nodeID: nr.nodeID,
+                        attempt: nr.attempt,
+                        paneID: nr.paneID.flatMap { UUID(uuidString: $0) },
+                        agentSessionID: nr.agentSessionID,
+                        status: PipelineNodeRunStatus(rawValue: nr.status) ?? .interrupted,
+                        summary: nr.summary,
+                        outputPath: nr.outputPath,
+                        warnings: warnings,
+                        feedbackSourceNodeRunID: nr.feedbackSourceNodeRunID.flatMap { UUID(uuidString: $0) },
+                        startedAt: Date(timeIntervalSince1970: nr.startedAt),
+                        updatedAt: Date(timeIntervalSince1970: nr.updatedAt),
+                        completedAt: nr.completedAt.map { Date(timeIntervalSince1970: $0) }
+                    )
+                    nodeRunsByRunID[nr.runID, default: []].append(nodeRun)
+                }
+
+                var pipelineRuns: [PipelineRun] = []
+                for rr in pipelineRunRecords {
+                    guard let runID = UUID(uuidString: rr.id),
+                          let definition = try? PipelineDefinition.fromYAML(rr.definitionYAML, id: rr.definitionID)
+                    else { continue }
+                    let inputs: [String: String] = (rr.inputsJSON.data(using: .utf8))
+                        .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+                    let edgeTraversals: [String: Int] = (rr.edgeTraversalsJSON.data(using: .utf8))
+                        .flatMap { try? JSONDecoder().decode([String: Int].self, from: $0) } ?? [:]
+
+                    var restoredNodeRuns = IdentifiedArrayOf<PipelineNodeRun>()
+                    var wasInterrupted = false
+                    for var nodeRun in nodeRunsByRunID[rr.id] ?? [] {
+                        if !nodeRun.status.isTerminal {
+                            wasInterrupted = true
+                            nodeRun.status = .interrupted
+                        }
+                        restoredNodeRuns.append(nodeRun)
+                    }
+
+                    var status = PipelineRunStatus(rawValue: rr.status) ?? .paused
+                    var statusDetail = rr.statusDetail
+                    if wasInterrupted, !status.isTerminal {
+                        status = .paused
+                        // Must carry the `PipelineRunPauseReason` prefix
+                        // convention — `nex pipeline resume` parses it to
+                        // pick the right re-engagement message (issue
+                        // #282 phase 7).
+                        statusDetail = PipelineRunPauseReason.detail(
+                            .appRestart, "interrupted by app restart — run `nex pipeline resume` to re-engage"
+                        )
+                    }
+
+                    pipelineRuns.append(PipelineRun(
+                        id: runID,
+                        definitionID: rr.definitionID,
+                        definitionSnapshot: definition,
+                        status: status,
+                        statusDetail: statusDetail,
+                        location: PipelineLocation(rawValue: rr.location) ?? .current,
+                        workspaceID: rr.workspaceID.flatMap { UUID(uuidString: $0) },
+                        worktreePath: rr.worktreePath,
+                        runDir: rr.runDir,
+                        inputs: inputs,
+                        nodeRuns: restoredNodeRuns,
+                        edgeTraversals: edgeTraversals,
+                        createdAt: Date(timeIntervalSince1970: rr.createdAt),
+                        updatedAt: Date(timeIntervalSince1970: rr.updatedAt),
+                        completedAt: rr.completedAt.map { Date(timeIntervalSince1970: $0) }
+                    ))
+                }
+
                 return LoadResult(
                     workspaces: workspaces,
                     groups: groups,
                     topLevelOrder: topLevelOrder,
                     activeWorkspaceID: activeID,
-                    repoRegistry: repoRegistry
+                    repoRegistry: repoRegistry,
+                    pipelineRuns: pipelineRuns
                 )
             }
         } catch {
@@ -279,7 +384,8 @@ actor PersistenceService {
                 groups: [],
                 topLevelOrder: [],
                 activeWorkspaceID: nil,
-                repoRegistry: []
+                repoRegistry: [],
+                pipelineRuns: []
             )
         }
     }
@@ -296,6 +402,8 @@ struct PersistenceSnapshot {
     let arRecords: [RepoAssociationRecord]
     let groupRecords: [WorkspaceGroupRecord]
     let stateRecords: [AppStateRecord]
+    let pipelineRunRecords: [PipelineRunRecord]
+    let pipelineNodeRunRecords: [PipelineNodeRunRecord]
 
     init(state: AppReducer.State) {
         repoRecords = state.repoRegistry.map { repo in
@@ -358,6 +466,9 @@ struct PersistenceSnapshot {
                         webActiveTabID = webState.activeTabID?.uuidString
                     }
                 }
+                let pipelineName: String? = pane.type == .pipeline
+                    ? workspace.pipelinePanes[pane.id]?.pipelineName
+                    : nil
                 return PaneRecord(
                     id: pane.id.uuidString,
                     workspaceID: workspace.id.uuidString,
@@ -374,7 +485,8 @@ struct PersistenceSnapshot {
                     webURL: webURL,
                     webTabsJSON: webTabsJSON,
                     webActiveTabID: webActiveTabID,
-                    webIsPrivate: webIsPrivate
+                    webIsPrivate: webIsPrivate,
+                    pipelineName: pipelineName
                 )
             }
         }
@@ -419,6 +531,51 @@ struct PersistenceSnapshot {
                 value: topLevelJSON
             )
         ]
+
+        let prunedRuns = PipelineRun.pruned(state.pipelines.runs)
+        pipelineRunRecords = prunedRuns.map { run in
+            let yaml = (try? run.definitionSnapshot.toYAML()) ?? ""
+            let inputsData = (try? JSONEncoder().encode(run.inputs)) ?? Data()
+            let edgeData = (try? JSONEncoder().encode(run.edgeTraversals)) ?? Data()
+            return PipelineRunRecord(
+                id: run.id.uuidString,
+                definitionID: run.definitionID,
+                definitionYAML: yaml,
+                status: run.status.rawValue,
+                statusDetail: run.statusDetail,
+                location: run.location.rawValue,
+                workspaceID: run.workspaceID?.uuidString,
+                worktreePath: run.worktreePath,
+                runDir: run.runDir,
+                inputsJSON: String(data: inputsData, encoding: .utf8) ?? "{}",
+                edgeTraversalsJSON: String(data: edgeData, encoding: .utf8) ?? "{}",
+                currentNodeRunID: nil,
+                createdAt: run.createdAt.timeIntervalSince1970,
+                updatedAt: run.updatedAt.timeIntervalSince1970,
+                completedAt: run.completedAt?.timeIntervalSince1970
+            )
+        }
+        pipelineNodeRunRecords = prunedRuns.flatMap { run in
+            run.nodeRuns.map { nodeRun in
+                let warningsData = (try? JSONEncoder().encode(nodeRun.warnings)) ?? Data()
+                return PipelineNodeRunRecord(
+                    id: nodeRun.id.uuidString,
+                    runID: run.id.uuidString,
+                    nodeID: nodeRun.nodeID,
+                    attempt: nodeRun.attempt,
+                    paneID: nodeRun.paneID?.uuidString,
+                    agentSessionID: nodeRun.agentSessionID,
+                    status: nodeRun.status.rawValue,
+                    summary: nodeRun.summary,
+                    outputPath: nodeRun.outputPath,
+                    warningsJSON: String(data: warningsData, encoding: .utf8) ?? "[]",
+                    feedbackSourceNodeRunID: nodeRun.feedbackSourceNodeRunID?.uuidString,
+                    startedAt: nodeRun.startedAt.timeIntervalSince1970,
+                    updatedAt: nodeRun.updatedAt.timeIntervalSince1970,
+                    completedAt: nodeRun.completedAt?.timeIntervalSince1970
+                )
+            }
+        }
     }
 }
 

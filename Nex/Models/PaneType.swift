@@ -4,4 +4,5 @@ enum PaneType: String, Codable {
     case scratchpad
     case diff
     case web
+    case pipeline
 }

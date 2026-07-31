@@ -21,6 +21,144 @@ Orchestrate multi-agent development workflows using the Nex terminal
 multiplexer. Spawn named child panes, start Claude agents in them, distribute
 work, and collect results.
 
+## Structured pipelines (`nex pipeline`)
+
+Nex has a first-class **pipeline** feature (issue #282): a graph of agent
+nodes with outcome-conditional edges (`done`/`fail`/`partial`), defined
+as YAML in `~/.config/nex/pipelines/*.yaml` and editable in a native
+canvas pane (`nex pane list` shows pane type `pipeline`). This codifies
+the manual fan-out/handoff workflow the rest of this skill teaches —
+**reach for a pipeline when the workflow is a known, repeatable graph**
+(plan → implement → audit → test, with bounce-back on audit failure);
+keep using the manual patterns below for one-off or exploratory fan-outs
+where the graph isn't known ahead of time.
+
+### Defining a pipeline
+
+Write (or hand-edit) a YAML file at `~/.config/nex/pipelines/<id>.yaml`
+— the filename slug is the pipeline's id:
+
+```yaml
+name: Feature Loop
+description: plan → implement → audit, with audit bounce-back
+version: 1
+location: current            # current | workspace | worktree
+inputs:
+  task: { description: What to build, required: true }
+entry: planner
+nodes:
+  - id: planner
+    mode: headless            # headless (claude -p, exits when done) | interactive
+    permissionMode: default   # default | acceptEdits | plan | bypassPermissions | dontAsk
+    prompt: |
+      Plan the implementation of: {{inputs.task}}
+  - id: implementer
+    mode: interactive
+    permissionMode: acceptEdits
+    prompt: |
+      Implement the plan at {{nodes.planner.output}}.
+      {{feedback}}
+  - id: auditor
+    mode: headless
+    prompt: Review {{nodes.implementer.output}}; fail with findings if inadequate.
+edges:
+  - { from: planner,     on: done, to: implementer }
+  - { from: implementer, on: done, to: auditor }
+  - { from: auditor,     on: fail, to: implementer, maxTraversals: 3 }
+  - { from: auditor,     on: done, to: implementer, requiresApproval: true }
+```
+
+`{{inputs.<name>}}`, `{{nodes.<id>.output}}` (path to that node's latest
+deliverable), `{{nodes.<id>.summary}}`, `{{run.id}}`, `{{run.dir}}`, and
+`{{feedback}}` (empty on first visit; the routing node's summary +
+artifact path on a bounce-back) are the available placeholders. v1 is
+`agent: claude` only. `nex pipeline validate <name>` checks a definition
+for schema errors (unknown refs, `headless` + `permissionMode: plan`,
+an exactly-duplicated edge, unreachable nodes) before you run it.
+
+**Fan-out**: a node can have more than one edge off the same outcome —
+e.g. two `{ from: planner, on: done, to: ... }` edges to different
+targets both fire when planner hands off `done`, spawning two
+concurrently-running nodes with their own panes. There's no AND-join in
+v1: if two edges both point at the same already-running target, the
+second one just coalesces (no double-spawn) rather than waiting for
+both upstream branches. A branch that fails with no matching fail edge
+fails the WHOLE run and marks every other still-active branch
+`interrupted` (panes left open for inspection).
+
+### Running one
+
+```bash
+nex pipeline run <name> [--input key=value]...   # → run_id, status "launching"
+nex pipeline status <run-id> [--json]            # poll: run + per-node status
+nex pipeline watch <run-id>                       # stream every transition until terminal
+nex pipeline list [--json]                        # every definition on disk
+```
+
+The engine spawns each node as an ordinary pane labeled
+`pipe:<node-id>:<run-id-prefix>` (visible in `nex pane list`), types the
+launch command, and waits for the node's Claude session to actually
+start before considering it live. **You do not drive node panes
+yourself** — the engine owns their lifecycle (spawn, bounce-back reuse,
+liveness) once a run is `.launching`/`.running`. Treat a pipeline run as
+a black box you poll via `status`/`watch`, not a set of panes you `pane
+send` into.
+
+### The handoff protocol (what a node's own prompt must do)
+
+Every node's rendered prompt gets a mandatory appendix instructing it to
+write its deliverable to `output.md` in its attempt directory, then
+finish with exactly one of:
+
+```bash
+nex pipeline done    --summary "..."
+nex pipeline fail    --summary "..."
+nex pipeline partial --summary "..."
+```
+
+This is the **only** machine-readable completion signal — there is no
+"the process exited" detection for typed launches. If you are the agent
+running *inside* a pipeline node (you'll see `NEX_PIPELINE_RUN` /
+`NEX_PIPELINE_NODE` / `NEX_PIPELINE_ATTEMPT` in your environment), your
+job is exactly what your prompt says, ending with one of the three verbs
+above — never leave a pipeline node's turn without calling one. If the
+command errors (Nex momentarily unreachable), retry every 30s. A Stop
+with no handoff eventually stalls the node and pauses the run — the
+engine never guesses an outcome for you.
+
+### Approval gates, stalls, and manual control
+
+```bash
+nex pipeline approve <run-id> [--edge <key>]   # continue past a requiresApproval edge
+nex pipeline deny    <run-id> [--edge <key>]   # deny one gate (→ run cancelled if that was the last branch)
+nex pipeline cancel  <run-id>                  # cancel a non-terminal run outright
+nex pipeline retry   <run-id>                  # force a fresh attempt of every stuck/failed node
+nex pipeline resume  <run-id>                  # re-engage a run paused (stalled node / closed pane / app restart)
+```
+
+A run pauses (never guesses) when: an edge has `requiresApproval: true`
+(status `awaitingApproval`), a node stalls (Stop with no handoff, 120s
+grace), its pane gets closed, or Nex restarts mid-run. `pipeline status`
+/ `watch` show the pause reason (and, in `pending_approvals`, every
+currently-gated edge — a fan-out graph can have more than one pending
+at once, hence `--edge <key>` to disambiguate; omit it when there's only
+one). Resolve with `approve`/`deny`, `retry`, or `resume` — outside-the-
+pane manual overrides also work via `nex pipeline done|fail|partial
+--run <id> --node <slug> --force` for a node that's stuck. `pipeline
+status`'s `active_node_ids` lists every currently-running branch, and
+each node-run entry's `from_node_id`/`from_node_run_id` shows which
+upstream node spawned it — both needed once a run can have more than one
+node active at once.
+
+### Run locations
+
+`location: current` (default) spawns node panes in the caller's/active
+workspace, alongside whatever else is open there. `location: workspace`
+opens a dedicated workspace for the run; `location: worktree` also
+creates a fresh git worktree first (the same mechanics as `workspace
+create --worktree`) — reach for these two when a pipeline shouldn't
+share a workspace with unrelated panes, or needs an isolated checkout.
+
 ## Prerequisites
 
 You must be running inside a Nex pane. Verify with:

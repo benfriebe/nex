@@ -18,6 +18,11 @@ struct ClosedPaneSnapshot: Equatable {
     /// non-web panes and for closed private panes (which intentionally
     /// drop their tabs at quit/close time).
     var webState: WebPaneState?
+    /// Which pipeline definition a closed `.pipeline` pane had open.
+    /// Only the name is carried — reopen re-loads the document from
+    /// YAML rather than restoring canvas/undo state. Nil for non-pipeline
+    /// panes and for a pipeline pane that was still on the library view.
+    var pipelineName: String?
 }
 
 @Reducer
@@ -57,6 +62,10 @@ struct WorkspaceFeature {
         /// don't need to learn the type. Mirrors `parkedPanes`'s
         /// "lives alongside `panes`" model.
         var webPanes: [UUID: WebPaneState] = [:]
+        /// Sidecar state for `.pipeline` panes — open document, canvas
+        /// selection/undo-redo/viewport, library vs. editor mode.
+        /// Mirrors `webPanes`.
+        var pipelinePanes: [UUID: PipelinePaneState] = [:]
         var zoomedPaneID: UUID?
         var savedLayout: PaneLayout?
         var searchingPaneID: UUID?
@@ -161,6 +170,7 @@ struct WorkspaceFeature {
             labels: [String] = [],
             icon: GroupIcon? = nil,
             webPanes: [UUID: WebPaneState] = [:],
+            pipelinePanes: [UUID: PipelinePaneState] = [:],
             profileName: String? = nil
         ) {
             self.id = id
@@ -176,6 +186,7 @@ struct WorkspaceFeature {
             self.lastAccessedAt = lastAccessedAt
             self.labels = labels
             self.webPanes = webPanes
+            self.pipelinePanes = pipelinePanes
             self.profileName = profileName
         }
 
@@ -437,6 +448,34 @@ struct WorkspaceFeature {
         /// page-side marker click (which then highlights the row).
         /// Pass nil to clear the focus highlight.
         case webBatchItemFocused(paneID: UUID, itemID: UUID?)
+        /// Open a new `.pipeline` pane (library view — no document
+        /// loaded yet), split off the focused pane. Mirrors
+        /// `openDiffPane`'s simpler (non-reusable) split path.
+        case openPipelinePane
+        /// Load a definition by id from `PipelineDefinitionStore` into
+        /// the pane's document slot (library -> editor transition, or
+        /// switching definitions from the library view).
+        case pipelineOpenDefinition(paneID: UUID, name: String)
+        case pipelineDocumentLoaded(paneID: UUID, definition: PipelineDefinition)
+        case pipelineLoadFailed(paneID: UUID, message: String)
+        /// Refresh the pane's cached listing of `~/.config/nex/pipelines`
+        /// for the library view.
+        case pipelineLibraryRequested(paneID: UUID)
+        case pipelineLibraryLoaded(paneID: UUID, names: [String])
+        /// Create a new scaffold definition (one node, no edges), save
+        /// it, and open it in the same pane.
+        case pipelineCreateDefinition(paneID: UUID)
+        case pipelineDeleteDefinition(paneID: UUID, name: String)
+        /// Back to the library view, discarding the in-memory document
+        /// (it's already saved — autosave keeps disk current).
+        case pipelineCloseDocument(paneID: UUID)
+        case pipelineEdit(paneID: UUID, edit: PipelineEdit)
+        case pipelineUndo(paneID: UUID)
+        case pipelineRedo(paneID: UUID)
+        case pipelineSelect(paneID: UUID, selection: PipelineCanvasSelection)
+        case pipelineSetViewport(paneID: UUID, zoom: CGFloat, pan: CGPoint)
+        case pipelineSaved(paneID: UUID)
+        case pipelineSaveFailed(paneID: UUID, message: String)
         case toggleMarkdownEdit(UUID)
         case increaseMarkdownFontSize(UUID)
         case decreaseMarkdownFontSize(UUID)
@@ -488,8 +527,31 @@ struct WorkspaceFeature {
     @Dependency(\.gitService) var gitService
     @Dependency(\.editorService) var editorService
     @Dependency(\.webPaneStore) var webPaneStore
+    @Dependency(\.pipelineDefinitionStore) var pipelineDefinitionStore
     @Dependency(\.date.now) var now
     @Dependency(\.uuid) var uuid
+
+    private enum PipelineAutosaveID: Hashable {
+        case debounce(UUID)
+    }
+
+    /// Debounced (500ms) autosave through `PipelineDefinitionStore`,
+    /// matching `MarkdownEditorView`'s disk-autosave cadence. Per-pane
+    /// cancel id so rapid edits collapse into a single write and two
+    /// pipeline panes never cancel each other's pending save.
+    private func schedulePipelineAutosave(paneID: UUID, definition: PipelineDefinition) -> Effect<Action> {
+        let store = pipelineDefinitionStore
+        return .run { send in
+            try await Task.sleep(for: .milliseconds(500))
+            do {
+                try store.save(definition)
+                await send(.pipelineSaved(paneID: paneID))
+            } catch {
+                await send(.pipelineSaveFailed(paneID: paneID, message: error.localizedDescription))
+            }
+        }
+        .cancellable(id: PipelineAutosaveID.debounce(paneID), cancelInFlight: true)
+    }
 
     /// Push the workspace's current sync group to `SurfaceManager`.
     /// Cheap when sync is off (the manager clears the entry); cheap
@@ -1178,6 +1240,190 @@ struct WorkspaceFeature {
                 state.webPanes[paneID] = webState
                 return .none
 
+            case .openPipelinePane:
+                let newPaneID = uuid()
+                let newPane = Pane(
+                    id: newPaneID,
+                    type: .pipeline,
+                    title: "Pipelines",
+                    workingDirectory: state.focusedPane?.workingDirectory ?? NSHomeDirectory(),
+                    createdAt: now,
+                    lastActivityAt: now
+                )
+                state.pipelinePanes[newPaneID] = PipelinePaneState()
+
+                if let sourceID = state.focusedPaneID {
+                    if let saved = state.savedLayout {
+                        state.layout = saved
+                        state.zoomedPaneID = nil
+                        state.savedLayout = nil
+                    }
+                    let (newLayout, _) = state.layout.splitting(
+                        paneID: sourceID,
+                        direction: .horizontal,
+                        newPaneID: newPaneID
+                    )
+                    state.layout = newLayout
+                } else {
+                    state.layout = .leaf(newPaneID)
+                }
+                state.panes.append(newPane)
+                state.setFocus(newPaneID)
+                state.currentLayoutIndex = nil
+                return .send(.pipelineLibraryRequested(paneID: newPaneID))
+
+            case let .pipelineLibraryRequested(paneID):
+                return .run { send in
+                    let names = pipelineDefinitionStore.list()
+                    await send(.pipelineLibraryLoaded(paneID: paneID, names: names))
+                }
+
+            case let .pipelineLibraryLoaded(paneID, names):
+                state.pipelinePanes[paneID]?.libraryNames = names
+                return .none
+
+            case let .pipelineOpenDefinition(paneID, name):
+                return .run { send in
+                    do {
+                        let definition = try pipelineDefinitionStore.load(name)
+                        await send(.pipelineDocumentLoaded(paneID: paneID, definition: definition))
+                    } catch {
+                        await send(.pipelineLoadFailed(paneID: paneID, message: error.localizedDescription))
+                    }
+                }
+
+            case let .pipelineDocumentLoaded(paneID, definition):
+                var document = definition
+                // Reconcile positions immediately: a hand-written YAML
+                // with no `ui:` block still renders sensibly, and the
+                // FIRST autosave captures the auto-layout.
+                document.ui.nodes = PipelineAutoLayout.reconciledPositions(for: document)
+                var pipelineState = state.pipelinePanes[paneID] ?? PipelinePaneState()
+                pipelineState.pipelineName = document.id
+                pipelineState.document = document
+                pipelineState.mode = .edit
+                pipelineState.selection = .none
+                pipelineState.undoStack = []
+                pipelineState.redoStack = []
+                pipelineState.isDirty = false
+                pipelineState.validationIssues = document.validate()
+                state.pipelinePanes[paneID] = pipelineState
+                state.mutatePane(id: paneID) {
+                    $0.title = document.name
+                    $0.label = document.id
+                }
+                return .none
+
+            case let .pipelineLoadFailed(paneID, message):
+                // Surface as a validation-style issue on the (still
+                // usable) pane rather than a blocking modal.
+                state.pipelinePanes[paneID]?.validationIssues = [.error(message)]
+                return .none
+
+            case let .pipelineCreateDefinition(paneID):
+                let existing = Set(pipelineDefinitionStore.list())
+                var candidate = "new-pipeline"
+                var suffix = 1
+                while existing.contains(candidate) {
+                    candidate = "new-pipeline-\(suffix)"
+                    suffix += 1
+                }
+                let scaffold = PipelineDefinition(
+                    id: candidate,
+                    name: "New Pipeline",
+                    entry: "start",
+                    nodes: [PipelineNode(id: "start", prompt: "Describe the task.")]
+                )
+                return .run { send in
+                    do {
+                        try pipelineDefinitionStore.save(scaffold)
+                        await send(.pipelineDocumentLoaded(paneID: paneID, definition: scaffold))
+                    } catch {
+                        await send(.pipelineLoadFailed(paneID: paneID, message: error.localizedDescription))
+                    }
+                }
+
+            case let .pipelineDeleteDefinition(paneID, name):
+                let wasOpen = state.pipelinePanes[paneID]?.pipelineName == name
+                return .run { send in
+                    try? pipelineDefinitionStore.delete(name)
+                    if wasOpen {
+                        await send(.pipelineCloseDocument(paneID: paneID))
+                    }
+                    let names = pipelineDefinitionStore.list()
+                    await send(.pipelineLibraryLoaded(paneID: paneID, names: names))
+                }
+
+            case let .pipelineCloseDocument(paneID):
+                state.pipelinePanes[paneID] = PipelinePaneState(libraryNames: state.pipelinePanes[paneID]?.libraryNames ?? [])
+                state.mutatePane(id: paneID) {
+                    $0.title = "Pipelines"
+                    $0.label = nil
+                }
+                return .send(.pipelineLibraryRequested(paneID: paneID))
+
+            case let .pipelineEdit(paneID, edit):
+                guard var pipelineState = state.pipelinePanes[paneID],
+                      let before = pipelineState.document
+                else { return .none }
+                let changed = pipelineState.apply(edit)
+                guard changed, let after = pipelineState.document else { return .none }
+                pipelineState.undoStack.append(before)
+                if pipelineState.undoStack.count > PipelinePaneState.undoStackLimit {
+                    pipelineState.undoStack.removeFirst()
+                }
+                pipelineState.redoStack.removeAll()
+                pipelineState.isDirty = true
+                pipelineState.validationIssues = after.validate()
+                state.pipelinePanes[paneID] = pipelineState
+                return schedulePipelineAutosave(paneID: paneID, definition: after)
+
+            case let .pipelineUndo(paneID):
+                guard var pipelineState = state.pipelinePanes[paneID],
+                      let current = pipelineState.document,
+                      let previous = pipelineState.undoStack.popLast()
+                else { return .none }
+                pipelineState.redoStack.append(current)
+                pipelineState.document = previous
+                pipelineState.selection = .none
+                pipelineState.isDirty = true
+                pipelineState.validationIssues = previous.validate()
+                state.pipelinePanes[paneID] = pipelineState
+                return schedulePipelineAutosave(paneID: paneID, definition: previous)
+
+            case let .pipelineRedo(paneID):
+                guard var pipelineState = state.pipelinePanes[paneID],
+                      let current = pipelineState.document,
+                      let next = pipelineState.redoStack.popLast()
+                else { return .none }
+                pipelineState.undoStack.append(current)
+                pipelineState.document = next
+                pipelineState.selection = .none
+                pipelineState.isDirty = true
+                pipelineState.validationIssues = next.validate()
+                state.pipelinePanes[paneID] = pipelineState
+                return schedulePipelineAutosave(paneID: paneID, definition: next)
+
+            case let .pipelineSelect(paneID, selection):
+                state.pipelinePanes[paneID]?.selection = selection
+                return .none
+
+            case let .pipelineSetViewport(paneID, zoom, pan):
+                state.pipelinePanes[paneID]?.zoom = PipelineCanvasGeometry.clampedZoom(zoom)
+                state.pipelinePanes[paneID]?.pan = pan
+                return .none
+
+            case let .pipelineSaved(paneID):
+                state.pipelinePanes[paneID]?.isDirty = false
+                return .none
+
+            case let .pipelineSaveFailed(paneID, message):
+                let banner = "Save failed: \(message)"
+                if state.pipelinePanes[paneID]?.validationIssues.contains(where: { $0.message == banner }) != true {
+                    state.pipelinePanes[paneID]?.validationIssues.append(.error(banner))
+                }
+                return .none
+
             case .createScratchpad:
                 let newPaneID = uuid()
                 let newPane = Pane(
@@ -1267,6 +1513,7 @@ struct WorkspaceFeature {
                 let hasBackingSurface = paneType == .shell
                     || (state.panes[id: paneID]?.isUsingExternalEditor ?? false)
                 let isWebPane = paneType == .web
+                let isPipelinePane = paneType == .pipeline
                 if let pane = state.panes[id: paneID] {
                     // For web panes the sidecar holds the URL — capture
                     // it into the snapshot so `reopenClosedPane` can
@@ -1289,7 +1536,8 @@ struct WorkspaceFeature {
                             agentSessionID: pane.agentSessionID,
                             agentKind: pane.agentKind,
                             markdownFontSize: pane.markdownFontSize,
-                            webState: snapshotWebState
+                            webState: snapshotWebState,
+                            pipelineName: pane.type == .pipeline ? state.pipelinePanes[paneID]?.pipelineName : nil
                         )
                     )
                     if state.recentlyClosedPanes.count > 10 {
@@ -1298,6 +1546,9 @@ struct WorkspaceFeature {
                 }
                 if isWebPane {
                     state.webPanes.removeValue(forKey: paneID)
+                }
+                if isPipelinePane {
+                    state.pipelinePanes.removeValue(forKey: paneID)
                 }
                 state.panes.remove(id: paneID)
                 let newLayout = state.layout.removing(paneID: paneID)
@@ -1930,13 +2181,25 @@ struct WorkspaceFeature {
                 if snapshot.type == .web, let webState = snapshot.webState {
                     state.webPanes[newPaneID] = webState
                 }
+                var reopenPipelineEffect: Effect<Action> = .none
+                if snapshot.type == .pipeline {
+                    state.pipelinePanes[newPaneID] = PipelinePaneState(pipelineName: snapshot.pipelineName)
+                    // Document isn't carried in the snapshot — reload it
+                    // from YAML (or show the library view when the pane
+                    // was closed without a document open).
+                    if let pipelineName = snapshot.pipelineName {
+                        reopenPipelineEffect = .send(.pipelineOpenDefinition(paneID: newPaneID, name: pipelineName))
+                    } else {
+                        reopenPipelineEffect = .send(.pipelineLibraryRequested(paneID: newPaneID))
+                    }
+                }
                 state.setFocus(newPaneID)
                 state.currentLayoutIndex = nil
 
                 // Non-shell pane types don't need a ghostty surface
                 if snapshot.type == .markdown || snapshot.type == .scratchpad
-                    || snapshot.type == .diff || snapshot.type == .web {
-                    return .none
+                    || snapshot.type == .diff || snapshot.type == .web || snapshot.type == .pipeline {
+                    return reopenPipelineEffect
                 }
 
                 let opacity = ghosttyConfig.backgroundOpacity

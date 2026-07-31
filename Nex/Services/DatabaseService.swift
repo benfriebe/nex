@@ -265,6 +265,83 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Which pipeline definition a `.pipeline` pane has open. Only
+        // the name is persisted — the document itself reloads from
+        // `~/.config/nex/pipelines/<name>.yaml` (config-file-as-
+        // source-of-truth, same idiom as workspace profiles); canvas
+        // undo/redo and zoom/pan are deliberately not persisted.
+        migrator.registerMigration("v19_pipeline_pane") { db in
+            let columns = try db.columns(in: "pane").map(\.name)
+            if !columns.contains("pipelineName") {
+                try db.alter(table: "pane") { t in
+                    t.add(column: "pipelineName", .text)
+                }
+            }
+        }
+
+        // Run tracking for the pipelines engine spine (issue #282 phase
+        // 4). `pipelineRun.workspaceID` deliberately has NO foreign key —
+        // a run's history must survive the owning workspace being
+        // deleted. `pipelineNodeRun` cascades on its parent run.
+        migrator.registerMigration("v20_pipelines") { db in
+            if try !db.tableExists("pipelineRun") {
+                try db.create(table: "pipelineRun") { t in
+                    t.primaryKey("id", .text)
+                    t.column("definitionID", .text).notNull()
+                    t.column("definitionYAML", .text).notNull()
+                    t.column("status", .text).notNull()
+                    t.column("statusDetail", .text)
+                    t.column("location", .text).notNull()
+                    t.column("workspaceID", .text)
+                    t.column("worktreePath", .text)
+                    t.column("runDir", .text).notNull()
+                    t.column("inputsJSON", .text).notNull().defaults(to: "{}")
+                    t.column("edgeTraversalsJSON", .text).notNull().defaults(to: "{}")
+                    t.column("currentNodeRunID", .text)
+                    t.column("createdAt", .double).notNull()
+                    t.column("updatedAt", .double).notNull()
+                    t.column("completedAt", .double)
+                }
+            }
+            if try !db.tableExists("pipelineNodeRun") {
+                try db.create(table: "pipelineNodeRun") { t in
+                    t.primaryKey("id", .text)
+                    t.column("runID", .text)
+                        .notNull()
+                        .references("pipelineRun", onDelete: .cascade)
+                    t.column("nodeID", .text).notNull()
+                    t.column("attempt", .integer).notNull().defaults(to: 1)
+                    t.column("paneID", .text)
+                    t.column("agentSessionID", .text)
+                    t.column("status", .text).notNull()
+                    t.column("summary", .text)
+                    t.column("outputPath", .text)
+                    t.column("warningsJSON", .text).notNull().defaults(to: "[]")
+                    t.column("startedAt", .double).notNull()
+                    t.column("updatedAt", .double).notNull()
+                    t.column("completedAt", .double)
+                }
+            }
+        }
+
+        // Fan-out (issue #282 round 3): `{{feedback}}` on a node with
+        // multiple inbound edges must bind to the specific edge that
+        // fired its spawn, not "whichever else in the run most recently
+        // finished" (ambiguous once concurrent branches exist) — so each
+        // NodeRun now carries a pointer to its source. `pipelineRun`'s
+        // `currentNodeRunID` column is retired in code (replaced by a
+        // computed `activeNodeRunIDs` derived from `nodeRuns`, since a
+        // run can have several live branches at once) but stays in the
+        // schema unused rather than a destructive drop.
+        migrator.registerMigration("v21_pipeline_fanout") { db in
+            let columns = try db.columns(in: "pipelineNodeRun").map(\.name)
+            if !columns.contains("feedbackSourceNodeRunID") {
+                try db.alter(table: "pipelineNodeRun") { t in
+                    t.add(column: "feedbackSourceNodeRunID", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -326,6 +403,10 @@ struct PaneRecord: Codable, FetchableRecord, PersistableRecord {
     /// URL or tabs, so reopen restores a blank pane that still
     /// remembers it is private.
     var webIsPrivate: Bool?
+    /// Which pipeline definition a `.pipeline` pane has open (nil = the
+    /// library view). The document itself is not persisted here — it
+    /// reloads from YAML.
+    var pipelineName: String?
 }
 
 struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {
@@ -368,4 +449,48 @@ struct WorkspaceGroupRecord: Codable, FetchableRecord, PersistableRecord {
     var createdAt: Double
     var sortOrder: Int
     var icon: String?
+}
+
+struct PipelineRunRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "pipelineRun"
+
+    var id: String
+    var definitionID: String
+    /// Frozen YAML snapshot of the definition at launch time — routing
+    /// always evaluates against the graph the run started with, even if
+    /// the source file is edited mid-run.
+    var definitionYAML: String
+    var status: String
+    var statusDetail: String?
+    var location: String
+    var workspaceID: String?
+    var worktreePath: String?
+    var runDir: String
+    var inputsJSON: String
+    var edgeTraversalsJSON: String
+    var currentNodeRunID: String?
+    var createdAt: Double
+    var updatedAt: Double
+    var completedAt: Double?
+}
+
+struct PipelineNodeRunRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "pipelineNodeRun"
+
+    var id: String
+    var runID: String
+    var nodeID: String
+    var attempt: Int
+    var paneID: String?
+    var agentSessionID: String?
+    var status: String
+    var summary: String?
+    var outputPath: String?
+    var warningsJSON: String
+    /// See `PipelineNodeRun.feedbackSourceNodeRunID`. Defaulted so
+    /// existing memberwise-init call sites keep compiling.
+    var feedbackSourceNodeRunID: String? = nil
+    var startedAt: Double
+    var updatedAt: Double
+    var completedAt: Double?
 }

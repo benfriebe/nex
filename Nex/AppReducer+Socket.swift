@@ -45,9 +45,11 @@ extension AppReducer {
                         }
                     }
 
+                    let pipelineStartEffect = pipelineHandleAgentStarted(&state, paneID: paneID)
                     return .merge(
                         .send(.workspaces(.element(id: workspace.id, action: .agentStarted(paneID: paneID, agent: agent)))),
-                        .send(.updateExternalIndicators)
+                        .send(.updateExternalIndicators),
+                        pipelineStartEffect
                     )
 
                 case .agentStopped(let paneID, let backgroundTaskCount):
@@ -67,10 +69,17 @@ extension AppReducer {
                     let shouldNotify = (!isFocused || !isAppActive) && !hasBackgroundWork
                     let shouldBounce = !isAppActive && !hasBackgroundWork
                     let title = workspace.pane(id: paneID)?.title ?? workspace.name
+                    // Raw wire signal (this IS the Stop hook, unlike the
+                    // `.notification` case below which also routes through
+                    // `.agentStopped` for pane-status bookkeeping but must
+                    // NOT arm the stall grace timer) — the 120s stop-grace
+                    // fallback lives here (issue section 3).
+                    let pipelineStopEffect = pipelineHandleStop(&state, paneID: paneID, backgroundTaskCount: backgroundTaskCount)
 
                     return .merge(
                         .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID, backgroundTaskCount: backgroundTaskCount)))),
                         .send(.updateExternalIndicators),
+                        pipelineStopEffect,
                         .run { _ in
                             if shouldNotify {
                                 notifService.post(
@@ -123,9 +132,14 @@ extension AppReducer {
                     // reading "waiting" (issues #215, #220). Claude's own
                     // message is still posted — unlike the synthetic stop-path
                     // notification, it may be an actionable permission prompt.
+                    // Pipeline-side, a Notification is distinct from a real
+                    // Stop: it suspends the stall grace timer (no auto-stall
+                    // while a permission prompt is up) and flags the node
+                    // `.awaitingHuman` rather than arming it (issue section 3).
                     var effects: [Effect<Action>] = [
                         .send(.workspaces(.element(id: workspace.id, action: .agentStopped(paneID: paneID, backgroundTaskCount: backgroundTaskCount)))),
-                        .send(.updateExternalIndicators)
+                        .send(.updateExternalIndicators),
+                        pipelineHandleNotification(&state, paneID: paneID)
                     ]
                     if !isFocused || !isAppActive {
                         effects.append(.run { _ in
@@ -143,13 +157,15 @@ extension AppReducer {
                             id: workspace.id,
                             action: .sessionStarted(paneID: paneID, sessionID: sessionID, agent: agent)
                         ))),
-                        .send(.updateExternalIndicators)
+                        .send(.updateExternalIndicators),
+                        pipelineHandleSessionStarted(&state, paneID: paneID, sessionID: sessionID)
                     )
 
                 case .sessionEnded(let paneID, let sessionID):
                     guard let workspace = state.workspaceContainingPane(paneID)
                     else { return .none }
 
+                    let pipelineEndEffect = pipelineHandleSessionEnded(&state, paneID: paneID, sessionID: sessionID)
                     // Persist so the cleared session id survives the next
                     // launch — otherwise the resume loop on restart would
                     // still see the stale id and reattach a dead session.
@@ -158,7 +174,8 @@ extension AppReducer {
                             id: workspace.id,
                             action: .sessionEnded(paneID: paneID, sessionID: sessionID)
                         ))),
-                        .send(.persistState)
+                        .send(.persistState),
+                        pipelineEndEffect
                     )
 
                 // MARK: Pane commands
@@ -601,6 +618,48 @@ extension AppReducer {
                 case .graftStatus:
                     return handleGraftStatus(state: state, reply: reply)
 
+                case .pipelineRun(let paneID, let name, let inputs):
+                    return handlePipelineRun(
+                        &state, paneID: paneID, name: name, inputs: inputs, reply: reply
+                    )
+
+                case .pipelineHandoff(let paneID, let outcome, let summary, let output, let runID, let nodeID, let force):
+                    return handlePipelineHandoff(
+                        &state, paneID: paneID, outcome: outcome, summary: summary,
+                        output: output, runID: runID, nodeID: nodeID, force: force, reply: reply
+                    )
+
+                case .pipelineCancel(let runID):
+                    return handlePipelineCancel(&state, runID: runID, reply: reply)
+
+                case .pipelineRetry(let runID):
+                    return handlePipelineRetry(&state, runID: runID, reply: reply)
+
+                case .pipelineApprove(let runID, let edgeKey):
+                    return handlePipelineApprove(&state, runID: runID, edgeKey: edgeKey, reply: reply)
+
+                case .pipelineDeny(let runID, let edgeKey):
+                    return handlePipelineDeny(&state, runID: runID, edgeKey: edgeKey, reply: reply)
+
+                case .pipelineResume(let runID):
+                    return handlePipelineResume(&state, runID: runID, reply: reply)
+
+                case .pipelineWatch(let runID):
+                    handlePipelineWatch(&state, runID: runID, reply: reply)
+                    return .none
+
+                case .pipelineStatus(let runID):
+                    handlePipelineStatus(state: state, runID: runID, reply: reply)
+                    return .none
+
+                case .pipelineList:
+                    handlePipelineList(reply: reply)
+                    return .none
+
+                case .pipelineValidate(let name):
+                    handlePipelineValidate(name: name, reply: reply)
+                    return .none
+
                 case .ping:
                     return handlePing(reply: reply)
 
@@ -613,6 +672,10 @@ extension AppReducer {
                         state.webConsoleSubscribers[paneID]?.removeValue(forKey: replyID)
                     }
                     state.webConsoleSubscribers = state.webConsoleSubscribers.filter { !$0.value.isEmpty }
+                    for runID in state.pipelineWatchSubscribers.keys {
+                        state.pipelineWatchSubscribers[runID]?.removeValue(forKey: replyID)
+                    }
+                    state.pipelineWatchSubscribers = state.pipelineWatchSubscribers.filter { !$0.value.isEmpty }
                     return .none
 
                 case .webOpen(let paneID, let url, let isPrivate):

@@ -79,6 +79,28 @@ struct PaneGridView: View {
     /// Workspace-profile name, threaded to `SurfaceContainerView` so its
     /// lazy-create fallback injects the same env as the reducer effect.
     var profileName: String?
+    /// Sidecar state for `.pipeline` panes in this workspace. Keyed by pane id.
+    var pipelinePanes: [UUID: PipelinePaneState] = [:]
+    var onPipelineOpenDefinition: ((UUID, String) -> Void)?
+    var onPipelineCreateDefinition: ((UUID) -> Void)?
+    var onPipelineDeleteDefinition: ((UUID, String) -> Void)?
+    var onPipelineCloseDocument: ((UUID) -> Void)?
+    var onPipelineEdit: ((UUID, PipelineEdit) -> Void)?
+    var onPipelineUndo: ((UUID) -> Void)?
+    var onPipelineRedo: ((UUID) -> Void)?
+    var onPipelineSelect: ((UUID, PipelineCanvasSelection) -> Void)?
+    var onPipelineViewportChange: ((UUID, CGFloat, CGPoint) -> Void)?
+    /// Live runs, looked up per pane via its `PipelinePaneState.mode`'s
+    /// `.monitor(runID)` to feed `PipelineRunHUD` + the canvas status
+    /// overlay (issue #282 phase 7).
+    var pipelineRuns: IdentifiedArrayOf<PipelineRun> = []
+    var onPipelineRun: ((UUID, [String: String]) -> Void)?
+    var onPipelineCancelRun: ((UUID) -> Void)?
+    var onPipelineApproveRun: ((UUID, String) -> Void)?
+    var onPipelineDenyRun: ((UUID, String) -> Void)?
+    var onPipelineResumeRun: ((UUID) -> Void)?
+    var onPipelineBackToEdit: ((UUID) -> Void)?
+    var onPipelineJumpToNode: ((UUID, String) -> Void)?
 
     @Environment(\.ghosttyConfig) private var ghosttyConfig
     @Environment(\.chromeTheme) private var chromeTheme
@@ -337,6 +359,30 @@ struct PaneGridView: View {
                         onOpenFavourite?(pane.id, url)
                     }
                 )
+            case .pipeline:
+                PipelinePaneView(
+                    pipelineState: pipelinePanes[pane.id],
+                    activeRun: {
+                        guard case let .monitor(runID) = pipelinePanes[pane.id]?.mode else { return nil }
+                        return pipelineRuns[id: runID]
+                    }(),
+                    onOpenDefinition: { name in onPipelineOpenDefinition?(pane.id, name) },
+                    onCreateDefinition: { onPipelineCreateDefinition?(pane.id) },
+                    onDeleteDefinition: { name in onPipelineDeleteDefinition?(pane.id, name) },
+                    onCloseDocument: { onPipelineCloseDocument?(pane.id) },
+                    onEdit: { edit in onPipelineEdit?(pane.id, edit) },
+                    onUndo: { onPipelineUndo?(pane.id) },
+                    onRedo: { onPipelineRedo?(pane.id) },
+                    onSelect: { selection in onPipelineSelect?(pane.id, selection) },
+                    onViewportChange: { zoom, pan in onPipelineViewportChange?(pane.id, zoom, pan) },
+                    onRun: { inputs in onPipelineRun?(pane.id, inputs) },
+                    onCancelRun: { onPipelineCancelRun?(pane.id) },
+                    onApproveRun: { edgeKey in onPipelineApproveRun?(pane.id, edgeKey) },
+                    onDenyRun: { edgeKey in onPipelineDenyRun?(pane.id, edgeKey) },
+                    onResumeRun: { onPipelineResumeRun?(pane.id) },
+                    onBackToEdit: { onPipelineBackToEdit?(pane.id) },
+                    onJumpToNode: { nodeID in onPipelineJumpToNode?(pane.id, nodeID) }
+                )
             }
         }
         // Clamp the VStack to the computed pane rect and clip overflow.
@@ -371,7 +417,8 @@ struct PaneGridView: View {
         .background {
             // Non-terminal pane bodies share the terminal panes' Ghostty
             // background so content panes blend with the terminal theme.
-            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web {
+            if pane.type == .markdown || pane.type == .scratchpad || pane.type == .diff || pane.type == .web
+                || pane.type == .pipeline {
                 Color(nsColor: ghosttyConfig.backgroundColor)
                     .opacity(ghosttyConfig.backgroundOpacity)
             }

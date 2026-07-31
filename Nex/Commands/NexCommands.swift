@@ -470,6 +470,10 @@ final class PaneShortcutMonitor {
         case .openDiff:
             return handleOpenDiff(activeWorkspaceID: id)
 
+        case .openPipeline:
+            store.send(.workspaces(.element(id: id, action: .openPipelinePane)))
+            return true
+
         case .toggleSyncInput:
             store.send(.workspaces(.element(id: id, action: .toggleSyncInput)))
             return true

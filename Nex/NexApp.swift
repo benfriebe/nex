@@ -110,6 +110,11 @@ struct NexApp: App {
                             store.send(.workspaces(.element(id: workspaceID, action: .focusPane(paneID))))
                         }
                     }
+                    statusBar.onSelectPipeline = { runID in
+                        NSApp.activate()
+                        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+                        store.send(.pipelineFocusRun(runID: runID))
+                    }
 
                     // Populate config dependency from the live ghostty config
                     var config = GhosttyConfigClient.load()

@@ -50,6 +50,7 @@ struct AppReducer {
         var bulkDeleteConfirmationIDs: [UUID]?
         var settings = SettingsFeature.State()
         var graft = GraftFeature.State()
+        var pipelines = PipelinesFeature.State()
         var repoRegistry: IdentifiedArrayOf<Repo> = []
         var gitStatuses: [UUID: RepoGitStatus] = [:]
         var isInspectorVisible: Bool = false
@@ -81,6 +82,22 @@ struct AppReducer {
         /// owning pane closes. Not persisted — a fresh launch has no
         /// live CLI connections to resume anyway.
         var webConsoleSubscribers: [UUID: [UInt64: SocketServer.ReplyHandle]] = [:]
+
+        /// `nex pipeline watch <run-id>` subscribers, keyed by run then by
+        /// `SocketServer.ReplyHandle.id` — the exact `webConsoleSubscribers`
+        /// shape. Torn down on client disconnect
+        /// (`socketSubscriberDisconnected`) AND when the run reaches a
+        /// terminal state (issue section 4). Not persisted.
+        var pipelineWatchSubscribers: [UUID: [UInt64: SocketServer.ReplyHandle]] = [:]
+
+        /// A file-pointer message queued for a `PipelineNodeRun` once its
+        /// SessionStart readiness gate confirms claude is up — interactive
+        /// fresh spawns and bounce-back resumes both land here; headless
+        /// fresh spawns (prompt piped via stdin at launch) never populate
+        /// this. Consumed and removed by the `sessionStarted` forwarding
+        /// hook in `AppReducer+PipelineEngine.swift`. Not persisted — a
+        /// restart's recovery path re-derives readiness from scratch.
+        var pipelinePendingPointerMessages: [UUID: String] = [:]
 
         /// Web favourites + workspace label presets. See `PresetsFeature`.
         var presets = PresetsFeature.State()
@@ -225,6 +242,7 @@ struct AppReducer {
                     case .scratchpad: "note.text"
                     case .diff: "plusminus"
                     case .web: "globe"
+                    case .pipeline: "point.3.connected.trianglepath.dotted"
                     }
                     items.append(CommandPaletteItem(
                         id: "pane:\(paneID)",
@@ -420,7 +438,8 @@ struct AppReducer {
             groups: IdentifiedArrayOf<WorkspaceGroup>,
             topLevelOrder: [SidebarID],
             activeWorkspaceID: UUID?,
-            repoRegistry: IdentifiedArrayOf<Repo>
+            repoRegistry: IdentifiedArrayOf<Repo>,
+            pipelineRuns: [PipelineRun] = []
         )
 
         // Workspace groups
@@ -449,6 +468,7 @@ struct AppReducer {
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
         case graft(GraftFeature.Action)
+        case pipelines(PipelinesFeature.Action)
 
         /// Socket messages (agent lifecycle + pane/workspace commands).
         /// `reply` is non-nil only for request-style commands (currently
@@ -497,6 +517,23 @@ struct AppReducer {
         /// cold launch, once a workspace is live (issue #197).
         case flushPendingFileOpens
         case openDiffPath(repoPath: String, targetPath: String?, fromPaneID: UUID?)
+        /// GUI entry points for the pipeline monitor UI (issue #282 phase
+        /// 7) — the header play button, `PipelineRunHUD`'s
+        /// cancel/approve/deny/resume/back-to-edit, and double-click
+        /// jump-to-node. All resolve the pane's workspace + (for the HUD
+        /// actions) its `PipelinePaneState.mode`'s monitor `runID`
+        /// themselves, so the view layer only ever needs a `paneID`.
+        case pipelineRunFromPane(paneID: UUID, inputs: [String: String])
+        case pipelineCancelRunFromPane(paneID: UUID)
+        case pipelineApproveRunFromPane(paneID: UUID, edgeKey: String)
+        case pipelineDenyRunFromPane(paneID: UUID, edgeKey: String)
+        case pipelineResumeRunFromPane(paneID: UUID)
+        case pipelineBackToEditFromPane(paneID: UUID)
+        case pipelineJumpToNode(paneID: UUID, nodeID: String)
+        /// StatusBar popover "Pipelines" row click — focuses the run's
+        /// current node's pane, or just its workspace if nothing has
+        /// spawned yet.
+        case pipelineFocusRun(runID: UUID)
         /// Open a web pane in the active workspace. `fromPaneID` is the
         /// pane to split off (header button / context menu, issue #206);
         /// nil splits the focused pane. `direction` picks right vs down.
@@ -639,6 +676,8 @@ struct AppReducer {
     @Dependency(\.globalHotkeyService) var globalHotkeyService
     @Dependency(\.graftService) var graftService
     @Dependency(\.webPaneStore) var webPaneStore
+    @Dependency(\.pipelineDefinitionStore) var pipelineDefinitionStore
+    @Dependency(\.pipelineEngine) var pipelineEngine
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
     @Dependency(\.userDefaults) var userDefaults
@@ -1085,7 +1124,8 @@ struct AppReducer {
                             groups: result.groups,
                             topLevelOrder: result.topLevelOrder,
                             activeWorkspaceID: result.activeWorkspaceID,
-                            repoRegistry: result.repoRegistry
+                            repoRegistry: result.repoRegistry,
+                            pipelineRuns: result.pipelineRuns
                         ))
                     },
                     .send(.settings(.loadSettings)),
@@ -1337,6 +1377,12 @@ struct AppReducer {
                 // no-op for associations without one.
                 let graftStopEffects = assocIDs.map { Effect.send(Action.graft(.forceStop($0))) }
                 let mgr = surfaceManager
+                // A deleted workspace's active pipeline runs are cancelled
+                // — their history (run dir, artifacts, DB rows) survives
+                // the workspace regardless (issue section 3: "workspace
+                // deleted → cancelled"). `PipelineRun.workspaceID` carries
+                // no FK for exactly this reason.
+                let pipelineCancelEffect = cancelPipelineRuns(&state, workspaceID: id, reason: "workspace deleted")
                 return .merge(
                     [
                         .run { _ in
@@ -1348,7 +1394,8 @@ struct AppReducer {
                             // doesn't leak the entry indefinitely.
                             mgr.setSyncGroup(workspaceID: id, paneIDs: [])
                         },
-                        .send(.persistState)
+                        .send(.persistState),
+                        pipelineCancelEffect
                     ] + stopEffects + graftStopEffects
                 )
 
@@ -2085,7 +2132,7 @@ struct AppReducer {
                     await persistenceService.save(snapshot: snapshot)
                 }
 
-            case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry):
+            case .stateLoaded(let workspaces, let groups, let topLevelOrder, let activeID, let repoRegistry, let pipelineRuns):
                 if workspaces.isEmpty {
                     // First launch — create a default workspace and
                     // still hand off to GraftFeature so its updates
@@ -2110,6 +2157,7 @@ struct AppReducer {
                 }
                 state.workspaces = workspaces
                 state.groups = groups
+                state.pipelines.runs = IdentifiedArrayOf(uniqueElements: pipelineRuns)
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
                 state.repoRegistry = repoRegistry
                 state.didRestoreWorkspaces = true
@@ -2129,10 +2177,20 @@ struct AppReducer {
                 // `codex resume`, issue #101) and is deliberately NOT
                 // cleared below: it's a last-known display value, and the
                 // resumable tuples must capture it before any clearing.
+                // Panes bound to an active pipeline NodeRun are excluded —
+                // the engine (not the blind restart-resume path) owns
+                // their lifecycle. Otherwise a restored node pane could
+                // get `claude --resume` typed into it while its run sits
+                // `.paused`, and a later `pipeline resume` deciding
+                // "session exited → resume" would type a shell command
+                // into a live claude TUI as chat text (issue section 5).
+                let pipelineOwnedPaneIDs = Set(pipelineRuns.flatMap { run in
+                    run.nodeRuns.compactMap(\.paneID)
+                })
                 var resumablePanes: [(paneID: UUID, sessionID: String, kind: AgentKind)] = []
                 for workspace in workspaces {
                     for pane in workspace.panes {
-                        if let sessionID = pane.agentSessionID {
+                        if let sessionID = pane.agentSessionID, !pipelineOwnedPaneIDs.contains(pane.id) {
                             resumablePanes.append((
                                 paneID: pane.id,
                                 sessionID: sessionID,
@@ -2180,8 +2238,20 @@ struct AppReducer {
                 }
 
                 let parentRepoRoots = Array(Set(state.repoRegistry.map(\.path)))
+                // Pipeline panes persist only their definition name — the
+                // document itself is re-loaded from YAML on restart
+                // rather than surviving in the DB.
+                let pipelineReloadEffects: [Effect<Action>] = workspaces.flatMap { ws in
+                    ws.pipelinePanes.compactMap { paneID, pipelineState -> Effect<Action>? in
+                        guard let name = pipelineState.pipelineName else { return nil }
+                        return .send(.workspaces(.element(
+                            id: ws.id,
+                            action: .pipelineOpenDefinition(paneID: paneID, name: name)
+                        )))
+                    }
+                }
                 return .merge(
-                    [
+                    pipelineReloadEffects + [
                         .run { send in
                             // Resolve each workspace profile once, not per
                             // pane — resolveEnv re-reads the config file.
@@ -2310,9 +2380,11 @@ struct AppReducer {
                 if let subscribers = state.webConsoleSubscribers.removeValue(forKey: paneID) {
                     for (_, handle) in subscribers { handle.close() }
                 }
+                let pipelineCloseEffect = pipelineHandlePaneClosed(&state, paneID: paneID)
                 return .merge(
                     .send(.persistState),
-                    scheduleAutoUnlink(workspaceID: wsID, in: state)
+                    scheduleAutoUnlink(workspaceID: wsID, in: state),
+                    pipelineCloseEffect
                 )
 
             case .workspaces(.element(id: let wsID, action: .webConsoleLineAppended(let paneID))):
@@ -2362,6 +2434,42 @@ struct AppReducer {
             case .graft:
                 // Handled by the GraftFeature Scope below.
                 return .none
+
+            // This specific case MUST sit above the catch-all `case
+            // .pipelines:` below — the async re-entry points for the
+            // execution engine (issue #282 phases 6-7). See
+            // `AppReducer+PipelineEngine.swift`.
+            case .pipelines(.delegate(let delegateAction)):
+                return handlePipelineDelegate(&state, delegateAction)
+
+            case .pipelines:
+                // Handled by the PipelinesFeature Scope below.
+                return .none
+
+            case .pipelineRunFromPane(let paneID, let inputs):
+                return handlePipelineRunFromPane(&state, paneID: paneID, inputs: inputs)
+
+            case .pipelineCancelRunFromPane(let paneID):
+                return handlePipelineCancelRunFromPane(&state, paneID: paneID)
+
+            case .pipelineApproveRunFromPane(let paneID, let edgeKey):
+                return handlePipelineApproveRunFromPane(&state, paneID: paneID, edgeKey: edgeKey)
+
+            case .pipelineDenyRunFromPane(let paneID, let edgeKey):
+                return handlePipelineDenyRunFromPane(&state, paneID: paneID, edgeKey: edgeKey)
+
+            case .pipelineResumeRunFromPane(let paneID):
+                return handlePipelineResumeRunFromPane(&state, paneID: paneID)
+
+            case .pipelineBackToEditFromPane(let paneID):
+                handlePipelineBackToEditFromPane(&state, paneID: paneID)
+                return .none
+
+            case .pipelineJumpToNode(let paneID, let nodeID):
+                return handlePipelineJumpToNode(&state, paneID: paneID, nodeID: nodeID)
+
+            case .pipelineFocusRun(let runID):
+                return handlePipelineFocusRun(&state, runID: runID)
 
             // MARK: - Presets child reducer (web favourites + label presets)
 
@@ -2531,6 +2639,19 @@ struct AppReducer {
                     }
                 }
 
+                let pipelineItems: [StatusBarPipelineItem] = state.pipelines.runs
+                    .filter { !$0.status.isTerminal }
+                    .sorted { $0.createdAt < $1.createdAt }
+                    .map { run in
+                        StatusBarPipelineItem(
+                            runID: run.id,
+                            name: run.definitionSnapshot.name,
+                            status: run.status,
+                            activeNodeIDs: run.activeNodeRunIDs.compactMap { run.nodeRuns[id: $0]?.nodeID },
+                            createdAt: run.createdAt
+                        )
+                    }
+
                 let controller = statusBarController
                 let finalWaiting = totalWaiting
                 let finalRunning = totalRunning
@@ -2553,6 +2674,7 @@ struct AppReducer {
                             waitingCount: finalWaiting,
                             runningCount: finalRunning,
                             items: finalItems,
+                            pipelineItems: pipelineItems,
                             waitingColor: theme.statusWaiting,
                             runningColor: theme.statusRunning
                         )
@@ -2591,6 +2713,10 @@ struct AppReducer {
 
         Scope(state: \.graft, action: \.graft) {
             GraftFeature()
+        }
+
+        Scope(state: \.pipelines, action: \.pipelines) {
+            PipelinesFeature()
         }
 
         Scope(state: \.configHotkey, action: \.configHotkey) {

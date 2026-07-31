@@ -255,6 +255,7 @@ enum NexAction: String, CaseIterable {
     case commandPalette = "command_palette"
     case newGroup = "new_group"
     case openDiff = "open_diff"
+    case openPipeline = "open_pipeline"
     case toggleSyncInput = "toggle_sync_input"
 
     // Web pane actions. `openWebPane` is the app-level entry point:
@@ -336,6 +337,7 @@ enum NexAction: String, CaseIterable {
         case .commandPalette: "Command Palette"
         case .newGroup: "New Group"
         case .openDiff: "Open Diff"
+        case .openPipeline: "Open Pipeline"
         case .toggleSyncInput: "Toggle Synchronise Input"
         case .openWebPane: "Open Web Pane"
         case .webFocusURLBar: "Web: Focus URL Bar"
@@ -375,7 +377,7 @@ enum NexAction: String, CaseIterable {
         case .toggleSidebar, .toggleInspector:
             "View"
         case .openFile, .toggleMarkdownEdit, .increaseMarkdownFontSize, .decreaseMarkdownFontSize,
-             .resetMarkdownFontSize, .openDiff:
+             .resetMarkdownFontSize, .openDiff, .openPipeline:
             "Files"
         case .webFocusURLBar, .webBack, .webForward, .webReload,
              .webTabNew, .webTabClose, .webTabPrev, .webTabNext,
