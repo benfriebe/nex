@@ -20,8 +20,8 @@ struct PipelinePaneView: View {
     let onViewportChange: (CGFloat, CGPoint) -> Void
     var onRun: ([String: String]) -> Void = { _ in }
     var onCancelRun: () -> Void = {}
-    var onApproveRun: () -> Void = {}
-    var onDenyRun: () -> Void = {}
+    var onApproveRun: (String) -> Void = { _ in }
+    var onDenyRun: (String) -> Void = { _ in }
     var onResumeRun: () -> Void = {}
     var onBackToEdit: () -> Void = {}
     var onJumpToNode: (String) -> Void = { _ in }
@@ -61,8 +61,9 @@ struct PipelinePaneView: View {
     }
 
     /// Latest NodeRun per node id (highest attempt), mapped to the
-    /// canvas card's display struct. The run's `currentNodeRunID` marks
-    /// which single card gets the focus glow.
+    /// canvas card's display struct. Every currently-active branch's
+    /// card gets the focus glow (fan-out, issue #282 round 3, can be
+    /// more than one at once) rather than a single `currentNodeRunID`.
     private func nodeStatuses(for run: PipelineRun) -> [String: PipelineNodeRunDisplay] {
         var latestByNode: [String: PipelineNodeRun] = [:]
         for nodeRun in run.nodeRuns {
@@ -72,7 +73,7 @@ struct PipelinePaneView: View {
             latestByNode[nodeRun.nodeID] = nodeRun
         }
         return latestByNode.mapValues {
-            PipelineNodeRunDisplay(status: $0.status, attempt: $0.attempt, isCurrent: $0.id == run.currentNodeRunID)
+            PipelineNodeRunDisplay(status: $0.status, attempt: $0.attempt, isCurrent: $0.status.isActive)
         }
     }
 
@@ -169,12 +170,24 @@ struct PipelinePaneView: View {
                         onSelect: onSelect,
                         onMoveNode: { id, point in onEdit(.moveNode(id: id, to: point)) },
                         onAddNode: { point in onEdit(.addNode(at: point)) },
+                        onMoveEdgeHandle: { edgeKey, offset in onEdit(.moveEdgeHandle(edgeKey: edgeKey, offset: offset)) },
                         isMonitorMode: isMonitorMode,
                         nodeStatuses: activeRun.map(nodeStatuses) ?? [:],
                         onJumpToNode: onJumpToNode
                     )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    // Fixed to the viewport corner (outside the
+                    // zoom/pan-transformed canvas content, like the
+                    // header's zoom HUD) so it's always reachable
+                    // regardless of scroll position — double-click still
+                    // works too, this is just the discoverable affordance
+                    // for it (issue #282 round 3).
+                    if !isMonitorMode {
+                        addNodeToolbar(positions: positions)
+                    }
+                }
 
                 if !isMonitorMode, pipelineState.selection != .none {
                     Divider()
@@ -195,5 +208,35 @@ struct PipelinePaneView: View {
             }
         }
         .background(chromeTheme.surfaceBackground)
+    }
+
+    /// Floating canvas-corner control, styled like the header's zoom
+    /// buttons — the discoverable counterpart to double-click-to-add
+    /// (issue #282 round 3: "it's not clear double click creates a new
+    /// node").
+    private func addNodeToolbar(positions: [String: CGPoint]) -> some View {
+        Button {
+            onEdit(.addNode(at: nextNodePosition(positions: positions)))
+        } label: {
+            Label("New Node", systemImage: "plus")
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .background(chromeTheme.headerBackground, in: Capsule())
+        .overlay(Capsule().stroke(chromeTheme.divider, lineWidth: 1))
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+        .padding(12)
+    }
+
+    /// A default drop point for the toolbar button — just past the
+    /// existing layout's bottom-left, so a freshly added node never
+    /// lands stacked on top of another one.
+    private func nextNodePosition(positions: [String: CGPoint]) -> CGPoint {
+        guard let box = PipelineCanvasGeometry.boundingBox(positions: positions) else {
+            return PipelineAutoLayout.origin
+        }
+        return PipelineCanvasGeometry.snapped(CGPoint(x: box.minX, y: box.maxY + 40))
     }
 }

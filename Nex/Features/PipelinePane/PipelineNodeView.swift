@@ -43,6 +43,21 @@ struct PipelineNodeView: View, Equatable {
         }
     }
 
+    /// State-appropriate SF Symbol for the top-right status badge —
+    /// complements (doesn't replace) the status text row below it.
+    private var statusSymbol: String? {
+        guard let run else { return nil }
+        switch run.status {
+        case .done, .partial: return "checkmark.circle.fill"
+        case .failed, .timedOut: return "xmark.circle.fill"
+        case .stalled: return "exclamationmark.triangle.fill"
+        case .awaitingHuman: return "pause.circle.fill"
+        case .running: return "play.circle.fill"
+        case .spawning: return "circle.dotted"
+        case .interrupted: return "questionmark.circle.fill"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
@@ -93,6 +108,16 @@ struct PipelineNodeView: View, Equatable {
         .background(chromeTheme.surfaceBackground)
         .opacity(isPending ? 0.5 : 1.0)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .topTrailing) {
+            if let statusSymbol {
+                Image(systemName: statusSymbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(statusColor ?? chromeTheme.textTertiary)
+                    .padding(5)
+                    .background(chromeTheme.surfaceBackground.opacity(0.9), in: Circle())
+                    .padding(4)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(

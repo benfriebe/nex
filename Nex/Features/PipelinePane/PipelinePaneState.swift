@@ -74,6 +74,11 @@ struct PipelinePaneState: Equatable {
 /// document mutation in `PipelinePaneState.apply(_:)`.
 enum PipelineEdit: Equatable {
     case moveNode(id: String, to: CGPoint)
+    /// Drag-to-bend an edge's curve (issue #282 round 3) — `edgeKey` is
+    /// `PipelineEdge.identityKey`, `offset` is the new saved control-point
+    /// offset (document units). Purely a layout change, like `moveNode`
+    /// — never blocked in monitor mode.
+    case moveEdgeHandle(edgeKey: String, offset: CGPoint)
     case addNode(at: CGPoint)
     case deleteNode(id: String)
     case deleteEdge(index: Int)
@@ -106,6 +111,10 @@ extension PipelinePaneState {
         case let .moveNode(id, point):
             guard document.nodes.contains(where: { $0.id == id }) else { return false }
             document.ui.nodes[id] = point
+
+        case let .moveEdgeHandle(edgeKey, offset):
+            guard document.edges.contains(where: { $0.identityKey == edgeKey }) else { return false }
+            document.ui.edges[edgeKey] = PipelineEdgeUI(offset: offset)
 
         case let .addNode(point):
             let existing = Set(document.nodes.map(\.id))
@@ -144,8 +153,11 @@ extension PipelinePaneState {
             guard document.nodes.contains(where: { $0.id == from }),
                   document.nodes.contains(where: { $0.id == to })
             else { return false }
-            guard !document.edges.contains(where: { $0.from == from && $0.on == on }) else { return false }
-            document.edges.append(PipelineEdge(from: from, on: on, to: to))
+            let newEdge = PipelineEdge(from: from, on: on, to: to)
+            // Fan-out (multiple edges off the same (from, on)) is legal;
+            // only an exactly identical (from, on, to) triple is rejected.
+            guard !document.edges.contains(where: { $0.identityKey == newEdge.identityKey }) else { return false }
+            document.edges.append(newEdge)
 
         case let .setEntry(id):
             guard document.nodes.contains(where: { $0.id == id }) else { return false }

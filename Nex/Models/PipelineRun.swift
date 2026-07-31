@@ -15,13 +15,14 @@ enum PipelineRunStatus: String, Codable, Equatable, CaseIterable {
     case failed
     case cancelled
 
-    /// Runs in these statuses accept a handoff and route on it.
-    /// Everything else (paused, awaitingApproval, and the terminal
-    /// statuses) records the handoff but holds routing — matching the
-    /// issue's "handoff while paused is accepted and recorded; routing
-    /// holds until resume" rule.
+    /// Runs in these statuses accept a handoff and route on it. Only
+    /// `.paused` and the terminal statuses hold routing (issue's "handoff
+    /// while paused is accepted and recorded; routing holds until
+    /// resume"). `.awaitingApproval` is deliberately NOT excluded here —
+    /// with fan-out (issue #282 round 3) a gate on one branch must not
+    /// block a sibling branch's own independent handoff from routing.
     var routesOnHandoff: Bool {
-        self == .launching || self == .running
+        !isTerminal && self != .paused
     }
 
     var isTerminal: Bool {
@@ -52,6 +53,16 @@ enum PipelineNodeRunStatus: String, Codable, Equatable, CaseIterable {
     var isTerminal: Bool {
         self == .done || self == .failed || self == .partial || self == .timedOut
     }
+
+    /// A NodeRun in one of these statuses is a "live branch" of a
+    /// fan-out run: it either has a pane doing work or is blocked on a
+    /// timer/human and could still resolve on its own. Used to decide
+    /// spawn-coalescing (issue #282 round 3: "if a fired edge targets a
+    /// node that already has an active NodeRun, do not double-spawn")
+    /// and run-completion (`PipelineRun.activeNodeRunIDs`).
+    static let activeStatuses: Set<Self> = [.spawning, .running, .awaitingHuman, .stalled]
+
+    var isActive: Bool { Self.activeStatuses.contains(self) }
 }
 
 /// One attempt of one node within a run. `attempt` starts at 1 and
@@ -68,6 +79,15 @@ struct PipelineNodeRun: Codable, Equatable, Identifiable {
     var summary: String?
     var outputPath: String?
     var warnings: [String] = []
+    /// The NodeRun whose handoff routed to this one — `{{feedback}}`
+    /// binds to exactly this source (issue #282 round 3: "a node with
+    /// multiple inbound edges binds to the specific edge that fired its
+    /// spawn"), not "whatever else in the run most recently finished",
+    /// which would be ambiguous once concurrent fan-out branches exist.
+    /// Nil for the entry node's first attempt and for any node engaged
+    /// by an operator action (`pipeline retry`/`resume`) rather than a
+    /// routed handoff.
+    var feedbackSourceNodeRunID: UUID?
     var startedAt: Date
     var updatedAt: Date
     var completedAt: Date?
@@ -82,6 +102,7 @@ struct PipelineNodeRun: Codable, Equatable, Identifiable {
         summary: String? = nil,
         outputPath: String? = nil,
         warnings: [String] = [],
+        feedbackSourceNodeRunID: UUID? = nil,
         startedAt: Date,
         updatedAt: Date,
         completedAt: Date? = nil
@@ -95,6 +116,7 @@ struct PipelineNodeRun: Codable, Equatable, Identifiable {
         self.summary = summary
         self.outputPath = outputPath
         self.warnings = warnings
+        self.feedbackSourceNodeRunID = feedbackSourceNodeRunID
         self.startedAt = startedAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
@@ -138,12 +160,14 @@ struct PipelineRun: Codable, Equatable, Identifiable {
     var runDir: String
     var inputs: [String: String]
     var nodeRuns: IdentifiedArrayOf<PipelineNodeRun> = []
-    var currentNodeRunID: UUID?
-    /// Traversal counts keyed by `PipelineRun.traversalKey(from:on:)`
-    /// ("<from>|<on>"), not `PipelineEdge.Key` directly — a non-String/Int
-    /// dictionary key would encode as a flat array under `JSONEncoder`
-    /// instead of an object, which is a worse fit for the `edgeTraversalsJSON`
-    /// DB column.
+    /// Traversal counts keyed by `PipelineRun.traversalKey(from:on:to:)`
+    /// (`PipelineEdge.identityKey`, `"<from>|<on>|<to>"`) — per-edge, not
+    /// per-`(from,on)`, since fan-out lets several edges share a
+    /// `(from, on)` pair with independent `maxTraversals` (issue #282
+    /// round 3). Not a `PipelineEdge` dictionary key directly — a
+    /// non-String/Int key would encode as a flat array under
+    /// `JSONEncoder` instead of an object, a worse fit for the
+    /// `edgeTraversalsJSON` DB column.
     var edgeTraversals: [String: Int] = [:]
     var createdAt: Date
     var updatedAt: Date
@@ -161,7 +185,6 @@ struct PipelineRun: Codable, Equatable, Identifiable {
         runDir: String,
         inputs: [String: String] = [:],
         nodeRuns: IdentifiedArrayOf<PipelineNodeRun> = [],
-        currentNodeRunID: UUID? = nil,
         edgeTraversals: [String: Int] = [:],
         createdAt: Date,
         updatedAt: Date,
@@ -178,15 +201,51 @@ struct PipelineRun: Codable, Equatable, Identifiable {
         self.runDir = runDir
         self.inputs = inputs
         self.nodeRuns = nodeRuns
-        self.currentNodeRunID = currentNodeRunID
         self.edgeTraversals = edgeTraversals
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
     }
 
-    static func traversalKey(from: String, on: PipelineNodeOutcome) -> String {
-        "\(from)|\(on.rawValue)"
+    static func traversalKey(from: String, on: PipelineNodeOutcome, to: String) -> String {
+        "\(from)|\(on.rawValue)|\(to)"
+    }
+
+    /// Every NodeRun still "live" (issue #282 round 3 fan-out: a run can
+    /// have several of these at once, one per active branch). Replaces
+    /// the old single `currentNodeRunID` pointer entirely — there is no
+    /// persisted analogue; it's always derived from `nodeRuns`.
+    var activeNodeRunIDs: [UUID] {
+        nodeRuns.filter(\.status.isActive).map(\.id)
+    }
+
+    /// NodeRuns a human needs to act on to unstick the run: `.stalled`
+    /// (no handoff after Stop) or `.interrupted` (unclean shutdown / pane
+    /// closed). `pipeline retry`/`resume` re-engage all of these, not
+    /// just one, since fan-out can leave more than one branch blocked at
+    /// once.
+    var blockingNodeRunIDs: [UUID] {
+        nodeRuns.filter { $0.status == .stalled || $0.status == .interrupted }.map(\.id)
+    }
+
+    /// Best-effort "what should the GUI focus" pointer, used only by
+    /// jump-to-node / StatusBar-row-click affordances (never by routing
+    /// logic): the most recently updated active branch, falling back to
+    /// the most recently updated NodeRun overall so a finished run still
+    /// resolves to something.
+    var mostRecentNodeRun: PipelineNodeRun? {
+        let active = nodeRuns.filter(\.status.isActive)
+        if let latestActive = active.max(by: { $0.updatedAt < $1.updatedAt }) {
+            return latestActive
+        }
+        return nodeRuns.max(by: { $0.updatedAt < $1.updatedAt })
+    }
+
+    /// Every branch currently gated behind `requiresApproval` (fan-out,
+    /// issue #282 round 3, can be more than one at once), decoded from
+    /// `statusDetail`. Empty whenever `status != .awaitingApproval`.
+    var pendingApprovals: [PipelinePendingApproval] {
+        PipelinePendingApproval.parseAll(statusDetail)
     }
 
     /// `~/Library/Application Support/Nex/pipeline-runs/<runID>/` — the

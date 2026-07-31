@@ -74,7 +74,17 @@ deliverable), `{{nodes.<id>.summary}}`, `{{run.id}}`, `{{run.dir}}`, and
 artifact path on a bounce-back) are the available placeholders. v1 is
 `agent: claude` only. `nex pipeline validate <name>` checks a definition
 for schema errors (unknown refs, `headless` + `permissionMode: plan`,
-duplicate edges, unreachable nodes) before you run it.
+an exactly-duplicated edge, unreachable nodes) before you run it.
+
+**Fan-out**: a node can have more than one edge off the same outcome —
+e.g. two `{ from: planner, on: done, to: ... }` edges to different
+targets both fire when planner hands off `done`, spawning two
+concurrently-running nodes with their own panes. There's no AND-join in
+v1: if two edges both point at the same already-running target, the
+second one just coalesces (no double-spawn) rather than waiting for
+both upstream branches. A branch that fails with no matching fail edge
+fails the WHOLE run and marks every other still-active branch
+`interrupted` (panes left open for inspection).
 
 ### Running one
 
@@ -119,20 +129,26 @@ engine never guesses an outcome for you.
 ### Approval gates, stalls, and manual control
 
 ```bash
-nex pipeline approve <run-id>   # continue past a requiresApproval edge
-nex pipeline deny    <run-id>   # → run cancelled
-nex pipeline cancel  <run-id>   # cancel a non-terminal run outright
-nex pipeline retry   <run-id>   # force a fresh attempt of the current node
-nex pipeline resume  <run-id>   # re-engage a run paused (stalled node / closed pane / app restart)
+nex pipeline approve <run-id> [--edge <key>]   # continue past a requiresApproval edge
+nex pipeline deny    <run-id> [--edge <key>]   # deny one gate (→ run cancelled if that was the last branch)
+nex pipeline cancel  <run-id>                  # cancel a non-terminal run outright
+nex pipeline retry   <run-id>                  # force a fresh attempt of every stuck/failed node
+nex pipeline resume  <run-id>                  # re-engage a run paused (stalled node / closed pane / app restart)
 ```
 
 A run pauses (never guesses) when: an edge has `requiresApproval: true`
 (status `awaitingApproval`), a node stalls (Stop with no handoff, 120s
 grace), its pane gets closed, or Nex restarts mid-run. `pipeline status`
-/ `watch` show the pause reason; resolve it with `approve`/`deny`,
-`retry`, or `resume` — outside-the-pane manual overrides also work via
-`nex pipeline done|fail|partial --run <id> --node <slug> --force` for a
-node that's stuck.
+/ `watch` show the pause reason (and, in `pending_approvals`, every
+currently-gated edge — a fan-out graph can have more than one pending
+at once, hence `--edge <key>` to disambiguate; omit it when there's only
+one). Resolve with `approve`/`deny`, `retry`, or `resume` — outside-the-
+pane manual overrides also work via `nex pipeline done|fail|partial
+--run <id> --node <slug> --force` for a node that's stuck. `pipeline
+status`'s `active_node_ids` lists every currently-running branch, and
+each node-run entry's `from_node_id`/`from_node_run_id` shows which
+upstream node spawned it — both needed once a run can have more than one
+node active at once.
 
 ### Run locations
 

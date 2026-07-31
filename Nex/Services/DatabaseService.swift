@@ -324,6 +324,24 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // Fan-out (issue #282 round 3): `{{feedback}}` on a node with
+        // multiple inbound edges must bind to the specific edge that
+        // fired its spawn, not "whichever else in the run most recently
+        // finished" (ambiguous once concurrent branches exist) — so each
+        // NodeRun now carries a pointer to its source. `pipelineRun`'s
+        // `currentNodeRunID` column is retired in code (replaced by a
+        // computed `activeNodeRunIDs` derived from `nodeRuns`, since a
+        // run can have several live branches at once) but stays in the
+        // schema unused rather than a destructive drop.
+        migrator.registerMigration("v21_pipeline_fanout") { db in
+            let columns = try db.columns(in: "pipelineNodeRun").map(\.name)
+            if !columns.contains("feedbackSourceNodeRunID") {
+                try db.alter(table: "pipelineNodeRun") { t in
+                    t.add(column: "feedbackSourceNodeRunID", .text)
+                }
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -469,6 +487,9 @@ struct PipelineNodeRunRecord: Codable, FetchableRecord, PersistableRecord {
     var summary: String?
     var outputPath: String?
     var warningsJSON: String
+    /// See `PipelineNodeRun.feedbackSourceNodeRunID`. Defaulted so
+    /// existing memberwise-init call sites keep compiling.
+    var feedbackSourceNodeRunID: String? = nil
     var startedAt: Double
     var updatedAt: Double
     var completedAt: Double?

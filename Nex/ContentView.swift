@@ -289,11 +289,11 @@ struct ContentView: View {
                             onPipelineCancelRun: { paneID in
                                 store.send(.pipelineCancelRunFromPane(paneID: paneID))
                             },
-                            onPipelineApproveRun: { paneID in
-                                store.send(.pipelineApproveRunFromPane(paneID: paneID))
+                            onPipelineApproveRun: { paneID, edgeKey in
+                                store.send(.pipelineApproveRunFromPane(paneID: paneID, edgeKey: edgeKey))
                             },
-                            onPipelineDenyRun: { paneID in
-                                store.send(.pipelineDenyRunFromPane(paneID: paneID))
+                            onPipelineDenyRun: { paneID, edgeKey in
+                                store.send(.pipelineDenyRunFromPane(paneID: paneID, edgeKey: edgeKey))
                             },
                             onPipelineResumeRun: { paneID in
                                 store.send(.pipelineResumeRunFromPane(paneID: paneID))

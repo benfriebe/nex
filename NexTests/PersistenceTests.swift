@@ -473,11 +473,13 @@ struct PersistenceTests {
         // (`pipelineRunInterruptedNodeForcesRunPausedOnReload`), forcing
         // the run to `.paused` and defeating this test's "clean round
         // trip" premise.
+        let sourceNodeRunID = UUID()
         let nodeRun = PipelineNodeRun(
             id: nodeRunID,
             nodeID: "planner",
             status: .done,
             summary: "in progress",
+            feedbackSourceNodeRunID: sourceNodeRunID,
             startedAt: Date(timeIntervalSince1970: 1000),
             updatedAt: Date(timeIntervalSince1970: 1000)
         )
@@ -518,6 +520,9 @@ struct PersistenceTests {
         #expect(loaded.nodeRuns.first?.id == nodeRunID)
         #expect(loaded.nodeRuns.first?.summary == "in progress")
         #expect(loaded.nodeRuns.first?.status == .done)
+        // Fan-out (issue #282 round 3): `{{feedback}}` binding survives
+        // a save/load round trip.
+        #expect(loaded.nodeRuns.first?.feedbackSourceNodeRunID == sourceNodeRunID)
     }
 
     /// A non-terminal node run persisted mid-flight loads back

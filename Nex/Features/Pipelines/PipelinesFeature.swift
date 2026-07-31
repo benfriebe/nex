@@ -89,7 +89,7 @@ struct PipelinesFeature {
                     summary: summary,
                     outputPath: outputPath,
                     engine: pipelineEngine,
-                    newNodeRunID: uuid(),
+                    newNodeRunID: { uuid() },
                     state: &state
                 )
                 return .none
@@ -116,16 +116,25 @@ struct PipelinesFeature {
     }
 
     /// Appends a new `PipelineNodeRun` (`.spawning`) for `nodeID` — either
-    /// the entry node's first attempt, or the next attempt of a
-    /// bounced-back node (`attempt` = 1 + however many prior NodeRuns this
-    /// run already has for that node id). Sets it as `currentNodeRunID`
-    /// and moves the run to `.launching`. Returns the new NodeRun's id, or
-    /// nil if `runID` doesn't resolve.
+    /// the entry node's first attempt, a fanned-out/bounced-back node's
+    /// next attempt (`attempt` = 1 + however many prior NodeRuns this run
+    /// already has for that node id), or an operator-initiated retry.
+    /// `feedbackSourceNodeRunID` is the NodeRun whose handoff routed here
+    /// (nil for the entry node and operator actions) — see
+    /// `PipelineNodeRun.feedbackSourceNodeRunID`. Returns the new
+    /// NodeRun's id, or nil if `runID` doesn't resolve.
+    ///
+    /// Deliberately does NOT touch `run.status`/`run.statusDetail` —
+    /// with fan-out, several branches can be mid-flight (or gated behind
+    /// separate pending approvals) at once, so only the caller knows
+    /// what the run-level status should become after this append. Every
+    /// call site sets it explicitly.
     @discardableResult
     static func appendNodeRun(
         runID: UUID,
         nodeID: String,
         newID: UUID,
+        feedbackSourceNodeRunID: UUID? = nil,
         now: Date,
         state: inout State
     ) -> UUID? {
@@ -133,12 +142,10 @@ struct PipelinesFeature {
         let attempt = run.nodeRuns.count { $0.nodeID == nodeID } + 1
         let nodeRun = PipelineNodeRun(
             id: newID, nodeID: nodeID, attempt: attempt,
-            status: .spawning, startedAt: now, updatedAt: now
+            status: .spawning, feedbackSourceNodeRunID: feedbackSourceNodeRunID,
+            startedAt: now, updatedAt: now
         )
         run.nodeRuns.append(nodeRun)
-        run.currentNodeRunID = newID
-        run.status = .launching
-        run.statusDetail = nil
         run.updatedAt = now
         state.runs[id: runID] = run
         return newID
@@ -168,31 +175,37 @@ struct PipelinesFeature {
     enum HandoffResult: Equatable {
         case runNotFound
         case nodeRunNotFound
-        /// Recorded while the run wasn't in a routing status (paused,
-        /// awaitingApproval, or terminal) — routing holds until an
-        /// explicit `pipeline resume` re-engages the run.
+        /// Recorded while the run wasn't in a routing status (paused or
+        /// terminal) — routing holds until an explicit `pipeline resume`
+        /// re-engages the run.
         case recorded(PipelineRun)
         /// Repeat of the same outcome for an already-terminal node run —
         /// no-op success (issue section 4: "idempotent on repeat
         /// same-outcome").
         case idempotent(PipelineRun)
-        /// Routed to a new node. `spawnNodeRunID` is set (and a fresh
-        /// `PipelineNodeRun` already appended in `.spawning`) when the
-        /// edge didn't require approval — the caller (`AppReducer`) must
-        /// follow up by spawning/resuming that NodeRun's pane. Nil when
-        /// the edge required approval instead (run parked
-        /// `.awaitingApproval`; nothing to spawn until `pipeline approve`).
-        case applied(PipelineRun, spawnNodeRunID: UUID?)
+        /// Routing was evaluated. `spawnNodeRunIDs` lists every freshly
+        /// appended `PipelineNodeRun` (`.spawning`, fan-out can produce
+        /// more than one from a single handoff) the caller must follow up
+        /// on by spawning/resuming its pane — empty when every fired edge
+        /// either required approval (parked, nothing to spawn until
+        /// `pipeline approve`) or coalesced into an already-active
+        /// branch, or when this branch simply dead-ended.
+        case applied(PipelineRun, spawnNodeRunIDs: [UUID])
     }
 
     /// Records a handoff outcome against one `PipelineNodeRun` and, when
-    /// the owning run is in a routing status, evaluates the resulting
-    /// `PipelineTransition` via `engine.evaluateTransition`. A `.route`
-    /// transition either parks the run `.awaitingApproval` (gated edge) or
-    /// immediately appends the next node's `PipelineNodeRun` and reports
-    /// its id back via `spawnNodeRunID` — `AppReducer` follows up by
-    /// actually spawning/resuming that node's pane (issue section 3);
-    /// this function only ever touches `PipelinesFeature.State`.
+    /// the owning run isn't paused/terminal, evaluates the resulting
+    /// `PipelineTransition` via `engine.evaluateTransition`. Fan-out
+    /// (issue #282 round 3): ALL edges matching `(from, outcome)` fire —
+    /// each either parks a pending approval, coalesces into an already-
+    /// active NodeRun for the same target (no double-spawn), or appends a
+    /// fresh `PipelineNodeRun` and is reported back via `spawnNodeRunIDs`
+    /// for `AppReducer` to actually spawn/resume (issue section 3). A
+    /// branch that fails with no matching fail edge (or trips a
+    /// `maxTraversals` guard) fails the WHOLE run and marks every other
+    /// still-active NodeRun `.interrupted` — no AND-join/barrier
+    /// semantics in this round (future work). This function only ever
+    /// touches `PipelinesFeature.State`.
     static func applyHandoff(
         runID: UUID,
         nodeRunID: UUID,
@@ -200,7 +213,7 @@ struct PipelinesFeature {
         summary: String?,
         outputPath: String?,
         engine: PipelineEngine,
-        newNodeRunID: UUID,
+        newNodeRunID: () -> UUID,
         state: inout State
     ) -> HandoffResult {
         guard var run = state.runs[id: runID] else { return .runNotFound }
@@ -223,11 +236,17 @@ struct PipelinesFeature {
         run.nodeRuns[id: nodeRunID] = nodeRun
         run.updatedAt = now
 
-        // A late handoff for the node the run stalled on clears the stall
+        // A late handoff for a node the run stalled on clears the stall
         // and resumes routing (issue section 3: "clears the stall and
-        // routes normally") rather than being merely recorded.
+        // routes normally") rather than being merely recorded — but only
+        // once every OTHER blocking branch has also cleared (fan-out can
+        // leave more than one node `.stalled` under the same pause).
+        // `existing.status` (captured before this handoff's mutation
+        // above) is what to check — `run.blockingNodeRunIDs` no longer
+        // includes `nodeRunID` at this point since `nodeRun`'s new
+        // terminal status was already written into `run` above.
         if run.status == .paused, PipelineRunPauseReason.parse(run.statusDetail) == .stalledNode,
-           run.currentNodeRunID == nodeRunID {
+           existing.status == .stalled, run.blockingNodeRunIDs.isEmpty {
             run.status = .running
             run.statusDetail = nil
         }
@@ -240,76 +259,159 @@ struct PipelinesFeature {
         let transition = engine.evaluateTransition(
             run.definitionSnapshot, nodeRun.nodeID, outcome, run.edgeTraversals
         )
-        var spawnNodeRunID: UUID?
+
         switch transition {
-        case .completed:
-            run.status = .completed
-            run.statusDetail = nil
-            run.completedAt = now
-
         case .failed(let reason):
-            run.status = .failed
-            run.statusDetail = reason
-            run.completedAt = now
+            state.runs[id: runID] = run
+            return Self.failRun(runID: runID, reason: reason, state: &state)
 
-        case .loopExhausted(let edgeKey):
-            run.status = .failed
-            run.statusDetail = "loop_exhausted: \(edgeKey)"
-            run.completedAt = now
+        case .completed:
+            state.runs[id: runID] = run
+            return Self.finishRouting(runID: runID, spawnNodeRunIDs: [], state: &state)
 
-        case .route(let to, let requiresApproval, let edgeKey):
-            run.edgeTraversals[edgeKey, default: 0] += 1
-            if requiresApproval {
-                run.status = .awaitingApproval
-                run.statusDetail = PipelinePendingApproval.encode(
-                    PipelinePendingApproval(toNodeID: to, edgeKey: edgeKey),
-                    message: "edge \(edgeKey) → \"\(to)\" awaiting approval"
-                )
-            } else {
-                state.runs[id: runID] = run
-                spawnNodeRunID = Self.appendNodeRun(
-                    runID: runID, nodeID: to, newID: newNodeRunID, now: now, state: &state
-                )
-                run = state.runs[id: runID] ?? run
+        case .routes(let routes):
+            var pendingApprovals = PipelinePendingApproval.parseAll(run.statusDetail)
+            var spawnNodeRunIDs: [UUID] = []
+            state.runs[id: runID] = run
+            for route in routes {
+                PipelinesFeature.updateRun(runID: runID, state: &state) {
+                    $0.edgeTraversals[route.edgeKey, default: 0] += 1
+                }
+                let targetAlreadyQueued = pendingApprovals.contains { $0.toNodeID == route.to }
+                let targetAlreadyActive = state.runs[id: runID]?.nodeRuns
+                    .contains { $0.nodeID == route.to && $0.status.isActive } ?? false
+
+                if route.requiresApproval {
+                    if !targetAlreadyQueued {
+                        pendingApprovals.append(PipelinePendingApproval(
+                            toNodeID: route.to, edgeKey: route.edgeKey, fromNodeRunID: nodeRunID
+                        ))
+                    }
+                } else if targetAlreadyActive || targetAlreadyQueued {
+                    // Coalesced: the traversal is recorded above, but no
+                    // second NodeRun/pane is spawned for an already-live
+                    // (or already-gated-and-about-to-spawn) branch.
+                    continue
+                } else {
+                    let newID = newNodeRunID()
+                    Self.appendNodeRun(
+                        runID: runID, nodeID: route.to, newID: newID,
+                        feedbackSourceNodeRunID: nodeRunID, now: now, state: &state
+                    )
+                    spawnNodeRunIDs.append(newID)
+                }
             }
+            PipelinesFeature.updateRun(runID: runID, state: &state) {
+                $0.statusDetail = pendingApprovals.isEmpty ? nil : PipelinePendingApproval.encodeAll(pendingApprovals)
+            }
+            return Self.finishRouting(runID: runID, spawnNodeRunIDs: spawnNodeRunIDs, state: &state)
         }
+    }
 
+    /// Fails the whole run and marks every other still-active branch
+    /// `.interrupted` (its pane is left open — panes are never auto-closed
+    /// in v1). The caller (`AppReducer+PipelineEngine`) is responsible for
+    /// cancelling those branches' readiness/stop-grace timers.
+    private static func failRun(runID: UUID, reason: String, state: inout State) -> HandoffResult {
+        guard var run = state.runs[id: runID] else { return .runNotFound }
+        let now = Date()
+        for id in run.activeNodeRunIDs {
+            run.nodeRuns[id: id]?.status = .interrupted
+            run.nodeRuns[id: id]?.updatedAt = now
+        }
+        run.status = .failed
+        run.statusDetail = reason
+        run.completedAt = now
+        run.updatedAt = now
         state.runs[id: runID] = run
-        return .applied(run, spawnNodeRunID: spawnNodeRunID)
+        return .applied(run, spawnNodeRunIDs: [])
+    }
+
+    /// Recomputes the run-level aggregate status after routing: any
+    /// pending approval (from ANY branch) shows as `.awaitingApproval`;
+    /// with none pending and no active branches left, the run is
+    /// `.completed` if at least one branch reached `.done`, else
+    /// `.failed` (every branch dead-ended without ever succeeding — a
+    /// misconfigured graph, not left hanging forever). Otherwise the run
+    /// is still in progress and its status is left alone (an
+    /// `.awaitingApproval` run whose last gate just got resolved by this
+    /// same handoff reverts to `.running`).
+    private static func finishRouting(runID: UUID, spawnNodeRunIDs: [UUID], state: inout State) -> HandoffResult {
+        guard var run = state.runs[id: runID] else { return .runNotFound }
+        let pendingApprovals = PipelinePendingApproval.parseAll(run.statusDetail)
+        let now = Date()
+        if !pendingApprovals.isEmpty {
+            run.status = .awaitingApproval
+        } else if run.activeNodeRunIDs.isEmpty {
+            if run.nodeRuns.contains(where: { $0.status == .done }) {
+                run.status = .completed
+            } else {
+                run.status = .failed
+                run.statusDetail = "run finished with no branch reaching done"
+            }
+            run.completedAt = now
+        } else if run.status == .awaitingApproval {
+            run.status = .running
+        }
+        run.updatedAt = now
+        state.runs[id: runID] = run
+        return .applied(run, spawnNodeRunIDs: spawnNodeRunIDs)
     }
 }
 
-/// The pending routing target while a run sits `.awaitingApproval`,
+/// One pending routing target while a run sits `.awaitingApproval`,
 /// encoded into `PipelineRun.statusDetail` (no DB column of its own — the
 /// same free-text-with-a-parseable-prefix convention as
-/// `PipelineRunPauseReason`). Node ids and edge keys are slug/pipe-joined
+/// `PipelineRunPauseReason`). With fan-out (issue #282 round 3) several of
+/// these can be pending at once — one per gated branch — so the whole
+/// list round-trips through the one free-text column as consecutive
+/// `[approval ...]` tokens. Node ids and edge keys are slug/pipe-joined
 /// text with no spaces, so a simple space-delimited `key=value` scan is
-/// safe.
-struct PipelinePendingApproval: Equatable {
+/// safe. `edgeKey` (`PipelineEdge.identityKey`) is unique among
+/// concurrently-pending approvals — the same edge can't fire twice before
+/// its source NodeRun (already terminal once it hands off) fires again.
+struct PipelinePendingApproval: Equatable, Identifiable {
     var toNodeID: String
     var edgeKey: String
+    /// The NodeRun whose handoff fired this gated edge — carried through
+    /// to the spawned NodeRun's `feedbackSourceNodeRunID` on approval.
+    var fromNodeRunID: UUID
 
-    static func encode(_ pending: Self, message: String) -> String {
-        "[approval to=\(pending.toNodeID) edge=\(pending.edgeKey)] \(message)"
+    var id: String { edgeKey }
+
+    static func encodeAll(_ approvals: [Self]) -> String? {
+        guard !approvals.isEmpty else { return nil }
+        let tokens = approvals.map {
+            "[approval to=\($0.toNodeID) edge=\($0.edgeKey) from=\($0.fromNodeRunID.uuidString)]"
+        }
+        return tokens.joined(separator: " ") + " — \(approvals.count) pending approval\(approvals.count == 1 ? "" : "s")"
     }
 
-    static func parse(_ detail: String?) -> Self? {
-        guard let detail, detail.hasPrefix("[approval "), let end = detail.firstIndex(of: "]") else { return nil }
-        let start = detail.index(detail.startIndex, offsetBy: "[approval ".count)
-        guard start <= end else { return nil }
-        var toNodeID: String?
-        var edgeKey: String?
-        for part in detail[start ..< end].split(separator: " ") {
-            let kv = part.split(separator: "=", maxSplits: 1)
-            guard kv.count == 2 else { continue }
-            if kv[0] == "to" {
-                toNodeID = String(kv[1])
+    static func parseAll(_ detail: String?) -> [Self] {
+        guard let detail else { return [] }
+        var results: [Self] = []
+        var searchStart = detail.startIndex
+        while let openRange = detail.range(of: "[approval ", range: searchStart ..< detail.endIndex),
+              let closeIndex = detail[openRange.upperBound...].firstIndex(of: "]") {
+            let inner = detail[openRange.upperBound ..< closeIndex]
+            var toNodeID: String?
+            var edgeKey: String?
+            var fromNodeRunID: UUID?
+            for part in inner.split(separator: " ") {
+                let kv = part.split(separator: "=", maxSplits: 1)
+                guard kv.count == 2 else { continue }
+                switch kv[0] {
+                case "to": toNodeID = String(kv[1])
+                case "edge": edgeKey = String(kv[1])
+                case "from": fromNodeRunID = UUID(uuidString: String(kv[1]))
+                default: break
+                }
             }
-            if kv[0] == "edge" {
-                edgeKey = String(kv[1])
+            if let toNodeID, let edgeKey, let fromNodeRunID {
+                results.append(Self(toNodeID: toNodeID, edgeKey: edgeKey, fromNodeRunID: fromNodeRunID))
             }
+            searchStart = detail.index(after: closeIndex)
         }
-        guard let toNodeID, let edgeKey else { return nil }
-        return Self(toNodeID: toNodeID, edgeKey: edgeKey)
+        return results
     }
 }

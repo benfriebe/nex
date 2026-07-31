@@ -430,6 +430,23 @@ struct WorkspaceListView: View {
 
                     Spacer()
 
+                    // Discoverable entry point for pipeline panes (issue
+                    // #282 round 3) — previously only reachable via the
+                    // sidebar chevron menu, command palette, or an
+                    // unbound keybinding.
+                    if let activeID = store.activeWorkspaceID {
+                        Button {
+                            store.send(.workspaces(.element(id: activeID, action: .openPipelinePane)))
+                        } label: {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 12, weight: .medium))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(chromeTheme.textSecondary)
+                        .help("Open Pipelines")
+                    }
+
                     Text("\u{2318}N")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(chromeTheme.textTertiary)

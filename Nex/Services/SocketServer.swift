@@ -208,13 +208,15 @@ enum SocketMessage: Equatable {
     /// `nex pipeline retry <run-id>` — force the run back to `.running`
     /// and start a fresh attempt of its current node. Request/response.
     case pipelineRetry(runID: String)
-    /// `nex pipeline approve <run-id>` — approve the pending
-    /// `requiresApproval` edge, spawning/resuming the target node.
-    /// Request/response.
-    case pipelineApprove(runID: String)
-    /// `nex pipeline deny <run-id>` — deny the pending approval; the run
-    /// becomes `.cancelled`. Request/response.
-    case pipelineDeny(runID: String)
+    /// `nex pipeline approve <run-id> [--edge <key>]` — approve a pending
+    /// `requiresApproval` edge, spawning/resuming its target node.
+    /// `edgeKey` disambiguates when fan-out (issue #282 round 3) has left
+    /// more than one branch gated at once; required unless there's
+    /// exactly one pending approval. Request/response.
+    case pipelineApprove(runID: String, edgeKey: String?)
+    /// `nex pipeline deny <run-id> [--edge <key>]` — deny a pending
+    /// approval. Request/response.
+    case pipelineDeny(runID: String, edgeKey: String?)
     /// `nex pipeline resume <run-id>` — re-engage a run paused
     /// `.appRestart`/`.stalledNode`/`.paneClosed`. Request/response.
     case pipelineResume(runID: String)
@@ -1039,6 +1041,10 @@ final class SocketServer: Sendable {
         /// `pipeline-handoff --node` — node slug, paired with `runID`
         /// under `--force`.
         var nodeID: String?
+        /// `pipeline-approve|deny --edge` — `PipelineEdge.identityKey`,
+        /// disambiguates which pending approval to act on when fan-out
+        /// (issue #282 round 3) has left more than one gated at once.
+        var edgeKey: String?
 
         enum CodingKeys: String, CodingKey {
             case command
@@ -1087,6 +1093,7 @@ final class SocketServer: Sendable {
             case inputs, outcome, summary, output
             case runID = "run_id"
             case nodeID = "node_id"
+            case edgeKey = "edge"
         }
     }
 
@@ -1770,12 +1777,14 @@ final class SocketServer: Sendable {
 
         if wire.command == "pipeline-approve" {
             guard let runID = wire.runID, !runID.isEmpty else { return nil }
-            return (.pipelineApprove(runID: runID), wire)
+            let edgeKey = (wire.edgeKey?.isEmpty == true) ? nil : wire.edgeKey
+            return (.pipelineApprove(runID: runID, edgeKey: edgeKey), wire)
         }
 
         if wire.command == "pipeline-deny" {
             guard let runID = wire.runID, !runID.isEmpty else { return nil }
-            return (.pipelineDeny(runID: runID), wire)
+            let edgeKey = (wire.edgeKey?.isEmpty == true) ? nil : wire.edgeKey
+            return (.pipelineDeny(runID: runID, edgeKey: edgeKey), wire)
         }
 
         if wire.command == "pipeline-resume" {

@@ -459,41 +459,52 @@ extension AppReducer {
     /// A node that never got a chance to hand off (spawn failure,
     /// readiness-gate exhaustion) is routed exactly like an explicit
     /// `nex pipeline fail` — same `applyHandoff` call, same follow-up.
-    /// Reuses `newNodeRunID: uuid()` in case routing continues to
-    /// another node.
     func pipelineFailNodeSynthetically(_ state: inout State, runID: UUID, nodeRunID: UUID, reason: String) -> Effect<Action> {
         let result = PipelinesFeature.applyHandoff(
             runID: runID, nodeRunID: nodeRunID, outcome: .fail, summary: reason, outputPath: nil,
-            engine: pipelineEngine, newNodeRunID: uuid(), state: &state.pipelines
+            engine: pipelineEngine, newNodeRunID: { self.uuid() }, state: &state.pipelines
         )
         return pipelineFollowUpOnHandoff(&state, result: result)
     }
 
     /// Shared follow-up after any `applyHandoff` call (real or
-    /// synthetic): if routing appended a new pending NodeRun, engage it;
-    /// always cancel this node's timers and fan out `pipeline watch`.
+    /// synthetic): engages every freshly spawned NodeRun (fan-out, issue
+    /// #282 round 3, can be more than one from a single handoff);
+    /// cancels timers for any sibling branch a whole-run failure just
+    /// marked `.interrupted`; always fans out `pipeline watch`.
     func pipelineFollowUpOnHandoff(_ state: inout State, result: PipelinesFeature.HandoffResult) -> Effect<Action> {
         switch result {
         case .runNotFound, .nodeRunNotFound, .idempotent:
             return .none
         case .recorded(let run):
             return .merge(.send(.persistState), pipelineFanOutWatch(&state, runID: run.id))
-        case .applied(let run, let spawnNodeRunID):
+        case .applied(let run, let spawnNodeRunIDs):
             var effects: [Effect<Action>] = [.send(.persistState), pipelineFanOutWatch(&state, runID: run.id)]
-            if let spawnNodeRunID {
-                effects.append(pipelineEngageNode(&state, runID: run.id, nodeRunID: spawnNodeRunID, feedback: pipelineFeedback(run: run, nodeRunID: spawnNodeRunID)))
+            if run.status == .failed {
+                for nodeRun in run.nodeRuns where nodeRun.status == .interrupted {
+                    effects.append(pipelineCancelTimers(nodeRunID: nodeRun.id))
+                }
+            }
+            for spawnNodeRunID in spawnNodeRunIDs {
+                effects.append(pipelineEngageNode(
+                    &state, runID: run.id, nodeRunID: spawnNodeRunID,
+                    feedback: pipelineFeedback(run: run, nodeRunID: spawnNodeRunID)
+                ))
             }
             return .merge(effects)
         }
     }
 
     /// The feedback surfaced to a node via `{{feedback}}`: the summary +
-    /// artifact of whichever NodeRun most recently routed here. Nil on a
-    /// node's first-ever visit in this run.
+    /// artifact of the SPECIFIC NodeRun whose handoff routed here
+    /// (`PipelineNodeRun.feedbackSourceNodeRunID`, set when the NodeRun
+    /// was appended) — not "whichever else in the run most recently
+    /// finished", which would be ambiguous once concurrent fan-out
+    /// branches exist (issue #282 round 3). Nil on a node's first-ever
+    /// visit in this run.
     private func pipelineFeedback(run: PipelineRun, nodeRunID: UUID) -> PipelineFeedback? {
-        guard run.nodeRuns[id: nodeRunID] != nil else { return nil }
-        let candidates = run.nodeRuns.filter { $0.id != nodeRunID && $0.status.isTerminal }
-        guard let source = candidates.max(by: { $0.completedAt ?? .distantPast < $1.completedAt ?? .distantPast })
+        guard let nodeRun = run.nodeRuns[id: nodeRunID], let sourceID = nodeRun.feedbackSourceNodeRunID,
+              let source = run.nodeRuns[id: sourceID]
         else { return nil }
         let path = source.outputPath ?? PipelineEngineLogic.attemptDirPath(
             runDir: run.runDir, nodeID: source.nodeID, attempt: source.attempt
@@ -503,16 +514,32 @@ extension AppReducer {
 
     // MARK: - Manual controls (CLI `pipeline approve|deny|cancel|retry|resume`)
 
-    func pipelineApprove(_ state: inout State, runID: UUID) -> Effect<Action> {
-        guard let run = state.pipelines.runs[id: runID], run.status == .awaitingApproval,
-              let pending = PipelinePendingApproval.parse(run.statusDetail) else { return .none }
+    /// Resolves which pending approval an `approve`/`deny` call targets:
+    /// the explicit `--edge <key>` match if given, else the sole pending
+    /// approval when unambiguous. Nil (including "more than one pending
+    /// and no edge given") is the caller's cue to reject with a
+    /// structured "ambiguous, pass --edge" error — see
+    /// `AppReducer+PipelineSocket.swift`'s `handlePipelineApprove`/`Deny`.
+    static func resolvePendingApproval(_ pending: [PipelinePendingApproval], edgeKey: String?) -> PipelinePendingApproval? {
+        if let edgeKey {
+            return pending.first { $0.edgeKey == edgeKey }
+        }
+        return pending.count == 1 ? pending.first : nil
+    }
+
+    func pipelineApprove(_ state: inout State, runID: UUID, edgeKey: String? = nil) -> Effect<Action> {
+        guard let run = state.pipelines.runs[id: runID], run.status == .awaitingApproval else { return .none }
+        let pending = PipelinePendingApproval.parseAll(run.statusDetail)
+        guard let target = Self.resolvePendingApproval(pending, edgeKey: edgeKey) else { return .none }
+        let remaining = pending.filter { $0.edgeKey != target.edgeKey }
         PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
-            $0.status = .launching
-            $0.statusDetail = nil
+            $0.statusDetail = PipelinePendingApproval.encodeAll(remaining)
+            $0.status = remaining.isEmpty ? .running : .awaitingApproval
         }
         let newID = uuid()
         guard let newNodeRunID = PipelinesFeature.appendNodeRun(
-            runID: runID, nodeID: pending.toNodeID, newID: newID, now: Date(), state: &state.pipelines
+            runID: runID, nodeID: target.toNodeID, newID: newID,
+            feedbackSourceNodeRunID: target.fromNodeRunID, now: Date(), state: &state.pipelines
         ), let updatedRun = state.pipelines.runs[id: runID] else { return .none }
         let feedback = pipelineFeedback(run: updatedRun, nodeRunID: newNodeRunID)
         return .merge(
@@ -521,35 +548,58 @@ extension AppReducer {
         )
     }
 
-    func pipelineDeny(_ state: inout State, runID: UUID) -> Effect<Action> {
+    /// Denying one gated branch doesn't necessarily kill the whole run —
+    /// with fan-out, sibling branches may still be active or may already
+    /// have succeeded. The run only becomes `.cancelled` (legacy
+    /// single-branch behaviour) when this was the last thing keeping it
+    /// alive and nothing ever reached `.done`; if a sibling already
+    /// succeeded, denying a late bounce-back approval completes the run
+    /// instead of retroactively undoing that success.
+    func pipelineDeny(_ state: inout State, runID: UUID, edgeKey: String? = nil) -> Effect<Action> {
         guard let run = state.pipelines.runs[id: runID], run.status == .awaitingApproval else { return .none }
+        let pending = PipelinePendingApproval.parseAll(run.statusDetail)
+        guard let target = Self.resolvePendingApproval(pending, edgeKey: edgeKey) else { return .none }
+        let remaining = pending.filter { $0.edgeKey != target.edgeKey }
         PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
-            $0.status = .cancelled
-            $0.statusDetail = "approval denied"
-            $0.completedAt = Date()
+            $0.statusDetail = PipelinePendingApproval.encodeAll(remaining)
+        }
+        guard let updatedRun = state.pipelines.runs[id: runID] else { return .none }
+        if !remaining.isEmpty {
+            PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) { $0.status = .awaitingApproval }
+        } else if updatedRun.activeNodeRunIDs.isEmpty {
+            let reachedDone = updatedRun.nodeRuns.contains { $0.status == .done }
+            PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
+                $0.status = reachedDone ? .completed : .cancelled
+                $0.statusDetail = reachedDone ? nil : "approval denied"
+                $0.completedAt = Date()
+            }
+        } else {
+            PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) { $0.status = .running }
         }
         return .merge(.send(.persistState), pipelineFanOutWatch(&state, runID: runID))
     }
 
     func pipelineCancel(_ state: inout State, runID: UUID) -> Effect<Action> {
         guard let run = state.pipelines.runs[id: runID], !run.status.isTerminal else { return .none }
-        let timerCancel = run.currentNodeRunID.map(pipelineCancelTimers) ?? .none
+        let timerCancels = Set(run.activeNodeRunIDs + run.blockingNodeRunIDs).map(pipelineCancelTimers)
         PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
             $0.status = .cancelled
             $0.statusDetail = "cancelled by user"
             $0.completedAt = Date()
         }
-        return .merge(.send(.persistState), pipelineFanOutWatch(&state, runID: runID), timerCancel)
+        return .merge([.send(.persistState), pipelineFanOutWatch(&state, runID: runID)] + timerCancels)
     }
 
-    /// `nex pipeline resume` — the appRestart-specific re-entry: the
-    /// current NodeRun is `.interrupted`, and its message frames the
+    /// `nex pipeline resume` — the appRestart-specific re-entry:
+    /// re-engages every blocked NodeRun (fan-out can leave more than one
+    /// `.interrupted`/`.stalled` at once), each message framing the
     /// re-verify instruction the issue calls for (issue section 5).
     func pipelineResume(_ state: inout State, runID: UUID) -> Effect<Action> {
         guard let run = state.pipelines.runs[id: runID], run.status == .paused,
-              let reason = PipelineRunPauseReason.parse(run.statusDetail),
-              let currentID = run.currentNodeRunID, run.nodeRuns[id: currentID] != nil
+              let reason = PipelineRunPauseReason.parse(run.statusDetail)
         else { return .none }
+        let blocking = run.blockingNodeRunIDs
+        guard !blocking.isEmpty else { return .none }
         let message: String = switch reason {
         case .appRestart:
             "You were interrupted by an app restart before finishing. Check the run directory for " +
@@ -561,20 +611,38 @@ extension AppReducer {
             "Your pane was closed and a new one was opened to continue this node. Continue the " +
                 "mission and hand off when done."
         }
-        return pipelineReengageNode(&state, runID: runID, nodeRunID: currentID, feedbackMessage: message)
+        var effects: [Effect<Action>] = []
+        for nodeRunID in blocking {
+            effects.append(pipelineReengageNode(&state, runID: runID, nodeRunID: nodeRunID, feedbackMessage: message))
+        }
+        return .merge(effects)
     }
 
     /// `nex pipeline retry` — generic manual escalation for a stalled /
     /// pane-closed / failed run: force the run back to `.running` and
-    /// start a fresh attempt of whatever node it stopped on.
+    /// start a fresh attempt of every node it stopped on — every
+    /// currently blocking (stalled/interrupted) NodeRun, plus, if the run
+    /// itself is `.failed`, each node's latest attempt that actually
+    /// failed (fan-out can leave more than one of either).
     func pipelineRetry(_ state: inout State, runID: UUID) -> Effect<Action> {
-        guard let run = state.pipelines.runs[id: runID],
-              let currentID = run.currentNodeRunID, run.nodeRuns[id: currentID] != nil
-        else { return .none }
-        return pipelineReengageNode(
-            &state, runID: runID, nodeRunID: currentID,
-            feedbackMessage: "Retrying at operator request. Continue the mission and hand off when done."
-        )
+        guard let run = state.pipelines.runs[id: runID] else { return .none }
+        var targets = Set(run.blockingNodeRunIDs)
+        if run.status == .failed {
+            let latestByNode = Dictionary(grouping: run.nodeRuns, by: \.nodeID)
+                .compactMapValues { $0.max { $0.attempt < $1.attempt } }
+            for nodeRun in latestByNode.values where nodeRun.status == .failed {
+                targets.insert(nodeRun.id)
+            }
+        }
+        guard !targets.isEmpty else { return .none }
+        var effects: [Effect<Action>] = []
+        for nodeRunID in targets {
+            effects.append(pipelineReengageNode(
+                &state, runID: runID, nodeRunID: nodeRunID,
+                feedbackMessage: "Retrying at operator request. Continue the mission and hand off when done."
+            ))
+        }
+        return .merge(effects)
     }
 
     private func pipelineReengageNode(_ state: inout State, runID: UUID, nodeRunID: UUID, feedbackMessage: String) -> Effect<Action> {
@@ -582,6 +650,7 @@ extension AppReducer {
         PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
             $0.status = .running
             $0.statusDetail = nil
+            $0.completedAt = nil
         }
         let newID = uuid()
         guard let newNodeRunID = PipelinesFeature.appendNodeRun(
@@ -607,8 +676,10 @@ extension AppReducer {
     // MARK: - Agent-event forwarding (issue section 3 liveness rules)
 
     /// Finds the NodeRun bound to `paneID` whose status matches one of
-    /// `statuses` (there is at most one live NodeRun per pane at a time —
-    /// v1 is single-active-node).
+    /// `statuses` — there is at most one live NodeRun per PANE at a time
+    /// (each fan-out branch gets its own pane, issue #282 round 3), even
+    /// though a run as a whole can have several concurrently-active
+    /// NodeRuns across different panes.
     private func pipelineActiveNodeRun(
         _ state: State, paneID: UUID, statuses: Set<PipelineNodeRunStatus>
     ) -> (runID: UUID, nodeRunID: UUID)? {
@@ -686,8 +757,12 @@ extension AppReducer {
                 effects.append(paneSendText(paneID: paneID, text: pointer, bare: false))
             }
         }
+        // Only lift the run-level pause once EVERY blocking branch has
+        // cleared — fan-out can leave more than one node `.stalled` under
+        // the same pause, and a late SessionStart for one of them
+        // shouldn't resume routing while a sibling is still stuck.
         if wasStalled, run.status == .paused, PipelineRunPauseReason.parse(run.statusDetail) == .stalledNode,
-           run.currentNodeRunID == nodeRunID {
+           (state.pipelines.runs[id: runID]?.blockingNodeRunIDs ?? []).isEmpty {
             PipelinesFeature.updateRun(runID: runID, state: &state.pipelines) {
                 $0.status = .running
                 $0.statusDetail = nil
@@ -752,8 +827,8 @@ extension AppReducer {
         var effects: [Effect<Action>] = []
         for run in state.pipelines.runs where run.workspaceID == workspaceID && !run.status.isTerminal {
             let id = run.id
-            if let currentID = run.currentNodeRunID {
-                effects.append(pipelineCancelTimers(nodeRunID: currentID))
+            for nodeRunID in Set(run.activeNodeRunIDs + run.blockingNodeRunIDs) {
+                effects.append(pipelineCancelTimers(nodeRunID: nodeRunID))
             }
             PipelinesFeature.updateRun(runID: id, state: &state.pipelines) {
                 $0.status = .cancelled
@@ -806,14 +881,14 @@ extension AppReducer {
         return pipelineCancel(&state, runID: runID)
     }
 
-    func handlePipelineApproveRunFromPane(_ state: inout State, paneID: UUID) -> Effect<Action> {
+    func handlePipelineApproveRunFromPane(_ state: inout State, paneID: UUID, edgeKey: String) -> Effect<Action> {
         guard let runID = pipelineMonitorRunID(state, paneID: paneID) else { return .none }
-        return pipelineApprove(&state, runID: runID)
+        return pipelineApprove(&state, runID: runID, edgeKey: edgeKey)
     }
 
-    func handlePipelineDenyRunFromPane(_ state: inout State, paneID: UUID) -> Effect<Action> {
+    func handlePipelineDenyRunFromPane(_ state: inout State, paneID: UUID, edgeKey: String) -> Effect<Action> {
         guard let runID = pipelineMonitorRunID(state, paneID: paneID) else { return .none }
-        return pipelineDeny(&state, runID: runID)
+        return pipelineDeny(&state, runID: runID, edgeKey: edgeKey)
     }
 
     func handlePipelineResumeRunFromPane(_ state: inout State, paneID: UUID) -> Effect<Action> {
@@ -854,7 +929,7 @@ extension AppReducer {
     /// still `.launching` or `.awaitingApproval` before anything spawned).
     func handlePipelineFocusRun(_ state: inout State, runID: UUID) -> Effect<Action> {
         guard let run = state.pipelines.runs[id: runID] else { return .none }
-        if let currentPaneID = run.currentNodeRunID.flatMap({ run.nodeRuns[id: $0]?.paneID }),
+        if let currentPaneID = run.mostRecentNodeRun?.paneID,
            let workspace = state.workspaceContainingPane(currentPaneID) {
             state.activeWorkspaceID = workspace.id
             state.workspaces[id: workspace.id]?.setFocus(currentPaneID)

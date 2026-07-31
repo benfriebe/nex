@@ -132,7 +132,10 @@ struct PipelineInspectorView: View {
                 .foregroundStyle(chromeTheme.textTertiary)
         } else {
             let target = newEdgeTarget.flatMap { id in candidates.first { $0.id == id } } ?? candidates[0]
-            let alreadyExists = document.edges.contains { $0.from == node.id && $0.on == newEdgeOutcome }
+            // Fan-out (multiple edges off the same outcome) is legal —
+            // only an exactly identical edge (same outcome AND target)
+            // is blocked here.
+            let alreadyExists = document.edges.contains { $0.from == node.id && $0.on == newEdgeOutcome && $0.to == target.id }
 
             labeledField("On outcome") {
                 Picker("On outcome", selection: $newEdgeOutcome) {
@@ -165,7 +168,7 @@ struct PipelineInspectorView: View {
             .disabled(alreadyExists)
 
             if alreadyExists {
-                Text("An edge for \"\(newEdgeOutcome.rawValue)\" already exists from this node.")
+                Text("This exact edge already exists.")
                     .font(.system(size: 10))
                     .foregroundStyle(chromeTheme.textTertiary)
             }

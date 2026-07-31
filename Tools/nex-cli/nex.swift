@@ -4808,13 +4808,23 @@ private func handlePipelineValidate(_ args: inout ArraySlice<String>) {
 /// (`{ok, run_id, status}`).
 private func handlePipelineControlVerb(_ args: inout ArraySlice<String>, wire: String, label: String) {
     let asJSON = popSwitch("--json", from: &args)
+    // `--edge <key>` disambiguates approve/deny when fan-out (issue #282
+    // round 3) has left more than one branch gated at once; ignored (but
+    // accepted) by cancel/retry/resume, which the server never consults
+    // it for.
+    let edgeKey = parseFlag("--edge", from: &args)
     guard let runID = args.popFirst() else {
-        fputs("Usage: nex pipeline \(label) <run-id> [--json]\n", stderr)
+        let edgeUsage = (label == "approve" || label == "deny") ? " [--edge <key>]" : ""
+        fputs("Usage: nex pipeline \(label) <run-id>\(edgeUsage) [--json]\n", stderr)
         exit(1)
     }
     rejectLeftoverArgs(args, command: "nex pipeline \(label)")
 
-    let json = decodeReply(["command": wire, "run_id": runID], command: "nex pipeline \(label)")
+    var payload: [String: Any] = ["command": wire, "run_id": runID]
+    if let edgeKey {
+        payload["edge"] = edgeKey
+    }
+    let json = decodeReply(payload, command: "nex pipeline \(label)")
     if asJSON {
         var clean = json
         clean.removeValue(forKey: "ok")

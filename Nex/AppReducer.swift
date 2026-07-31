@@ -525,8 +525,8 @@ struct AppReducer {
         /// themselves, so the view layer only ever needs a `paneID`.
         case pipelineRunFromPane(paneID: UUID, inputs: [String: String])
         case pipelineCancelRunFromPane(paneID: UUID)
-        case pipelineApproveRunFromPane(paneID: UUID)
-        case pipelineDenyRunFromPane(paneID: UUID)
+        case pipelineApproveRunFromPane(paneID: UUID, edgeKey: String)
+        case pipelineDenyRunFromPane(paneID: UUID, edgeKey: String)
         case pipelineResumeRunFromPane(paneID: UUID)
         case pipelineBackToEditFromPane(paneID: UUID)
         case pipelineJumpToNode(paneID: UUID, nodeID: String)
@@ -2452,11 +2452,11 @@ struct AppReducer {
             case .pipelineCancelRunFromPane(let paneID):
                 return handlePipelineCancelRunFromPane(&state, paneID: paneID)
 
-            case .pipelineApproveRunFromPane(let paneID):
-                return handlePipelineApproveRunFromPane(&state, paneID: paneID)
+            case .pipelineApproveRunFromPane(let paneID, let edgeKey):
+                return handlePipelineApproveRunFromPane(&state, paneID: paneID, edgeKey: edgeKey)
 
-            case .pipelineDenyRunFromPane(let paneID):
-                return handlePipelineDenyRunFromPane(&state, paneID: paneID)
+            case .pipelineDenyRunFromPane(let paneID, let edgeKey):
+                return handlePipelineDenyRunFromPane(&state, paneID: paneID, edgeKey: edgeKey)
 
             case .pipelineResumeRunFromPane(let paneID):
                 return handlePipelineResumeRunFromPane(&state, paneID: paneID)
@@ -2647,7 +2647,7 @@ struct AppReducer {
                             runID: run.id,
                             name: run.definitionSnapshot.name,
                             status: run.status,
-                            currentNodeID: run.currentNodeRunID.flatMap { run.nodeRuns[id: $0]?.nodeID },
+                            activeNodeIDs: run.activeNodeRunIDs.compactMap { run.nodeRuns[id: $0]?.nodeID },
                             createdAt: run.createdAt
                         )
                     }

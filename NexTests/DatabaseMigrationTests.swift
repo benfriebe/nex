@@ -240,6 +240,17 @@ struct DatabaseMigrationTests {
         }
     }
 
+    /// Fan-out (issue #282 round 3): `{{feedback}}` on a node with
+    /// multiple inbound edges binds to the specific NodeRun that fired
+    /// its spawn, which needs a persisted pointer column.
+    @Test func v21AddsFeedbackSourceNodeRunIDColumn() throws {
+        let db = try DatabaseService(inMemory: true)
+        try db.writer.read { db in
+            let columns = try Set(db.columns(in: "pipelineNodeRun").map(\.name))
+            #expect(columns.contains("feedbackSourceNodeRunID"))
+        }
+    }
+
     /// Migration is idempotent — re-running `migrate()` against an
     /// already-migrated DB (the guarded `tableExists` check) must not
     /// throw, matching the house style for every other v4+ migration.

@@ -7,8 +7,12 @@ import SwiftUI
 struct PipelineRunHUD: View {
     let run: PipelineRun
     let onCancel: () -> Void
-    let onApprove: () -> Void
-    let onDeny: () -> Void
+    /// Approve/deny one pending gate, identified by its `edgeKey`
+    /// (`PipelineEdge.identityKey`) — fan-out (issue #282 round 3) can
+    /// leave more than one branch gated at once, so there's a row per
+    /// pending approval rather than one global button pair.
+    let onApprove: (String) -> Void
+    let onDeny: (String) -> Void
     let onResume: () -> Void
     let onBackToEdit: () -> Void
 
@@ -52,13 +56,7 @@ struct PipelineRunHUD: View {
 
                 Spacer()
 
-                if run.status == .awaitingApproval {
-                    Button("Deny", action: onDeny)
-                        .font(.system(size: 11))
-                    Button("Approve", action: onApprove)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(chromeTheme.accent)
-                } else if run.status == .paused {
+                if run.status == .paused {
                     Button("Resume", action: onResume)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(chromeTheme.accent)
@@ -75,7 +73,25 @@ struct PipelineRunHUD: View {
             }
             .buttonStyle(.plain)
 
-            if let detail = run.statusDetail, !detail.isEmpty {
+            // One row per pending gate — fan-out (issue #282 round 3) can
+            // leave more than one branch awaiting approval at once, each
+            // independently approve/deny-able by its edge key.
+            if run.status == .awaitingApproval {
+                ForEach(run.pendingApprovals) { pending in
+                    HStack(spacing: 8) {
+                        Text("→ \(pending.toNodeID) awaiting approval")
+                            .font(.system(size: 10))
+                            .foregroundStyle(chromeTheme.textTertiary)
+                        Spacer()
+                        Button("Deny") { onDeny(pending.edgeKey) }
+                            .font(.system(size: 11))
+                        Button("Approve") { onApprove(pending.edgeKey) }
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(chromeTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else if let detail = run.statusDetail, !detail.isEmpty {
                 Text(detail)
                     .font(.system(size: 10))
                     .foregroundStyle(chromeTheme.textTertiary)

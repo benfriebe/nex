@@ -96,8 +96,8 @@ struct PaneGridView: View {
     var pipelineRuns: IdentifiedArrayOf<PipelineRun> = []
     var onPipelineRun: ((UUID, [String: String]) -> Void)?
     var onPipelineCancelRun: ((UUID) -> Void)?
-    var onPipelineApproveRun: ((UUID) -> Void)?
-    var onPipelineDenyRun: ((UUID) -> Void)?
+    var onPipelineApproveRun: ((UUID, String) -> Void)?
+    var onPipelineDenyRun: ((UUID, String) -> Void)?
     var onPipelineResumeRun: ((UUID) -> Void)?
     var onPipelineBackToEdit: ((UUID) -> Void)?
     var onPipelineJumpToNode: ((UUID, String) -> Void)?
@@ -377,8 +377,8 @@ struct PaneGridView: View {
                     onViewportChange: { zoom, pan in onPipelineViewportChange?(pane.id, zoom, pan) },
                     onRun: { inputs in onPipelineRun?(pane.id, inputs) },
                     onCancelRun: { onPipelineCancelRun?(pane.id) },
-                    onApproveRun: { onPipelineApproveRun?(pane.id) },
-                    onDenyRun: { onPipelineDenyRun?(pane.id) },
+                    onApproveRun: { edgeKey in onPipelineApproveRun?(pane.id, edgeKey) },
+                    onDenyRun: { edgeKey in onPipelineDenyRun?(pane.id, edgeKey) },
                     onResumeRun: { onPipelineResumeRun?(pane.id) },
                     onBackToEdit: { onPipelineBackToEdit?(pane.id) },
                     onJumpToNode: { nodeID in onPipelineJumpToNode?(pane.id, nodeID) }

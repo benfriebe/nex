@@ -200,7 +200,7 @@ extension AppReducer {
                 summary: summary,
                 outputPath: output,
                 engine: pipelineEngine,
-                newNodeRunID: uuid(),
+                newNodeRunID: { self.uuid() },
                 state: &state.pipelines
             )
             switch result {
@@ -262,24 +262,47 @@ extension AppReducer {
     func handlePipelineRetry(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
         handlePipelineControl(
             &state, runIDString: runID, reply: reply,
-            precondition: { $0.currentNodeRunID == nil ? "run has no current node to retry" : nil },
+            precondition: { $0.nodeRuns.isEmpty ? "run has no node to retry" : nil },
             orchestrate: { s, id in self.pipelineRetry(&s, runID: id) }
         )
     }
 
-    func handlePipelineApprove(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+    /// Approve/deny share the same ambiguity rule: with fan-out (issue
+    /// #282 round 3) more than one branch can be gated at once, so
+    /// `--edge <key>` is required unless there's exactly one pending
+    /// approval — an omitted/unmatched edge on an ambiguous run is
+    /// rejected up front with the candidate keys rather than silently
+    /// no-op'ing (`AppReducer+PipelineEngine.pipelineApprove`/`Deny`
+    /// already no-op on an unresolved target for the same reason).
+    private func pendingApprovalPrecondition(_ run: PipelineRun, edgeKey: String?) -> String? {
+        guard run.status == .awaitingApproval else {
+            return "run is not awaiting approval (status: \(run.status.rawValue))"
+        }
+        let pending = run.pendingApprovals
+        if let edgeKey {
+            return pending.contains { $0.edgeKey == edgeKey }
+                ? nil
+                : "no pending approval for edge '\(edgeKey)' — pending: \(pending.map(\.edgeKey).joined(separator: ", "))"
+        }
+        if pending.count > 1 {
+            return "multiple pending approvals — pass --edge (one of: \(pending.map(\.edgeKey).joined(separator: ", ")))"
+        }
+        return nil
+    }
+
+    func handlePipelineApprove(_ state: inout State, runID: String, edgeKey: String?, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
         handlePipelineControl(
             &state, runIDString: runID, reply: reply,
-            precondition: { $0.status == .awaitingApproval ? nil : "run is not awaiting approval (status: \($0.status.rawValue))" },
-            orchestrate: { s, id in self.pipelineApprove(&s, runID: id) }
+            precondition: { self.pendingApprovalPrecondition($0, edgeKey: edgeKey) },
+            orchestrate: { s, id in self.pipelineApprove(&s, runID: id, edgeKey: edgeKey) }
         )
     }
 
-    func handlePipelineDeny(_ state: inout State, runID: String, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
+    func handlePipelineDeny(_ state: inout State, runID: String, edgeKey: String?, reply: SocketServer.ReplyHandle?) -> Effect<Action> {
         handlePipelineControl(
             &state, runIDString: runID, reply: reply,
-            precondition: { $0.status == .awaitingApproval ? nil : "run is not awaiting approval (status: \($0.status.rawValue))" },
-            orchestrate: { s, id in self.pipelineDeny(&s, runID: id) }
+            precondition: { self.pendingApprovalPrecondition($0, edgeKey: edgeKey) },
+            orchestrate: { s, id in self.pipelineDeny(&s, runID: id, edgeKey: edgeKey) }
         )
     }
 
@@ -383,12 +406,18 @@ extension AppReducer {
     }
 
     static func runJSON(_ run: PipelineRun) -> [String: Any] {
+        // Fan-out (issue #282 round 3): every branch is independently
+        // identifiable by node id, both per-NodeRun (`node_id`,
+        // `from_node_run_id`) and at the run level (`active_node_ids`,
+        // `pending_approvals`) — `pipeline status`/`watch` consumers
+        // can't assume a single "the current node" anymore.
         var dict: [String: Any] = [
             "id": run.id.uuidString,
             "definition_id": run.definitionID,
             "status": run.status.rawValue,
             "location": run.location.rawValue,
             "run_dir": run.runDir,
+            "active_node_ids": run.activeNodeRunIDs.compactMap { run.nodeRuns[id: $0]?.nodeID },
             "created_at": ISO8601DateFormatter().string(from: run.createdAt),
             "updated_at": ISO8601DateFormatter().string(from: run.updatedAt),
             "node_runs": run.nodeRuns.map { nodeRun -> [String: Any] in
@@ -404,11 +433,20 @@ extension AppReducer {
                 if let summary = nodeRun.summary {
                     nrDict["summary"] = summary
                 }
+                if let sourceID = nodeRun.feedbackSourceNodeRunID {
+                    nrDict["from_node_run_id"] = sourceID.uuidString
+                    nrDict["from_node_id"] = run.nodeRuns[id: sourceID]?.nodeID
+                }
                 return nrDict
             }
         ]
         if let statusDetail = run.statusDetail {
             dict["status_detail"] = statusDetail
+        }
+        if run.status == .awaitingApproval {
+            dict["pending_approvals"] = run.pendingApprovals.map { pending -> [String: Any] in
+                ["to_node_id": pending.toNodeID, "edge": pending.edgeKey]
+            }
         }
         if let workspaceID = run.workspaceID {
             dict["workspace_id"] = workspaceID.uuidString

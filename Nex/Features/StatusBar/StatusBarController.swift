@@ -19,7 +19,9 @@ struct StatusBarPipelineItem: Equatable, Identifiable {
     let runID: UUID
     let name: String
     let status: PipelineRunStatus
-    let currentNodeID: String?
+    /// Every currently-active branch's node id (fan-out, issue #282
+    /// round 3 — can be more than one), in run order.
+    let activeNodeIDs: [String]
     let createdAt: Date
 
     var id: UUID { runID }

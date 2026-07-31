@@ -281,7 +281,6 @@ struct PipelineCLIReplyTests {
                 startedAt: now, updatedAt: now
             )
         ]
-        run.currentNodeRunID = secondAttemptID
         var pipelines = PipelinesFeature.State()
         pipelines.runs = [run]
 
@@ -300,7 +299,105 @@ struct PipelineCLIReplyTests {
         #expect(sink.payloads[0]["node_run_id"] as? String == secondAttemptID.uuidString)
     }
 
+    // MARK: - pipeline approve/deny (fan-out ambiguity, issue #282 round 3)
+
+    private func makeAwaitingApprovalRun(runID: UUID, plannerID: UUID) -> PipelineRun {
+        let now = Date()
+        var run = PipelineRun(
+            id: runID,
+            definitionID: "loop",
+            definitionSnapshot: PipelineDefinition(id: "loop", name: "Loop", entry: "planner"),
+            status: .awaitingApproval,
+            statusDetail: PipelinePendingApproval.encodeAll([
+                PipelinePendingApproval(toNodeID: "implementer", edgeKey: "planner|done|implementer", fromNodeRunID: plannerID),
+                PipelinePendingApproval(toNodeID: "auditor", edgeKey: "planner|done|auditor", fromNodeRunID: plannerID)
+            ]),
+            location: .current,
+            runDir: "/runs/\(runID.uuidString)",
+            createdAt: now,
+            updatedAt: now
+        )
+        run.nodeRuns = [
+            PipelineNodeRun(id: plannerID, nodeID: "planner", status: .done, startedAt: now, updatedAt: now, completedAt: now)
+        ]
+        return run
+    }
+
+    @Test func pipelineApproveWithoutEdgeFailsWhenMultipleApprovalsArePending() async {
+        let runID = UUID()
+        var pipelines = PipelinesFeature.State()
+        pipelines.runs = [makeAwaitingApprovalRun(runID: runID, plannerID: UUID())]
+        let store = makeStore(pipelines: pipelines)
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.pipelineApprove(runID: runID.uuidString, edgeKey: nil), reply: makeCaptureHandle(sink)))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+        let error = sink.payloads[0]["error"] as? String ?? ""
+        #expect(error.contains("planner|done|implementer"))
+        #expect(error.contains("planner|done|auditor"))
+    }
+
+    @Test func pipelineApproveWithEdgeKeyResolvesTheTargetedGate() async {
+        let runID = UUID()
+        var pipelines = PipelinesFeature.State()
+        pipelines.runs = [makeAwaitingApprovalRun(runID: runID, plannerID: UUID())]
+        let store = makeStore(pipelines: pipelines)
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .pipelineApprove(runID: runID.uuidString, edgeKey: "planner|done|implementer"),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == true)
+    }
+
+    @Test func pipelineDenyWithUnknownEdgeKeyFails() async {
+        let runID = UUID()
+        var pipelines = PipelinesFeature.State()
+        pipelines.runs = [makeAwaitingApprovalRun(runID: runID, plannerID: UUID())]
+        let store = makeStore(pipelines: pipelines)
+        let sink = CaptureSink()
+        await store.send(.socketMessage(
+            .pipelineDeny(runID: runID.uuidString, edgeKey: "nonexistent|done|node"),
+            reply: makeCaptureHandle(sink)
+        ))
+        await store.finish()
+
+        #expect(sink.payloads[0]["ok"] as? Bool == false)
+    }
+
     // MARK: - pipeline-status / list / validate
+
+    @Test func pipelineStatusSurfacesActiveNodeIdsForConcurrentBranches() async {
+        let runID = UUID()
+        let now = Date()
+        var run = PipelineRun(
+            id: runID,
+            definitionID: "loop",
+            definitionSnapshot: PipelineDefinition(id: "loop", name: "Loop", entry: "planner"),
+            status: .running,
+            location: .current,
+            runDir: "/runs/\(runID.uuidString)",
+            createdAt: now,
+            updatedAt: now
+        )
+        run.nodeRuns = [
+            PipelineNodeRun(id: UUID(), nodeID: "implementer", status: .running, startedAt: now, updatedAt: now),
+            PipelineNodeRun(id: UUID(), nodeID: "auditor", status: .running, startedAt: now, updatedAt: now)
+        ]
+        var pipelines = PipelinesFeature.State()
+        pipelines.runs = [run]
+        let store = makeStore(pipelines: pipelines)
+        let sink = CaptureSink()
+        await store.send(.socketMessage(.pipelineStatus(runID: runID.uuidString), reply: makeCaptureHandle(sink)))
+        await store.finish()
+
+        let runJSON = sink.payloads[0]["run"] as? [String: Any]
+        let activeNodeIDs = Set(runJSON?["active_node_ids"] as? [String] ?? [])
+        #expect(activeNodeIDs == ["implementer", "auditor"])
+    }
 
     @Test func pipelineStatusWithNoRunsReturnsEmptyArray() async {
         let store = makeStore()

@@ -8,13 +8,18 @@ struct PipelineEdgeLayer: View {
     let edges: [PipelineEdge]
     let positions: [String: CGPoint]
     let selectedEdgeIndex: Int?
+    /// Saved per-edge curve bends (issue #282 round 3), keyed by
+    /// `PipelineEdge.identityKey`. Absent = the deterministic default
+    /// curve.
+    var edgeUI: [String: PipelineEdgeUI] = [:]
     @Environment(\.chromeTheme) private var chromeTheme
 
     var body: some View {
         Canvas { context, _ in
             for (index, edge) in edges.enumerated() {
                 guard let fromPos = positions[edge.from], let toPos = positions[edge.to] else { continue }
-                draw(edge: edge, from: fromPos, to: toPos, isSelected: selectedEdgeIndex == index, context: &context)
+                let offset = edgeUI[edge.identityKey]?.offset ?? .zero
+                draw(edge: edge, from: fromPos, to: toPos, offset: offset, isSelected: selectedEdgeIndex == index, context: &context)
             }
         }
         .allowsHitTesting(false)
@@ -28,12 +33,13 @@ struct PipelineEdgeLayer: View {
         }
     }
 
-    private func draw(edge: PipelineEdge, from fromPos: CGPoint, to toPos: CGPoint, isSelected: Bool, context: inout GraphicsContext) {
+    private func draw(
+        edge: PipelineEdge, from fromPos: CGPoint, to toPos: CGPoint, offset: CGPoint,
+        isSelected: Bool, context: inout GraphicsContext
+    ) {
         let from = PipelineCanvasGeometry.center(of: fromPos)
         let to = PipelineCanvasGeometry.center(of: toPos)
-        let controlOffset = max(abs(to.x - from.x) / 2, 40)
-        let c1 = CGPoint(x: from.x + controlOffset, y: from.y)
-        let c2 = CGPoint(x: to.x - controlOffset, y: to.y)
+        let (c1, c2) = PipelineCanvasGeometry.edgeControlPoints(from: from, to: to, offset: offset)
 
         var path = Path()
         path.move(to: from)

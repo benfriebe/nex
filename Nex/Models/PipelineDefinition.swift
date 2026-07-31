@@ -164,14 +164,14 @@ struct PipelineEdge: Codable, Equatable {
         requiresApproval = try container.decodeIfPresent(Bool.self, forKey: .requiresApproval) ?? false
     }
 
-    /// Key used to track traversal counts against `maxTraversals` and
-    /// to reject duplicate `(from, on)` pairs at validation time.
-    struct Key: Hashable, Codable {
-        var from: String
-        var on: PipelineNodeOutcome
-    }
-
-    var key: Key { Key(from: from, on: on) }
+    /// Stable identity for one edge: `from|on|to`. Fan-out (multiple
+    /// edges sharing a `(from, on)` pair, routing to different targets)
+    /// is legal — only an exactly-identical triple twice is rejected at
+    /// validation time — so `identityKey` (not just `(from, on)`) is
+    /// what's unique. Used to track per-edge `maxTraversals` counts
+    /// (`PipelineRun.edgeTraversals`), to key `ui.edges` layout overrides,
+    /// and as the wire `edge` key for `pipeline approve|deny --edge`.
+    var identityKey: String { "\(from)|\(on.rawValue)|\(to)" }
 }
 
 /// Editor-owned layout metadata. The engine ignores this entirely; the
@@ -183,11 +183,25 @@ struct PipelineEdge: Codable, Equatable {
 /// wants, so positions are coded through a private keyed proxy.
 struct PipelineUIMetadata: Equatable {
     var nodes: [String: CGPoint] = [:]
+    /// Per-edge curve overrides, keyed by `PipelineEdge.identityKey`
+    /// (`from|on|to`) — needed now that duplicate `(from, on)` pairs are
+    /// legal (fan-out), so an edge's UI identity must include `to`.
+    /// Absent = the canvas falls back to its deterministic default curve
+    /// (`PipelineEdgeLayer`'s symmetric horizontal control points) — a
+    /// hand-authored YAML file never needs an `edges:` block.
+    var edges: [String: PipelineEdgeUI] = [:]
+}
+
+/// One edge's saved curve bend, as a control-point offset (document
+/// units) applied symmetrically to both cubic bezier control points —
+/// dragging an edge's midpoint handle writes here.
+struct PipelineEdgeUI: Equatable {
+    var offset: CGPoint
 }
 
 extension PipelineUIMetadata: Codable {
     private enum CodingKeys: String, CodingKey {
-        case nodes
+        case nodes, edges
     }
 
     private struct PointCoding: Codable {
@@ -195,16 +209,27 @@ extension PipelineUIMetadata: Codable {
         var y: Double
     }
 
+    private struct EdgeCoding: Codable {
+        var offsetX: Double
+        var offsetY: Double
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let raw = try container.decodeIfPresent([String: PointCoding].self, forKey: .nodes) ?? [:]
-        nodes = raw.mapValues { CGPoint(x: $0.x, y: $0.y) }
+        let rawNodes = try container.decodeIfPresent([String: PointCoding].self, forKey: .nodes) ?? [:]
+        nodes = rawNodes.mapValues { CGPoint(x: $0.x, y: $0.y) }
+        let rawEdges = try container.decodeIfPresent([String: EdgeCoding].self, forKey: .edges) ?? [:]
+        edges = rawEdges.mapValues { PipelineEdgeUI(offset: CGPoint(x: $0.offsetX, y: $0.offsetY)) }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        let raw = nodes.mapValues { PointCoding(x: Double($0.x), y: Double($0.y)) }
-        try container.encode(raw, forKey: .nodes)
+        let rawNodes = nodes.mapValues { PointCoding(x: Double($0.x), y: Double($0.y)) }
+        try container.encode(rawNodes, forKey: .nodes)
+        if !edges.isEmpty {
+            let rawEdges = edges.mapValues { EdgeCoding(offsetX: Double($0.offset.x), offsetY: Double($0.offset.y)) }
+            try container.encode(rawEdges, forKey: .edges)
+        }
     }
 }
 
@@ -367,7 +392,11 @@ struct PipelineDefinition: Codable, Equatable, Identifiable {
             issues.append(.error("Entry node \"\(entry)\" is not a declared node"))
         }
 
-        var seenEdgeKeys: Set<PipelineEdge.Key> = []
+        // Fan-out is legal: multiple edges may share a `(from, on)` pair
+        // as long as they route to different targets. An exactly
+        // identical `(from, on, to)` triple twice is meaningless, so
+        // that's what's actually rejected.
+        var seenEdgeKeys: Set<String> = []
         for (index, edge) in edges.enumerated() {
             if !nodeIDs.contains(edge.from) {
                 issues.append(.error("Edge #\(index): unknown source node \"\(edge.from)\"", edgeIndex: index))
@@ -375,13 +404,13 @@ struct PipelineDefinition: Codable, Equatable, Identifiable {
             if !nodeIDs.contains(edge.to) {
                 issues.append(.error("Edge #\(index): unknown target node \"\(edge.to)\"", edgeIndex: index))
             }
-            if seenEdgeKeys.contains(edge.key) {
+            if seenEdgeKeys.contains(edge.identityKey) {
                 issues.append(.error(
-                    "Duplicate edge for (\(edge.from), \(edge.on.rawValue)) — fan-out is reserved for v2",
+                    "Duplicate edge (\(edge.from) --\(edge.on.rawValue)--> \(edge.to))",
                     edgeIndex: index
                 ))
             }
-            seenEdgeKeys.insert(edge.key)
+            seenEdgeKeys.insert(edge.identityKey)
             if let max = edge.maxTraversals, max < 1 {
                 issues.append(.error("Edge #\(index): maxTraversals must be >= 1", edgeIndex: index))
             }

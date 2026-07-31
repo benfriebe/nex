@@ -79,6 +79,9 @@ struct PipelineEngineTests {
         ]
         definition.edges = [
             PipelineEdge(from: "planner", on: .done, to: "implementer"),
+            // Fan-out: planner|done also fires straight to auditor, in
+            // parallel with implementer (issue #282 round 3).
+            PipelineEdge(from: "planner", on: .done, to: "auditor"),
             PipelineEdge(from: "implementer", on: .done, to: "auditor"),
             PipelineEdge(from: "auditor", on: .fail, to: "implementer", maxTraversals: 3),
             PipelineEdge(from: "auditor", on: .done, to: "tester", requiresApproval: true)
@@ -88,16 +91,30 @@ struct PipelineEngineTests {
 
     @Test func routesAlongMatchingEdge() {
         let transition = PipelineEngineLogic.evaluateTransition(
+            definition: makeDefinition(), from: "implementer", outcome: .done, traversals: [:]
+        )
+        #expect(transition == .routes([
+            PipelineRoute(to: "auditor", requiresApproval: false, edgeKey: "implementer|done|auditor")
+        ]))
+    }
+
+    @Test func fanOutFiresEveryMatchingEdgeForTheSameFromAndOutcome() {
+        let transition = PipelineEngineLogic.evaluateTransition(
             definition: makeDefinition(), from: "planner", outcome: .done, traversals: [:]
         )
-        #expect(transition == .route(to: "implementer", requiresApproval: false, edgeKey: "planner|done"))
+        #expect(transition == .routes([
+            PipelineRoute(to: "implementer", requiresApproval: false, edgeKey: "planner|done|implementer"),
+            PipelineRoute(to: "auditor", requiresApproval: false, edgeKey: "planner|done|auditor")
+        ]))
     }
 
     @Test func approvalGateEdgePropagatesRequiresApproval() {
         let transition = PipelineEngineLogic.evaluateTransition(
             definition: makeDefinition(), from: "auditor", outcome: .done, traversals: [:]
         )
-        #expect(transition == .route(to: "tester", requiresApproval: true, edgeKey: "auditor|done"))
+        #expect(transition == .routes([
+            PipelineRoute(to: "tester", requiresApproval: true, edgeKey: "auditor|done|tester")
+        ]))
     }
 
     @Test func doneWithNoMatchingEdgeCompletesRun() {
@@ -117,11 +134,14 @@ struct PipelineEngineTests {
         }
     }
 
-    @Test func partialWithNoPartialEdgeFallsBackToDoneEdge() {
+    @Test func partialWithNoPartialEdgeFallsBackToDoneEdges() {
         let transition = PipelineEngineLogic.evaluateTransition(
             definition: makeDefinition(), from: "planner", outcome: .partial, traversals: [:]
         )
-        #expect(transition == .route(to: "implementer", requiresApproval: false, edgeKey: "planner|done"))
+        #expect(transition == .routes([
+            PipelineRoute(to: "implementer", requiresApproval: false, edgeKey: "planner|done|implementer"),
+            PipelineRoute(to: "auditor", requiresApproval: false, edgeKey: "planner|done|auditor")
+        ]))
     }
 
     @Test func partialWithNeitherPartialNorDoneEdgeCompletesRun() {
@@ -134,18 +154,42 @@ struct PipelineEngineTests {
     @Test func declaredMaxTraversalsExhaustionFailsWithLoopExhausted() {
         let transition = PipelineEngineLogic.evaluateTransition(
             definition: makeDefinition(), from: "auditor", outcome: .fail,
-            traversals: ["auditor|fail": 3]
+            traversals: ["auditor|fail|implementer": 3]
         )
-        #expect(transition == .loopExhausted(edgeKey: "auditor|fail"))
+        guard case .failed(let reason) = transition else {
+            Issue.record("expected .failed, got \(transition)")
+            return
+        }
+        #expect(reason == "loop_exhausted: auditor|fail|implementer")
     }
 
     @Test func undeclaredMaxTraversalsIsUnlimited() {
         // planner->implementer has no maxTraversals — any traversal count routes.
         let transition = PipelineEngineLogic.evaluateTransition(
-            definition: makeDefinition(), from: "planner", outcome: .done,
-            traversals: ["planner|done": 999]
+            definition: makeDefinition(), from: "implementer", outcome: .done,
+            traversals: ["implementer|done|auditor": 999]
         )
-        #expect(transition == .route(to: "implementer", requiresApproval: false, edgeKey: "planner|done"))
+        #expect(transition == .routes([
+            PipelineRoute(to: "auditor", requiresApproval: false, edgeKey: "implementer|done|auditor")
+        ]))
+    }
+
+    @Test func maxTraversalsExceededOnAnyFiredEdgeFailsTheWholeHandoffAtomically() {
+        // planner|done fans out to BOTH implementer and auditor; if the
+        // auditor leg alone would exceed its declared cap, the whole
+        // handoff fails rather than routing implementer and silently
+        // dropping auditor.
+        var definition = makeDefinition()
+        definition.edges.append(PipelineEdge(from: "planner", on: .done, to: "tester", maxTraversals: 1))
+        let transition = PipelineEngineLogic.evaluateTransition(
+            definition: definition, from: "planner", outcome: .done,
+            traversals: ["planner|done|tester": 1]
+        )
+        guard case .failed(let reason) = transition else {
+            Issue.record("expected .failed, got \(transition)")
+            return
+        }
+        #expect(reason == "loop_exhausted: planner|done|tester")
     }
 
     // MARK: - Launch command safety

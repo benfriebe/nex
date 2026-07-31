@@ -73,7 +73,7 @@ struct StatusBarPopoverView: View {
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(item.currentNodeID.map { "\($0) · \(item.status.rawValue)" } ?? item.status.rawValue)
+                    Text(item.activeNodeIDs.isEmpty ? item.status.rawValue : "\(item.activeNodeIDs.joined(separator: ", ")) · \(item.status.rawValue)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

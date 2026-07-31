@@ -98,4 +98,69 @@ struct PipelineCanvasGeometryTests {
     @Test func boundingBoxIsNilForEmptyPositions() {
         #expect(PipelineCanvasGeometry.boundingBox(positions: [:]) == nil)
     }
+
+    // MARK: - Edge curve geometry (drag-to-bend handles, issue #282 round 3)
+
+    @Test func edgeHandlePositionAtZeroOffsetSitsOnTheDefaultCurve() {
+        let from = CGPoint(x: 0, y: 100)
+        let to = CGPoint(x: 400, y: 100)
+        let (c1, c2) = PipelineCanvasGeometry.edgeControlPoints(from: from, to: to)
+        let expected = PipelineCanvasGeometry.cubicBezierPoint(from: from, c1: c1, c2: c2, to: to, t: 0.5)
+        #expect(PipelineCanvasGeometry.edgeHandlePosition(from: from, to: to) == expected)
+        // Symmetric endpoints at the same y with zero offset -> the
+        // curve's midpoint sits exactly between them.
+        #expect(abs(expected.x - 200) < 0.0001)
+        #expect(abs(expected.y - 100) < 0.0001)
+    }
+
+    @Test func edgeHandlePositionMovesWithSavedOffset() {
+        let from = CGPoint(x: 0, y: 100)
+        let to = CGPoint(x: 400, y: 100)
+        let bent = PipelineCanvasGeometry.edgeHandlePosition(from: from, to: to, offset: CGPoint(x: 0, y: -60))
+        // A negative-y offset bends the curve upward — the handle moves
+        // up by exactly the offset scaled by `edgeHandleOffsetGain`.
+        #expect(abs(bent.y - (100 - 60 * PipelineCanvasGeometry.edgeHandleOffsetGain)) < 0.0001)
+    }
+
+    @Test func updatedEdgeOffsetMakesTheHandleTrackTheDragExactly() {
+        let from = CGPoint(x: 0, y: 100)
+        let to = CGPoint(x: 400, y: 100)
+        let startOffset = CGPoint.zero
+        let dragDelta = CGPoint(x: 12, y: -18)
+        let newOffset = PipelineCanvasGeometry.updatedEdgeOffset(currentOffset: startOffset, handleDragDelta: dragDelta)
+
+        let before = PipelineCanvasGeometry.edgeHandlePosition(from: from, to: to, offset: startOffset)
+        let after = PipelineCanvasGeometry.edgeHandlePosition(from: from, to: to, offset: newOffset)
+        // The handle itself should have moved by exactly `dragDelta`,
+        // not by some scaled/lagging amount.
+        #expect(abs((after.x - before.x) - dragDelta.x) < 0.0001)
+        #expect(abs((after.y - before.y) - dragDelta.y) < 0.0001)
+    }
+
+    @Test func hitTestFollowsABentEdgeNotTheStraightChord() {
+        let nodes = [node("a"), node("b")]
+        let positions = ["a": CGPoint(x: 0, y: 0), "b": CGPoint(x: 400, y: 0)]
+        let edge = PipelineEdge(from: "a", on: .done, to: "b")
+        let edges = [edge]
+        let midY = PipelineCanvasGeometry.center(of: positions["a"]!).y
+
+        // A point on the (now-empty) straight chord no longer hits once
+        // the edge is bent 80pt away from it.
+        let bentEdgeUI = [edge.identityKey: PipelineEdgeUI(offset: CGPoint(x: 0, y: -80))]
+        let missOnChord = PipelineCanvasGeometry.hitTest(
+            documentPoint: CGPoint(x: 200, y: midY), nodes: nodes, positions: positions, edges: edges, edgeUI: bentEdgeUI
+        )
+        #expect(missOnChord == .none)
+
+        // But a point at the bent curve's actual handle position does hit.
+        let handlePoint = PipelineCanvasGeometry.edgeHandlePosition(
+            from: PipelineCanvasGeometry.center(of: positions["a"]!),
+            to: PipelineCanvasGeometry.center(of: positions["b"]!),
+            offset: CGPoint(x: 0, y: -80)
+        )
+        let hitOnBend = PipelineCanvasGeometry.hitTest(
+            documentPoint: handlePoint, nodes: nodes, positions: positions, edges: edges, edgeUI: bentEdgeUI
+        )
+        #expect(hitOnBend == .edge(0))
+    }
 }

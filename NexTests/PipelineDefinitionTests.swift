@@ -46,6 +46,27 @@ struct PipelineDefinitionTests {
         #expect(decoded.ui.nodes["implementer"] == CGPoint(x: 320, y: 120))
     }
 
+    /// Per-edge curve overrides (issue #282 round 3, drag-to-bend edge
+    /// handles) round-trip keyed by `PipelineEdge.identityKey`, and a
+    /// definition with no overrides never emits an `edges:` UI block —
+    /// hand-authored YAML stays clean.
+    @Test func yamlRoundTripPreservesEdgeUIOffsets() throws {
+        var original = makeValidDefinition()
+        original.ui.edges["planner|done|implementer"] = PipelineEdgeUI(offset: CGPoint(x: 12, y: -30))
+        let yaml = try original.toYAML()
+        let decoded = try PipelineDefinition.fromYAML(yaml, id: original.id)
+        #expect(decoded.ui.edges["planner|done|implementer"]?.offset == CGPoint(x: 12, y: -30))
+        #expect(decoded == original)
+    }
+
+    @Test func definitionWithNoEdgeUIOverridesRoundTripsToEmptyEdgeUI() throws {
+        let original = makeValidDefinition()
+        #expect(original.ui.edges.isEmpty)
+        let yaml = try original.toYAML()
+        let decoded = try PipelineDefinition.fromYAML(yaml, id: original.id)
+        #expect(decoded.ui.edges.isEmpty)
+    }
+
     @Test func idIsNotSerializedIntoYAML() throws {
         let original = makeValidDefinition()
         let yaml = try original.toYAML()
@@ -116,9 +137,20 @@ struct PipelineDefinitionTests {
         #expect(issues.contains { $0.severity == .error && $0.message.contains("Duplicate node id") })
     }
 
-    @Test func duplicateFromOnEdgePairIsAnError() {
+    /// Fan-out (issue #282 round 3): multiple edges sharing a
+    /// `(from, on)` pair, routing to different targets, is legal.
+    @Test func fanOutSameFromOnDifferentTargetsIsLegal() {
         var definition = makeValidDefinition()
         definition.edges.append(PipelineEdge(from: "planner", on: .done, to: "auditor"))
+        let issues = definition.validate()
+        #expect(!issues.contains { $0.severity == .error && $0.message.contains("Duplicate edge") })
+    }
+
+    /// An exactly identical `(from, on, to)` triple twice is still
+    /// rejected — it's meaningless, unlike fan-out.
+    @Test func duplicateIdenticalEdgeTripleIsAnError() {
+        var definition = makeValidDefinition()
+        definition.edges.append(PipelineEdge(from: "planner", on: .done, to: "implementer"))
         let issues = definition.validate()
         #expect(issues.contains { $0.severity == .error && $0.message.contains("Duplicate edge") })
     }

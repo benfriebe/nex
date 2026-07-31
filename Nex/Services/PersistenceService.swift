@@ -308,6 +308,7 @@ actor PersistenceService {
                         summary: nr.summary,
                         outputPath: nr.outputPath,
                         warnings: warnings,
+                        feedbackSourceNodeRunID: nr.feedbackSourceNodeRunID.flatMap { UUID(uuidString: $0) },
                         startedAt: Date(timeIntervalSince1970: nr.startedAt),
                         updatedAt: Date(timeIntervalSince1970: nr.updatedAt),
                         completedAt: nr.completedAt.map { Date(timeIntervalSince1970: $0) }
@@ -360,7 +361,6 @@ actor PersistenceService {
                         runDir: rr.runDir,
                         inputs: inputs,
                         nodeRuns: restoredNodeRuns,
-                        currentNodeRunID: rr.currentNodeRunID.flatMap { UUID(uuidString: $0) },
                         edgeTraversals: edgeTraversals,
                         createdAt: Date(timeIntervalSince1970: rr.createdAt),
                         updatedAt: Date(timeIntervalSince1970: rr.updatedAt),
@@ -549,7 +549,7 @@ struct PersistenceSnapshot {
                 runDir: run.runDir,
                 inputsJSON: String(data: inputsData, encoding: .utf8) ?? "{}",
                 edgeTraversalsJSON: String(data: edgeData, encoding: .utf8) ?? "{}",
-                currentNodeRunID: run.currentNodeRunID?.uuidString,
+                currentNodeRunID: nil,
                 createdAt: run.createdAt.timeIntervalSince1970,
                 updatedAt: run.updatedAt.timeIntervalSince1970,
                 completedAt: run.completedAt?.timeIntervalSince1970
@@ -569,6 +569,7 @@ struct PersistenceSnapshot {
                     summary: nodeRun.summary,
                     outputPath: nodeRun.outputPath,
                     warningsJSON: String(data: warningsData, encoding: .utf8) ?? "[]",
+                    feedbackSourceNodeRunID: nodeRun.feedbackSourceNodeRunID?.uuidString,
                     startedAt: nodeRun.startedAt.timeIntervalSince1970,
                     updatedAt: nodeRun.updatedAt.timeIntervalSince1970,
                     completedAt: nodeRun.completedAt?.timeIntervalSince1970

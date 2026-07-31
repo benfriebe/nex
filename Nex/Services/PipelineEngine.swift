@@ -51,16 +51,28 @@ struct PipelineRenderedPrompt: Equatable {
 
 // MARK: - Routing
 
-/// The outcome of evaluating one handoff against `PipelineEdge`s.
+/// One edge fired by a handoff. `requiresApproval` mirrors the traversed
+/// edge; `edgeKey` is `PipelineEdge.identityKey` (`PipelineRun.traversalKey`)
+/// for the caller to increment `edgeTraversals` and, when gated, to
+/// target this specific pending approval.
+struct PipelineRoute: Equatable {
+    var to: String
+    var requiresApproval: Bool
+    var edgeKey: String
+}
+
+/// The outcome of evaluating one handoff against `PipelineEdge`s. Fan-out
+/// (issue #282 round 3) means a single handoff can fire more than one
+/// edge — every `PipelineEdge` matching `(from, outcome)` routes,
+/// concurrently, each producing its own `PipelineRoute`.
 enum PipelineTransition: Equatable {
-    /// Proceed to `to`. `requiresApproval` mirrors the traversed edge;
-    /// `edgeKey` is `PipelineRun.traversalKey(from:on:)` for the caller
-    /// to increment `edgeTraversals`.
-    case route(to: String, requiresApproval: Bool, edgeKey: String)
+    /// One or more edges fired. Never empty.
+    case routes([PipelineRoute])
+    /// No edge matches `(from, outcome)` — this branch is a dead end.
+    /// Whether the *run* is done depends on every other active branch
+    /// too (`PipelinesFeature.applyHandoff`'s completion check).
     case completed
     case failed(reason: String)
-    /// A declared `maxTraversals` would be exceeded by taking this edge.
-    case loopExhausted(edgeKey: String)
 }
 
 // MARK: - Launch command safety
@@ -181,33 +193,43 @@ enum PipelineEngineLogic {
         return lines.joined(separator: "\n")
     }
 
+    /// Fan-out: ALL edges matching `(from, outcome)` fire together (issue
+    /// #282 round 3). `partial` with no `partial` edge falls back to the
+    /// `done` edge(s), same as before. If ANY fired edge would exceed its
+    /// declared `maxTraversals`, the whole handoff fails atomically
+    /// (`.failed`) rather than partially routing some edges and dropping
+    /// others — a loop guard tripping is a hard stop, not a per-branch
+    /// concern, so the caller (`applyHandoff`) fails the entire run and
+    /// interrupts any sibling branches, exactly as a single-branch loop
+    /// exhaustion already did.
     static func evaluateTransition(
         definition: PipelineDefinition,
         from: String,
         outcome: PipelineNodeOutcome,
         traversals: [String: Int]
     ) -> PipelineTransition {
-        func checked(_ edge: PipelineEdge) -> PipelineTransition {
-            let key = PipelineRun.traversalKey(from: edge.from, on: edge.on)
-            if let max = edge.maxTraversals, (traversals[key] ?? 0) >= max {
-                return .loopExhausted(edgeKey: key)
+        var matching = definition.edges.filter { $0.from == from && $0.on == outcome }
+        if matching.isEmpty, outcome == .partial {
+            matching = definition.edges.filter { $0.from == from && $0.on == .done }
+        }
+        guard !matching.isEmpty else {
+            switch outcome {
+            case .done, .partial:
+                return .completed
+            case .fail:
+                return .failed(reason: "node \"\(from)\" reported fail with no matching fail edge")
             }
-            return .route(to: edge.to, requiresApproval: edge.requiresApproval, edgeKey: key)
         }
 
-        if let edge = definition.edges.first(where: { $0.from == from && $0.on == outcome }) {
-            return checked(edge)
+        var routes: [PipelineRoute] = []
+        for edge in matching {
+            let key = edge.identityKey
+            if let max = edge.maxTraversals, (traversals[key] ?? 0) >= max {
+                return .failed(reason: "loop_exhausted: \(key)")
+            }
+            routes.append(PipelineRoute(to: edge.to, requiresApproval: edge.requiresApproval, edgeKey: key))
         }
-        // partial with no partial edge falls back to the done edge.
-        if outcome == .partial, let doneEdge = definition.edges.first(where: { $0.from == from && $0.on == .done }) {
-            return checked(doneEdge)
-        }
-        switch outcome {
-        case .done, .partial:
-            return .completed
-        case .fail:
-            return .failed(reason: "node \"\(from)\" reported fail with no matching fail edge")
-        }
+        return .routes(routes)
     }
 
     /// Composes the shell command a node's launch types into its pane.

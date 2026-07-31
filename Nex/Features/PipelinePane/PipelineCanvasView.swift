@@ -14,6 +14,9 @@ struct PipelineCanvasView: View {
     let onSelect: (PipelineCanvasSelection) -> Void
     let onMoveNode: (String, CGPoint) -> Void
     let onAddNode: (CGPoint) -> Void
+    /// Drag-to-bend an edge's curve (issue #282 round 3). A pure layout
+    /// change like `onMoveNode` — stays live in monitor mode too.
+    var onMoveEdgeHandle: (String, CGPoint) -> Void = { _, _ in }
     /// Monitor mode (issue #282 phase 7): structural edits (add node,
     /// select edges for editing) are guarded off — position drags stay
     /// live. Double-click on a node jumps to its pane instead of
@@ -24,6 +27,10 @@ struct PipelineCanvasView: View {
 
     @Environment(\.chromeTheme) private var chromeTheme
     @State private var dragOrigin: [String: CGPoint] = [:]
+    /// In-flight drag origin for an edge handle, keyed by
+    /// `PipelineEdge.identityKey` — the saved offset the drag started
+    /// from, not a screen position.
+    @State private var edgeHandleDragOrigin: [String: CGPoint] = [:]
 
     private var selectedEdgeIndex: Int? {
         if case let .edge(index) = selection {
@@ -59,7 +66,8 @@ struct PipelineCanvasView: View {
                         documentPoint: value.location,
                         nodes: document.nodes,
                         positions: positions,
-                        edges: document.edges
+                        edges: document.edges,
+                        edgeUI: document.ui.edges
                     )
                     switch hit {
                     case let .node(id): onSelect(.node(id))
@@ -73,9 +81,16 @@ struct PipelineCanvasView: View {
                 .frame(width: canvasSize.width, height: canvasSize.height)
                 .gesture(doubleTap.exclusively(before: singleTap))
 
-            PipelineEdgeLayer(edges: document.edges, positions: positions, selectedEdgeIndex: selectedEdgeIndex)
-                .frame(width: canvasSize.width, height: canvasSize.height)
-                .allowsHitTesting(false)
+            PipelineEdgeLayer(
+                edges: document.edges, positions: positions,
+                selectedEdgeIndex: selectedEdgeIndex, edgeUI: document.ui.edges
+            )
+            .frame(width: canvasSize.width, height: canvasSize.height)
+            .allowsHitTesting(false)
+
+            ForEach(Array(document.edges.enumerated()), id: \.offset) { index, edge in
+                edgeHandle(edge, index: index)
+            }
 
             ForEach(document.nodes) { node in
                 if let position = positions[node.id] {
@@ -122,5 +137,47 @@ struct PipelineCanvasView: View {
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
         .scaleEffect(zoom, anchor: .topLeading)
         .offset(x: pan.x, y: pan.y)
+    }
+
+    /// A small draggable dot at an edge's curve midpoint — grabbing and
+    /// dragging it bends the curve (issue #282 round 3). Always live,
+    /// including in monitor mode (a pure layout change, same precedent
+    /// as node position drags).
+    @ViewBuilder
+    private func edgeHandle(_ edge: PipelineEdge, index: Int) -> some View {
+        if let fromPos = positions[edge.from], let toPos = positions[edge.to] {
+            let key = edge.identityKey
+            let savedOffset = document.ui.edges[key]?.offset ?? .zero
+            let handlePoint = PipelineCanvasGeometry.edgeHandlePosition(
+                from: PipelineCanvasGeometry.center(of: fromPos),
+                to: PipelineCanvasGeometry.center(of: toPos),
+                offset: savedOffset
+            )
+            let isSelected = selectedEdgeIndex == index
+
+            Circle()
+                .fill(isSelected ? chromeTheme.selectionStroke : chromeTheme.divider)
+                .frame(width: isSelected ? 10 : 7, height: isSelected ? 10 : 7)
+                .overlay(Circle().strokeBorder(chromeTheme.surfaceBackground, lineWidth: 1))
+                .position(handlePoint)
+                .help("Drag to bend this edge")
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            let origin = edgeHandleDragOrigin[key] ?? savedOffset
+                            if edgeHandleDragOrigin[key] == nil {
+                                edgeHandleDragOrigin[key] = savedOffset
+                            }
+                            let delta = CGPoint(x: value.translation.width / zoom, y: value.translation.height / zoom)
+                            onMoveEdgeHandle(key, PipelineCanvasGeometry.updatedEdgeOffset(currentOffset: origin, handleDragDelta: delta))
+                        }
+                        .onEnded { value in
+                            let origin = edgeHandleDragOrigin[key] ?? savedOffset
+                            let delta = CGPoint(x: value.translation.width / zoom, y: value.translation.height / zoom)
+                            onMoveEdgeHandle(key, PipelineCanvasGeometry.updatedEdgeOffset(currentOffset: origin, handleDragDelta: delta))
+                            edgeHandleDragOrigin[key] = nil
+                        }
+                )
+        }
     }
 }

@@ -635,11 +635,11 @@ extension AppReducer {
                 case .pipelineRetry(let runID):
                     return handlePipelineRetry(&state, runID: runID, reply: reply)
 
-                case .pipelineApprove(let runID):
-                    return handlePipelineApprove(&state, runID: runID, reply: reply)
+                case .pipelineApprove(let runID, let edgeKey):
+                    return handlePipelineApprove(&state, runID: runID, edgeKey: edgeKey, reply: reply)
 
-                case .pipelineDeny(let runID):
-                    return handlePipelineDeny(&state, runID: runID, reply: reply)
+                case .pipelineDeny(let runID, let edgeKey):
+                    return handlePipelineDeny(&state, runID: runID, edgeKey: edgeKey, reply: reply)
 
                 case .pipelineResume(let runID):
                     return handlePipelineResume(&state, runID: runID, reply: reply)

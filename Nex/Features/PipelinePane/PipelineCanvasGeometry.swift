@@ -6,7 +6,10 @@ import Foundation
 /// this is unit-testable in isolation (the `WorkspaceDropTarget.dropZones`
 /// discipline).
 enum PipelineCanvasGeometry {
-    static let nodeSize = CGSize(width: 160, height: 64)
+    // Tall enough for name + mode + permission-mode + full status text
+    // (e.g. "awaitingApproval") without vertical clipping (issue #282
+    // round 3 — status text was cut off in the shorter card).
+    static let nodeSize = CGSize(width: 168, height: 92)
     static let gridSnap: CGFloat = 8
     /// How close (in document points) a click must land to a bezier's
     /// sampled polyline to count as an edge hit.
@@ -47,13 +50,19 @@ enum PipelineCanvasGeometry {
     }
 
     /// Hit-test priority: node body first (top-most declared node wins on
-    /// overlap, mirroring z-order), then edges, else `.none`. Port/chip
-    /// hit-testing is deferred to the interactive drag-edge feature.
+    /// overlap, mirroring z-order), then edges (following their actual
+    /// bezier curve, including any saved drag-to-bend offset — issue
+    /// #282 round 3 — not just the straight chord between centers), else
+    /// `.none`. Port/chip hit-testing is deferred to the interactive
+    /// drag-edge feature; the midpoint HANDLE (for bending a curve) is a
+    /// separate SwiftUI view with its own drag gesture, not part of this
+    /// hit-test.
     static func hitTest(
         documentPoint point: CGPoint,
         nodes: [PipelineNode],
         positions: [String: CGPoint],
-        edges: [PipelineEdge]
+        edges: [PipelineEdge],
+        edgeUI: [String: PipelineEdgeUI] = [:]
     ) -> HitTarget {
         for node in nodes.reversed() {
             guard let pos = positions[node.id] else { continue }
@@ -65,11 +74,73 @@ enum PipelineCanvasGeometry {
             guard let fromPos = positions[edge.from], let toPos = positions[edge.to] else { continue }
             let from = center(of: fromPos)
             let to = center(of: toPos)
-            if distance(from: point, toSegment: from, to) < edgeHitTolerance {
+            let offset = edgeUI[edge.identityKey]?.offset ?? .zero
+            if distanceToBezier(point: point, from: from, to: to, offset: offset) < edgeHitTolerance {
                 return .edge(index)
             }
         }
         return .none
+    }
+
+    // MARK: - Edge curve geometry (drag-to-bend handles, issue #282 round 3)
+
+    /// The two cubic-bezier control points for an edge between two node
+    /// CENTERS. `offset` (a saved `PipelineEdgeUI.offset`, document
+    /// units) is applied symmetrically to both — dragging the midpoint
+    /// handle just adjusts this one 2D value. Zero offset reproduces the
+    /// original deterministic curve (horizontal control arms scaled by
+    /// the endpoints' separation).
+    static func edgeControlPoints(from: CGPoint, to: CGPoint, offset: CGPoint = .zero) -> (c1: CGPoint, c2: CGPoint) {
+        let baseOffset = max(abs(to.x - from.x) / 2, 40)
+        let c1 = CGPoint(x: from.x + baseOffset + offset.x, y: from.y + offset.y)
+        let c2 = CGPoint(x: to.x - baseOffset + offset.x, y: to.y + offset.y)
+        return (c1, c2)
+    }
+
+    static func cubicBezierPoint(from: CGPoint, c1: CGPoint, c2: CGPoint, to: CGPoint, t: CGFloat) -> CGPoint {
+        let mt = 1 - t
+        return CGPoint(
+            x: mt * mt * mt * from.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * to.x,
+            y: mt * mt * mt * from.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * to.y
+        )
+    }
+
+    /// The draggable midpoint handle's document-space position for an
+    /// edge between two node centers, given its saved curve offset —
+    /// the point at `t = 0.5` along the actual cubic bezier (not just
+    /// the midpoint of the two endpoints).
+    static func edgeHandlePosition(from: CGPoint, to: CGPoint, offset: CGPoint = .zero) -> CGPoint {
+        let (c1, c2) = edgeControlPoints(from: from, to: to, offset: offset)
+        return cubicBezierPoint(from: from, c1: c1, c2: c2, to: to, t: 0.5)
+    }
+
+    /// d(handle position)/d(offset) at `t = 0.5`, for a symmetric offset
+    /// applied to both control points: `3·(1-t)²t + 3·(1-t)t²` at
+    /// `t = 0.5` is `0.75`. Converts a 1:1 screen-space drag delta on the
+    /// handle into the equivalent delta on the stored offset, so the
+    /// handle tracks the cursor exactly instead of lagging behind it.
+    static let edgeHandleOffsetGain: CGFloat = 0.75
+
+    static func updatedEdgeOffset(currentOffset: CGPoint, handleDragDelta: CGPoint) -> CGPoint {
+        CGPoint(
+            x: currentOffset.x + handleDragDelta.x / edgeHandleOffsetGain,
+            y: currentOffset.y + handleDragDelta.y / edgeHandleOffsetGain
+        )
+    }
+
+    private static func distanceToBezier(
+        point: CGPoint, from: CGPoint, to: CGPoint, offset: CGPoint, samples: Int = 16
+    ) -> CGFloat {
+        let (c1, c2) = edgeControlPoints(from: from, to: to, offset: offset)
+        var minDistance = CGFloat.greatestFiniteMagnitude
+        var previous = from
+        for i in 1 ... samples {
+            let t = CGFloat(i) / CGFloat(samples)
+            let sample = cubicBezierPoint(from: from, c1: c1, c2: c2, to: to, t: t)
+            minDistance = min(minDistance, distance(from: point, toSegment: previous, sample))
+            previous = sample
+        }
+        return minDistance
     }
 
     static func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
