@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Build libghostty (required once, or after ghostty submodule changes)
 # The lib/ directory is gitignored -- you must build it locally.
+# Needs Zig 0.16.x (ghostty's build.zig.zon pins it; 0.15.x can't link on macOS 27).
+# Xcode 26+ ships Metal separately: xcodebuild -downloadComponent MetalToolchain
 cd ghostty && zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false && cd ..
 mkdir -p lib
-cp $(find ghostty ghostty/.zig-cache -path "*/macos-*/libghostty.a" -type f | head -1) lib/libghostty.a
+cp $(find ghostty ghostty/.zig-cache -path "*/GhosttyKit.xcframework/macos-*/*.a" -type f | head -1) lib/libghostty.a
 
 # Generate Xcode project (required after changing project.yml)
 xcodegen generate --spec project.yml

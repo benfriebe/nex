@@ -1510,7 +1510,7 @@
 			repositoryURL = "https://github.com/pointfreeco/swift-composable-architecture";
 			requirement = {
 				kind = exactVersion;
-				version = 1.25.5;
+				version = 1.26.2;
 			};
 		};
 		74E1DDA9D84597B0F162BA1C /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

@@ -28,7 +28,7 @@ settings:
 packages:
   ComposableArchitecture:
     url: https://github.com/pointfreeco/swift-composable-architecture
-    version: 1.25.5
+    version: 1.26.2
   GRDB:
     url: https://github.com/groue/GRDB.swift
     version: 7.3.0

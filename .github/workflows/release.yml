@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  ZIG_VERSION: "0.15.2"
+  ZIG_VERSION: "0.16.0"
   SIGNING_IDENTITY: "Developer ID Application: BENJAMIN RYAN FRIEBE (4ASXCG2599)"
 
 jobs:
@@ -61,10 +61,10 @@ jobs:
           cd ghostty
           zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
           mkdir -p ../lib
-          MACOS_LIB=$(find . "$ZIG_LOCAL_CACHE_DIR" -path "*/macos-*/libghostty.a" -type f 2>/dev/null | head -1)
+          MACOS_LIB=$(find . "$ZIG_LOCAL_CACHE_DIR" -path "*/GhosttyKit.xcframework/macos-*/*.a" -type f 2>/dev/null | head -1)
           if [ -z "$MACOS_LIB" ]; then
             echo "::error::Could not find macOS libghostty.a in xcframework output"
-            find . "$ZIG_LOCAL_CACHE_DIR" -name "libghostty*" -type f 2>/dev/null
+            find . "$ZIG_LOCAL_CACHE_DIR" -name "*ghostty*.a" -type f 2>/dev/null
             exit 1
           fi
           cp "$MACOS_LIB" ../lib/libghostty.a
