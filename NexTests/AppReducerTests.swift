@@ -1043,6 +1043,27 @@ struct AppReducerTests {
         }
     }
 
+    // MARK: - CLI pane split/create keep focus
+
+    @Test func socketPaneSplitAndCreateDoNotStealFocus() async {
+        // Outside the `.incrementing` uuid range so the minted pane ids can't collide with it.
+        let typing = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000001")!
+        let ws1 = Self.makeWorkspace(id: Self.wsID1, name: "Main", paneID: typing)
+        let store = makeStore(workspaces: [ws1], activeWorkspaceID: Self.wsID1)
+        store.exhaustivity = .off
+
+        await store.send(.socketMessage(.paneSplit(
+            paneID: typing, direction: nil, path: nil, name: nil, target: nil, workspace: nil
+        ), reply: nil))
+        await store.send(.socketMessage(.paneCreate(
+            paneID: typing, path: "/tmp", name: nil, target: nil, workspace: nil
+        ), reply: nil))
+        await store.skipReceivedActions()
+
+        #expect(store.state.workspaces[id: Self.wsID1]?.panes.count == 3)
+        #expect(store.state.workspaces[id: Self.wsID1]?.focusedPaneID == typing)
+    }
+
     // MARK: - paneMoveToWorkspace
 
     @Test func movePaneToWorkspaceByName() async {

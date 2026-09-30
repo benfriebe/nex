@@ -2105,19 +2105,31 @@ extension AppReducer {
         // pane, so focus the resolved source first; `splitPane` takes the
         // source explicitly.
         let newID = uuid()
+        let priorFocus = workspace.focusedPaneID
         state.workspaces[id: workspaceID]?.setFocus(sourcePaneID)
         replyPaneCreated(reply, newPaneID: newID, workspace: workspace, label: name)
 
         if let path {
-            return .send(.workspaces(.element(
+            return restoringFocus(priorFocus, in: workspaceID, after: .send(.workspaces(.element(
                 id: workspaceID,
                 action: .splitPaneAtPath(path, label: name, direction: direction ?? .horizontal, newPaneID: newID)
-            )))
+            ))))
         }
-        return .send(.workspaces(.element(
+        return restoringFocus(priorFocus, in: workspaceID, after: .send(.workspaces(.element(
             id: workspaceID,
             action: .splitPane(direction: direction ?? .horizontal, sourcePaneID: sourcePaneID, label: name, newPaneID: newID)
-        )))
+        ))))
+    }
+
+    /// CLI-created panes open in the background: the split/create actions
+    /// focus the new pane (right for the GUI), so hand focus straight back
+    /// to whatever held it — otherwise an agent spawning a pane steals the
+    /// user's keystrokes mid-typing. Synchronous `.send`s, so the new pane
+    /// never renders as focused. No prior focus (empty workspace) = keep
+    /// the new pane focused.
+    private func restoringFocus(_ priorFocus: UUID?, in workspaceID: UUID, after effect: Effect<Action>) -> Effect<Action> {
+        guard let priorFocus else { return effect }
+        return effect.concatenate(with: .send(.workspaces(.element(id: workspaceID, action: .focusPane(priorFocus)))))
     }
 
     /// Resolve + dispatch a `pane-create` request (issue #117). Resolves
@@ -2177,6 +2189,7 @@ extension AppReducer {
         replyPaneCreated(reply, newPaneID: newID, workspace: workspace, label: name)
 
         let source = sourcePaneID ?? workspace.focusedPaneID ?? workspace.panes.first?.id
+        let priorFocus = workspace.focusedPaneID
 
         // Empty workspace: no pane to split off, so lay out the first pane
         // via `createPane`, carrying `--name` (label) and `--path`
@@ -2194,15 +2207,15 @@ extension AppReducer {
         // splits the focused pane, so focus first.
         state.workspaces[id: workspaceID]?.setFocus(source)
         if let path {
-            return .send(.workspaces(.element(
+            return restoringFocus(priorFocus, in: workspaceID, after: .send(.workspaces(.element(
                 id: workspaceID,
                 action: .splitPaneAtPath(path, label: name, newPaneID: newID)
-            )))
+            ))))
         }
-        return .send(.workspaces(.element(
+        return restoringFocus(priorFocus, in: workspaceID, after: .send(.workspaces(.element(
             id: workspaceID,
             action: .splitPane(direction: .horizontal, sourcePaneID: source, label: name, newPaneID: newID)
-        )))
+        ))))
     }
 
     /// Resolve + dispatch a `pane-name` request (issue #117). Without
